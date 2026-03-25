@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+package auth.v1;
+
+option go_package = "github.com/spburtsev/ex-files-backend/gen/auth/v1;authv1";
+
+import "google/protobuf/timestamp.proto";
+
+// ---------------------------------------------------------------------------
+// Enumerations
+// ---------------------------------------------------------------------------
+
+enum Role {
+  ROLE_UNSPECIFIED = 0;
+  ROLE_ROOT        = 1;
+  ROLE_MANAGER     = 2;
+  ROLE_EMPLOYEE    = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Shared domain object
+// ---------------------------------------------------------------------------
+
+message User {
+  uint64                    id         = 1;
+  string                    email      = 2;
+  string                    name       = 3;
+  string                    avatar_url = 4;
+  Role                      role       = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+// ---------------------------------------------------------------------------
+// Register  POST /auth/register
+// ---------------------------------------------------------------------------
+
+message RegisterRequest {
+  string email    = 1;
+  string password = 2;
+  string name     = 3;
+}
+
+message RegisterResponse {
+  User   user  = 1;
+  string token = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Login  POST /auth/login
+// ---------------------------------------------------------------------------
+
+message LoginRequest {
+  string email    = 1;
+  string password = 2;
+}
+
+message LoginResponse {
+  User   user  = 1;
+  string token = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Me  GET /auth/me
+// ---------------------------------------------------------------------------
+
+message MeResponse {
+  User user = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Logout  POST /auth/logout
+// ---------------------------------------------------------------------------
+
+message LogoutResponse {
+  string message = 1;
+}

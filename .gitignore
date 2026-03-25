@@ -1,0 +1,3 @@
+# Proto generated files (rebuild with: make proto)
+ex-files-backend/gen/
+ex-files-frontend/src/lib/gen/

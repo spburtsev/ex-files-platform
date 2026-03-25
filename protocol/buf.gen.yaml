@@ -1,0 +1,18 @@
+version: v2
+
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/spburtsev/ex-files-backend/gen
+
+plugins:
+  - remote: buf.build/protocolbuffers/go
+    out: ../ex-files-backend/gen
+    opt:
+      - paths=source_relative
+
+  - remote: buf.build/bufbuild/es
+    out: ../ex-files-frontend/src/lib/gen
+    opt:
+      - target=ts

@@ -1,0 +1,6 @@
+.env*
+!.env.example
+
+cover.out
+
+/ex-files-backend
