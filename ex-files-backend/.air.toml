@@ -1,0 +1,38 @@
+# air hot-reload config for ex-files-backend
+# Run: air  (from inside ex-files-backend/)
+# Docs: https://github.com/air-verse/air
+
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  # Build the binary into tmp/ so it never lands in the source tree
+  cmd        = "go build -o ./tmp/main ."
+  bin        = "./tmp/main"
+  full_bin   = "./tmp/main"
+
+  # Watch all Go source directories; exclude generated and build artefacts
+  include_dir = [".", "handlers", "models", "services", "middleware", "seed"]
+  exclude_dir = ["tmp", "gen", "vendor"]
+  include_ext = ["go"]
+
+  # Debounce: wait 500 ms after the last change before rebuilding
+  delay       = 500
+
+  # Send SIGINT first so Gin can shut down gracefully, then SIGKILL after 3 s
+  send_interrupt  = true
+  kill_delay      = "3s"
+  rerun           = false
+
+[log]
+  time          = false
+  main_only     = false
+
+[color]
+  main    = "magenta"
+  watcher = "cyan"
+  build   = "yellow"
+  runner  = "green"
+
+[misc]
+  clean_on_exit = true
