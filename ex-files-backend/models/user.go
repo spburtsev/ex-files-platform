@@ -10,6 +10,10 @@ const (
 	RoleEmployee Role = "employee"
 )
 
+func (r Role) CanManageWorkspaces() bool {
+	return r == RoleManager || r == RoleRoot
+}
+
 type User struct {
 	gorm.Model
 	Email        string `gorm:"uniqueIndex;not null"`

@@ -10,5 +10,32 @@ services:
       POSTGRES_DB: exfiles
     volumes:
       - pgdata:/var/lib/postgresql
+
+  ex-files-minio:
+    image: minio/minio
+    restart: always
+    ports:
+      - 9000:9000
+      - 9001:9001
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - miniodata:/data
+    command: server /data --console-address ":9001"
+
+  ex-files-minio-init:
+    image: minio/mc
+    depends_on:
+      - ex-files-minio
+    entrypoint: >
+      /bin/sh -c "
+      sleep 3;
+      mc alias set local http://ex-files-minio:9000 minioadmin minioadmin;
+      mc mb --ignore-existing local/documents;
+      exit 0;
+      "
+
 volumes:
   pgdata:
+  miniodata:

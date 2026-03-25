@@ -2,5 +2,6 @@
 !.env.example
 
 cover.out
+coverage.out
 
 /ex-files-backend

@@ -15,6 +15,7 @@ type AuthHandler struct {
 	Repo   services.UserRepository
 	Tokens services.TokenService
 	Hasher services.Hasher
+	Audit  services.AuditRepository
 }
 
 type registerRequest struct {
@@ -66,6 +67,10 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
+	logAudit(h.Audit, models.AuditActionUserRegistered, user.ID, uintPtr(user.ID), "user", map[string]any{
+		"email": user.Email,
+	})
+
 	setSessionCookie(c, token)
 	c.JSON(http.StatusCreated, &authv1.RegisterResponse{
 		User:  userToProto(&user),
@@ -96,6 +101,10 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue token"})
 		return
 	}
+
+	logAudit(h.Audit, models.AuditActionUserLoggedIn, user.ID, uintPtr(user.ID), "user", map[string]any{
+		"email": user.Email,
+	})
 
 	setSessionCookie(c, token)
 	c.JSON(http.StatusOK, &authv1.LoginResponse{

@@ -33,7 +33,7 @@ func main() {
 		log.Fatal("failed to connect to database:", err)
 	}
 
-	if err := db.AutoMigrate(&models.User{}); err != nil {
+	if err := db.AutoMigrate(&models.User{}, &models.Workspace{}, &models.WorkspaceMember{}, &models.AuditEntry{}, &models.Document{}, &models.DocumentVersion{}); err != nil {
 		log.Fatal("auto-migrate failed:", err)
 	}
 
@@ -41,7 +41,36 @@ func main() {
 	repo := &services.GormUserRepository{DB: db}
 	hasher := services.BcryptHasher{Cost: bcrypt.DefaultCost}
 
-	auth := &handlers.AuthHandler{Repo: repo, Tokens: ts, Hasher: hasher}
+	auditRepo := &services.GormAuditRepository{DB: db}
+
+	minioEndpoint := os.Getenv("MINIO_ENDPOINT")
+	if minioEndpoint == "" {
+		minioEndpoint = "localhost:9000"
+	}
+	minioAccessKey := os.Getenv("MINIO_ACCESS_KEY")
+	if minioAccessKey == "" {
+		minioAccessKey = "minioadmin"
+	}
+	minioSecretKey := os.Getenv("MINIO_SECRET_KEY")
+	if minioSecretKey == "" {
+		minioSecretKey = "minioadmin"
+	}
+	minioBucket := os.Getenv("MINIO_BUCKET")
+	if minioBucket == "" {
+		minioBucket = "documents"
+	}
+
+	storage, err := services.NewMinIOStorage(minioEndpoint, minioAccessKey, minioSecretKey, minioBucket, false)
+	if err != nil {
+		log.Fatal("failed to connect to MinIO:", err)
+	}
+
+	auth := &handlers.AuthHandler{Repo: repo, Tokens: ts, Hasher: hasher, Audit: auditRepo}
+	wsRepo := &services.GormWorkspaceRepository{DB: db}
+	ws := &handlers.WorkspaceHandler{Repo: wsRepo, UserRepo: repo, Audit: auditRepo}
+	audit := &handlers.AuditHandler{Repo: auditRepo}
+	docRepo := &services.GormDocumentRepository{DB: db}
+	docs := &handlers.DocumentHandler{Repo: docRepo, Storage: storage, Audit: auditRepo}
 
 	seed.Run(db, hasher)
 
@@ -49,8 +78,9 @@ func main() {
 
 	router.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"http://localhost:5173", "http://localhost:4173"},
-		AllowMethods:     []string{"GET", "POST", "OPTIONS"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Content-Type", "Authorization"},
+		ExposeHeaders:    []string{"X-Total-Count", "X-Page", "X-Per-Page", "X-Total-Pages"},
 		AllowCredentials: true,
 	}))
 
@@ -65,6 +95,32 @@ func main() {
 		authRoutes.POST("/login", auth.Login)
 		authRoutes.POST("/logout", auth.Logout)
 		authRoutes.GET("/me", middleware.AuthMiddleware(ts), auth.Me)
+	}
+
+	workspaceRoutes := router.Group("/workspaces", middleware.AuthMiddleware(ts))
+	{
+		workspaceRoutes.POST("", ws.Create)
+		workspaceRoutes.GET("", ws.List)
+		workspaceRoutes.GET("/:id", ws.Get)
+		workspaceRoutes.PUT("/:id", ws.Update)
+		workspaceRoutes.DELETE("/:id", ws.Delete)
+		workspaceRoutes.POST("/:id/members", ws.AddMember)
+		workspaceRoutes.DELETE("/:id/members/:userId", ws.RemoveMember)
+		workspaceRoutes.POST("/:id/documents", docs.Upload)
+		workspaceRoutes.GET("/:id/documents", docs.List)
+	}
+
+	documentRoutes := router.Group("/documents", middleware.AuthMiddleware(ts))
+	{
+		documentRoutes.GET("/:id", docs.Get)
+		documentRoutes.DELETE("/:id", docs.Delete)
+		documentRoutes.POST("/:id/versions", docs.UploadVersion)
+		documentRoutes.GET("/:id/versions/:versionId/download", docs.Download)
+	}
+
+	auditRoutes := router.Group("/audit", middleware.AuthMiddleware(ts))
+	{
+		auditRoutes.GET("", audit.List)
 	}
 
 	router.Run()

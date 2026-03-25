@@ -1,0 +1,38 @@
+package models
+
+import "gorm.io/gorm"
+
+type DocumentStatus string
+
+const (
+	DocumentStatusPending          DocumentStatus = "pending"
+	DocumentStatusInReview         DocumentStatus = "in_review"
+	DocumentStatusApproved         DocumentStatus = "approved"
+	DocumentStatusRejected         DocumentStatus = "rejected"
+	DocumentStatusChangesRequested DocumentStatus = "changes_requested"
+)
+
+type Document struct {
+	gorm.Model
+	Name        string         `gorm:"not null"`
+	MimeType    string         `gorm:"not null"`
+	Size        int64          `gorm:"not null"`
+	Hash        string         `gorm:"type:varchar(64);not null;index"`
+	Status      DocumentStatus `gorm:"type:varchar(30);default:pending;not null"`
+	UploaderID  uint           `gorm:"not null;index"`
+	Uploader    User           `gorm:"foreignKey:UploaderID"`
+	WorkspaceID uint           `gorm:"not null;index"`
+	Workspace   Workspace      `gorm:"foreignKey:WorkspaceID"`
+}
+
+type DocumentVersion struct {
+	gorm.Model
+	DocumentID uint     `gorm:"not null;index"`
+	Document   Document `gorm:"foreignKey:DocumentID"`
+	Version    int      `gorm:"not null"`
+	Hash       string   `gorm:"type:varchar(64);not null"`
+	Size       int64    `gorm:"not null"`
+	StorageKey string   `gorm:"not null"`
+	UploaderID uint     `gorm:"not null"`
+	Uploader   User     `gorm:"foreignKey:UploaderID"`
+}

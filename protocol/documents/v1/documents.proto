@@ -1,0 +1,83 @@
+syntax = "proto3";
+
+package documents.v1;
+
+option go_package = "github.com/spburtsev/ex-files-backend/gen/documents/v1;documentsv1";
+
+import "google/protobuf/timestamp.proto";
+
+// ---------------------------------------------------------------------------
+// Domain objects
+// ---------------------------------------------------------------------------
+
+message Document {
+  uint64                    id           = 1;
+  string                    name         = 2;
+  string                    mime_type    = 3;
+  int64                     size         = 4;
+  string                    hash         = 5;
+  string                    status       = 6;
+  uint64                    uploader_id  = 7;
+  string                    uploader_name = 8;
+  uint64                    workspace_id = 9;
+  google.protobuf.Timestamp created_at   = 10;
+  google.protobuf.Timestamp updated_at   = 11;
+}
+
+message DocumentVersion {
+  uint64                    id           = 1;
+  uint64                    document_id  = 2;
+  int32                     version      = 3;
+  string                    hash         = 4;
+  int64                     size         = 5;
+  string                    storage_key  = 6;
+  uint64                    uploader_id  = 7;
+  string                    uploader_name = 8;
+  google.protobuf.Timestamp created_at   = 9;
+}
+
+message DocumentDetail {
+  Document                    document = 1;
+  repeated DocumentVersion    versions = 2;
+}
+
+// ---------------------------------------------------------------------------
+// UploadDocument  POST /workspaces/:id/documents
+// ---------------------------------------------------------------------------
+
+message UploadDocumentResponse {
+  Document        document = 1;
+  DocumentVersion version  = 2;
+}
+
+// ---------------------------------------------------------------------------
+// ListDocuments  GET /workspaces/:id/documents
+// ---------------------------------------------------------------------------
+
+message ListDocumentsResponse {
+  repeated Document documents = 1;
+}
+
+// ---------------------------------------------------------------------------
+// GetDocument  GET /documents/:id
+// ---------------------------------------------------------------------------
+
+message GetDocumentResponse {
+  DocumentDetail document = 1;
+}
+
+// ---------------------------------------------------------------------------
+// GetDownloadURL  GET /documents/:id/versions/:versionId/download
+// ---------------------------------------------------------------------------
+
+message GetDownloadURLResponse {
+  string url = 1;
+}
+
+// ---------------------------------------------------------------------------
+// DeleteDocument  DELETE /documents/:id
+// ---------------------------------------------------------------------------
+
+message DeleteDocumentResponse {
+  string message = 1;
+}
