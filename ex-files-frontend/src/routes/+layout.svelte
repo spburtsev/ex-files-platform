@@ -4,6 +4,13 @@
 	import './layout.css';
 	import favicon from '$lib/assets/favicon.svg';
 	import { getMe } from '$lib/data.remote';
+	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
+	import * as Avatar from '$lib/components/ui/avatar/index.js';
+	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
+	import * as Breadcrumb from '$lib/components/ui/breadcrumb/index.js';
+	import { Separator } from '$lib/components/ui/separator/index.js';
+	import { Badge } from '$lib/components/ui/badge/index.js';
+	import { LayoutDashboard, FolderOpen, Users, ChevronsUpDown, LogOut, User, FileCheck2 } from '@lucide/svelte';
 
 	let { children } = $props();
 
@@ -18,160 +25,162 @@
 			.toUpperCase() ?? ''
 	);
 
-	let menuOpen = $state(false);
-
-	function toggleMenu() {
-		menuOpen = !menuOpen;
-	}
-
-	function closeMenu() {
-		menuOpen = false;
-	}
-
 	const navLinks = [
 		{
 			href: '/',
 			label: 'Dashboard',
-			icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6',
+			Icon: LayoutDashboard,
 			match: (p: string) => p === '/'
 		},
 		{
 			href: '/workspaces',
 			label: 'Workspaces',
-			icon: 'M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z',
+			Icon: FolderOpen,
 			match: (p: string) => p.startsWith('/workspaces')
 		},
 		{
 			href: '/users',
 			label: 'Users',
-			icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z',
+			Icon: Users,
 			match: (p: string) => p.startsWith('/users')
 		}
 	];
+
+	const pageLabel = $derived(navLinks.find((l) => l.match(page.url.pathname))?.label ?? 'ex-files');
 </script>
 
 <svelte:head><link rel="icon" href={favicon} /></svelte:head>
 
-<svelte:window
-	onclick={(e) => {
-		if (menuOpen && !(e.target as Element).closest('[data-avatar-menu]')) closeMenu();
-	}}
-/>
-
-<div class="flex min-h-screen">
-	<!-- Sidebar -->
-	<aside class="flex w-56 shrink-0 flex-col border-r bg-white">
-		<!-- Logo -->
-		<div class="border-b px-5 py-4">
-			<a href="/" class="text-sm font-semibold tracking-wide text-gray-900">ex-files</a>
-		</div>
+<Sidebar.Provider>
+	<Sidebar.Root collapsible="icon">
+		<!-- Header: brand -->
+		<Sidebar.Header>
+			<a href="/" class="flex items-center gap-2 overflow-hidden px-2 py-1">
+				<FileCheck2 class="size-5 shrink-0 text-primary" />
+				<span class="truncate text-sm font-semibold tracking-wide group-data-[collapsible=icon]:hidden">
+					ex-files
+				</span>
+			</a>
+		</Sidebar.Header>
 
 		<!-- Nav links -->
-		<nav class="flex flex-1 flex-col gap-0.5 px-3 py-3">
-			{#each navLinks as link}
-				{@const active = link.match(page.url.pathname)}
-				<a
-					href={link.href}
-					class="flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-medium transition-colors {active
-						? 'bg-blue-50 text-blue-700'
-						: 'text-gray-500 hover:bg-gray-100 hover:text-gray-800'}"
-				>
-					<svg
-						class="h-4 w-4 shrink-0"
-						fill="none"
-						viewBox="0 0 24 24"
-						stroke="currentColor"
-						stroke-width="1.5"
-					>
-						<path stroke-linecap="round" stroke-linejoin="round" d={link.icon} />
-					</svg>
-					{link.label}
-				</a>
-			{/each}
-		</nav>
-
-		<!-- User section -->
-		<div class="border-t px-3 py-3">
-			<div class="relative" data-avatar-menu>
-				<button
-					onclick={toggleMenu}
-					class="flex w-full items-center gap-2.5 rounded-md px-2 py-2 transition-colors hover:bg-gray-100"
-				>
-					<div
-						class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-semibold text-white"
-					>
-						{initials}
-					</div>
-					<div class="min-w-0 flex-1 text-left">
-						<p class="truncate text-sm font-medium text-gray-900">{me?.name ?? ''}</p>
-						{#if me?.role === 'manager'}
-							<span class="text-xs font-medium text-violet-600">Manager</span>
-						{:else}
-							<p class="truncate text-xs text-gray-500">{me?.email ?? ''}</p>
-						{/if}
-					</div>
-				</button>
-
-				{#if menuOpen}
-					<div
-						class="absolute bottom-full left-0 z-50 mb-2 w-48 overflow-hidden rounded-lg border border-gray-400 bg-white shadow-lg"
-					>
-						<div class="border-b px-4 py-3">
-							<p class="truncate text-sm font-medium text-gray-900">{me?.name}</p>
-							<p class="truncate text-xs text-gray-500">{me?.email}</p>
-						</div>
-						<div class="py-1">
-							<a
-								href="/profile"
-								onclick={closeMenu}
-								class="flex items-center gap-2.5 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+		<Sidebar.Content>
+			<Sidebar.Group>
+				<Sidebar.GroupLabel>Platform</Sidebar.GroupLabel>
+				<Sidebar.Menu>
+					{#each navLinks as link (link.href)}
+						<Sidebar.MenuItem>
+							<Sidebar.MenuButton
+								isActive={link.match(page.url.pathname)}
+								tooltipContent={link.label}
 							>
-								<svg
-									class="h-4 w-4 shrink-0 text-gray-400"
-									fill="none"
-									viewBox="0 0 24 24"
-									stroke="currentColor"
-									stroke-width="1.5"
-								>
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"
-									/>
-								</svg>
-								Profile
-							</a>
-							<button
-								onclick={closeMenu}
-								class="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-red-600 hover:bg-red-50"
-							>
-								<svg
-									class="h-4 w-4 shrink-0"
-									fill="none"
-									viewBox="0 0 24 24"
-									stroke="currentColor"
-									stroke-width="1.5"
-								>
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										d="M8.25 9V5.25A2.25 2.25 0 0 1 10.5 3h6a2.25 2.25 0 0 1 2.25 2.25v13.5A2.25 2.25 0 0 1 16.5 21h-6a2.25 2.25 0 0 1-2.25-2.25V15m-3 0-3-3m0 0 3-3m-3 3H15"
-									/>
-								</svg>
-								Logout
-							</button>
-						</div>
-					</div>
-				{/if}
-			</div>
-		</div>
-	</aside>
+								{#snippet child({ props })}
+									<a href={link.href} {...props}>
+										<link.Icon />
+										<span>{link.label}</span>
+									</a>
+								{/snippet}
+							</Sidebar.MenuButton>
+						</Sidebar.MenuItem>
+					{/each}
+				</Sidebar.Menu>
+			</Sidebar.Group>
+		</Sidebar.Content>
 
-	<!-- Main content -->
-	<main class="flex min-w-0 flex-1 flex-col">
+		<!-- Footer: user menu -->
+		<Sidebar.Footer>
+			<Sidebar.Menu>
+				<Sidebar.MenuItem>
+					<DropdownMenu.Root>
+						<DropdownMenu.Trigger>
+							{#snippet child({ props })}
+								<Sidebar.MenuButton size="lg" tooltipContent={me?.name ?? ''} {...props}>
+									<Avatar.Root class="h-8 w-8 rounded-lg">
+										<Avatar.Fallback
+											class="rounded-lg bg-primary text-xs font-semibold text-primary-foreground"
+										>
+											{initials}
+										</Avatar.Fallback>
+									</Avatar.Root>
+									<div class="grid flex-1 text-left text-xs leading-tight">
+										<span class="truncate font-semibold">{me?.name ?? ''}</span>
+										{#if me?.role === 'manager'}
+											<span class="text-muted-foreground">Manager</span>
+										{:else}
+											<span class="truncate text-muted-foreground">{me?.email ?? ''}</span>
+										{/if}
+									</div>
+									<ChevronsUpDown class="ml-auto size-4" />
+								</Sidebar.MenuButton>
+							{/snippet}
+						</DropdownMenu.Trigger>
+						<DropdownMenu.Content
+							class="w-[--bits-dropdown-menu-anchor-width] min-w-56 rounded-lg"
+							side="bottom"
+							align="end"
+							sideOffset={4}
+						>
+							<DropdownMenu.Label class="p-0 font-normal">
+								<div class="flex items-center gap-2 px-1 py-1.5 text-left text-xs">
+									<Avatar.Root class="h-8 w-8 rounded-lg">
+										<Avatar.Fallback
+											class="rounded-lg bg-primary text-xs font-semibold text-primary-foreground"
+										>
+											{initials}
+										</Avatar.Fallback>
+									</Avatar.Root>
+									<div class="grid flex-1 text-left leading-tight">
+										<div class="flex items-center gap-1.5">
+											<span class="truncate font-semibold">{me?.name}</span>
+											{#if me?.role === 'manager'}
+												<Badge variant="secondary" class="h-4 px-1 text-[10px] text-violet-700"
+													>Manager</Badge
+												>
+											{/if}
+										</div>
+										<span class="truncate text-muted-foreground">{me?.email}</span>
+									</div>
+								</div>
+							</DropdownMenu.Label>
+							<DropdownMenu.Separator />
+							<DropdownMenu.Item>
+								{#snippet child({ props })}
+									<a href="/profile" {...props}>
+										<User class="size-4" />
+										Profile
+									</a>
+								{/snippet}
+							</DropdownMenu.Item>
+							<DropdownMenu.Item class="text-destructive focus:text-destructive">
+								<LogOut class="size-4" />
+								Log out
+							</DropdownMenu.Item>
+						</DropdownMenu.Content>
+					</DropdownMenu.Root>
+				</Sidebar.MenuItem>
+			</Sidebar.Menu>
+		</Sidebar.Footer>
+
+		<Sidebar.Rail />
+	</Sidebar.Root>
+
+	<!-- Main content area -->
+	<Sidebar.Inset>
+		<header class="flex h-12 shrink-0 items-center gap-2 px-4">
+			<Sidebar.Trigger class="-ms-1" />
+			<Separator orientation="vertical" class="me-2 data-[orientation=vertical]:h-4" />
+			<Breadcrumb.Root>
+				<Breadcrumb.List>
+					<Breadcrumb.Item>
+						<Breadcrumb.Page>{pageLabel}</Breadcrumb.Page>
+					</Breadcrumb.Item>
+				</Breadcrumb.List>
+			</Breadcrumb.Root>
+		</header>
+
 		{@render children()}
-	</main>
-</div>
+	</Sidebar.Inset>
+</Sidebar.Provider>
 
 <div style="display:none">
 	{#each locales as locale (locale)}
