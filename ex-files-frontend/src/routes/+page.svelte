@@ -1,14 +1,17 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import type { PageData } from './$types';
+	import { getAssignments, getUsers } from '$lib/data.remote';
 
-	let { data }: { data: PageData } = $props();
+	const assignmentsQuery = getAssignments();
+	const usersQuery = getUsers();
+	const assignments = $derived(assignmentsQuery.current ?? []);
+	const users = $derived(usersQuery.current ?? []);
 
 	let selectedUserId = $state<string | null>(null);
 	let statusFilter = $state<'all' | 'pending' | 'completed'>('pending');
 
 	const filtered = $derived(
-		data.assignments.filter((a) => {
+		assignments.filter((a) => {
 			if (selectedUserId && a.assigneeId !== selectedUserId) return false;
 			if (statusFilter === 'pending') return !a.resolved;
 			if (statusFilter === 'completed') return a.resolved;
@@ -17,10 +20,10 @@
 	);
 
 	const stats = $derived({
-		total: data.assignments.length,
-		pending: data.assignments.filter((a) => !a.resolved).length,
-		completed: data.assignments.filter((a) => a.resolved).length,
-		overdue: data.assignments.filter(
+		total: assignments.length,
+		pending: assignments.filter((a) => !a.resolved).length,
+		completed: assignments.filter((a) => a.resolved).length,
+		overdue: assignments.filter(
 			(a) => !a.resolved && a.deadline && new Date(a.deadline) < new Date()
 		).length
 	});
@@ -39,7 +42,7 @@
 	];
 
 	function userName(userId: string) {
-		return data.users.find((u) => u.id === userId)?.name ?? 'Unknown';
+		return users.find((u) => u.id === userId)?.name ?? 'Unknown';
 	}
 
 	function userInitials(userId: string) {
@@ -126,7 +129,7 @@
 				>
 					All assignees
 				</button>
-				{#each data.users as user (user.id)}
+				{#each users as user (user.id)}
 					<button
 						class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors {selectedUserId ===
 						user.id

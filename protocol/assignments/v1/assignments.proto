@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package assignments.v1;
+
+option go_package = "github.com/spburtsev/ex-files-backend/gen/assignments/v1;assignmentsv1";
+
+import "google/protobuf/timestamp.proto";
+
+enum Role {
+  ROLE_UNSPECIFIED = 0;
+  ROLE_MANAGER     = 1;
+  ROLE_EMPLOYEE    = 2;
+}
+
+message User {
+  string id    = 1;
+  string name  = 2;
+  string email = 3;
+  Role   role  = 4;
+}
+
+message Assignment {
+  string                    id             = 1;
+  string                    creator_id     = 2;
+  string                    assignee_id    = 3;
+  string                    title          = 4;
+  string                    description    = 5;
+  google.protobuf.Timestamp deadline       = 6;
+  bool                      resolved       = 7;
+  int32                     comments_count = 8;
+  int32                     versions_count = 9;
+}
+
+message GetAssignmentsResponse {
+  repeated Assignment assignments = 1;
+}
+
+message GetUsersResponse {
+  repeated User users = 1;
+}
+
+message GetAssignmentResponse {
+  Assignment assignment = 1;
+  User       user       = 2;
+}

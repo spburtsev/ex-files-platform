@@ -1,16 +1,15 @@
 <script lang="ts">
 	import { workbenchStore } from '$lib/stores/workbench.svelte';
-	import type { PageData } from './$types';
+	import { getAssignment } from '$lib/data.remote';
 	import UploadZone from '$lib/components/pdf/UploadZone.svelte';
 	import PdfViewer from '$lib/components/pdf/PdfViewer.svelte';
 	import CommentPanel from '$lib/components/pdf/CommentPanel.svelte';
 	import CommentDialog from '$lib/components/pdf/CommentDialog.svelte';
 	import ActivityLog from '$lib/components/pdf/ActivityLog.svelte';
 
-	let { data }: { data: PageData } = $props();
-
-	const assignment = $derived(data.assignment);
-	const user = $derived(data.user);
+	const workbenchQuery = getAssignment('a1');
+	const assignment = $derived(workbenchQuery.current?.assignment);
+	const user = $derived(workbenchQuery.current?.user);
 
 	let currentPage = $state(0);
 	let sidePanel = $state<'comments' | 'activity'>('comments');
@@ -88,7 +87,9 @@
 	}
 
 	const dl = $derived(
-		!assignment.resolved && assignment.deadline ? deadlineChip(assignment.deadline) : null
+		assignment && !assignment.resolved && assignment.deadline
+			? deadlineChip(assignment.deadline)
+			: null
 	);
 </script>
 
@@ -96,6 +97,7 @@
 	<title>ex-files - Document Review</title>
 </svelte:head>
 
+{#if assignment}
 <div class="flex flex-1 overflow-hidden bg-gray-50">
 	<!-- Left Sidebar -->
 	<aside
@@ -527,4 +529,5 @@
 			</div>
 		</div>
 	</div>
+{/if}
 {/if}

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"golang.org/x/crypto/bcrypt"
@@ -24,7 +25,7 @@ func main() {
 
 	dsn := os.Getenv("DB_DSN")
 	if dsn == "" {
-		dsn = "host=localhost user=admin password=admin dbname=exfiles port=9920 sslmode=disable TimeZone=UTC"
+		dsn = "host=localhost user=admin password=admin dbname=exfiles port=5432 sslmode=disable TimeZone=UTC"
 	}
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
@@ -44,9 +45,21 @@ func main() {
 
 	router := gin.Default()
 
+	router.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"http://localhost:5173", "http://localhost:4173"},
+		AllowMethods:     []string{"GET", "POST", "OPTIONS"},
+		AllowHeaders:     []string{"Content-Type", "Authorization"},
+		AllowCredentials: true,
+	}))
+
 	router.GET("/ping", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "pong"})
 	})
+
+	assignments := &handlers.AssignmentsHandler{}
+	router.GET("/users", assignments.GetUsers)
+	router.GET("/assignments", assignments.GetAssignments)
+	router.GET("/assignments/:id", assignments.GetAssignment)
 
 	authRoutes := router.Group("/auth")
 	{
