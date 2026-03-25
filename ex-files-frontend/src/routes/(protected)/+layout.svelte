@@ -151,7 +151,13 @@
 									</a>
 								{/snippet}
 							</DropdownMenu.Item>
-							<DropdownMenu.Item class="text-destructive focus:text-destructive">
+							<DropdownMenu.Item
+								class="text-destructive focus:text-destructive"
+								onclick={async () => {
+									await fetch('/api/auth/logout', { method: 'POST' });
+									window.location.href = '/login';
+								}}
+							>
 								<LogOut class="size-4" />
 								Log out
 							</DropdownMenu.Item>

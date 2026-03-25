@@ -19,9 +19,3 @@ export interface MockAssignment {
 	versionsCount: number;
 }
 
-export const MOCK_ME: MockUser = {
-	id: 'u99999',
-	name: 'Sergei Burtsev',
-	email: 'sergei.p.burtsev@gmail.com',
-	role: 'manager'
-};

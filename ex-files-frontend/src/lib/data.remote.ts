@@ -1,4 +1,4 @@
-import { query } from '$app/server';
+import { query, getRequestEvent } from '$app/server';
 import { env } from '$env/dynamic/private';
 import { fromBinary } from '@bufbuild/protobuf';
 import type { Timestamp } from '@bufbuild/protobuf/wkt';
@@ -9,7 +9,6 @@ import {
 	Role
 } from '$lib/gen/assignments/v1/assignments_pb';
 import type { MockAssignment, MockUser } from '$lib/mock-data';
-import { MOCK_ME } from '$lib/mock-data';
 
 const BACKEND = env.BACKEND_URL ?? 'http://localhost:8080';
 
@@ -22,7 +21,23 @@ function tsToIso(ts?: Timestamp): string | undefined {
 	return ts ? new Date(Number(ts.seconds) * 1000).toISOString().slice(0, 19) : undefined;
 }
 
-export const getMe = query(() => MOCK_ME);
+export const getMe = query(async (): Promise<MockUser | null> => {
+	const event = getRequestEvent();
+	const token = event.cookies.get('session');
+	if (!token) return null;
+	const res = await fetch(`${BACKEND}/auth/me`, {
+		headers: { Authorization: `Bearer ${token}` }
+	});
+	if (!res.ok) return null;
+	const { user: u } = await res.json();
+	return {
+		id: String(u.id),
+		name: u.name,
+		email: u.email,
+		// auth proto: ROLE_MANAGER=2, ROLE_EMPLOYEE=3, ROLE_ROOT=1
+		role: u.role === 2 ? 'manager' : 'employee'
+	};
+});
 
 export const getUsers = query(async (): Promise<MockUser[]> => {
 	const r = fromBinary(GetUsersResponseSchema, await fetchProto(`${BACKEND}/users`));

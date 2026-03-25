@@ -14,6 +14,7 @@ import (
 	"github.com/spburtsev/ex-files-backend/handlers"
 	"github.com/spburtsev/ex-files-backend/middleware"
 	"github.com/spburtsev/ex-files-backend/models"
+	"github.com/spburtsev/ex-files-backend/seed"
 	"github.com/spburtsev/ex-files-backend/services"
 )
 
@@ -41,6 +42,8 @@ func main() {
 	hasher := services.BcryptHasher{Cost: bcrypt.DefaultCost}
 
 	auth := &handlers.AuthHandler{Repo: repo, Tokens: ts, Hasher: hasher}
+
+	seed.Run(db, hasher)
 
 	router := gin.Default()
 
