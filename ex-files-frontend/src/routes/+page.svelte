@@ -1,25 +1,27 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import { MOCK_ASSIGNMENTS, MOCK_USERS } from '$lib/mock-data';
+	import type { PageData } from './$types';
+
+	let { data }: { data: PageData } = $props();
 
 	let selectedUserId = $state<string | null>(null);
 	let statusFilter = $state<'all' | 'pending' | 'completed'>('pending');
 
 	const filtered = $derived(
-		MOCK_ASSIGNMENTS.filter((a) => {
-			if (selectedUserId && a.userId !== selectedUserId) return false;
-			if (statusFilter === 'pending') return !a.completed;
-			if (statusFilter === 'completed') return a.completed;
+		data.assignments.filter((a) => {
+			if (selectedUserId && a.assigneeId !== selectedUserId) return false;
+			if (statusFilter === 'pending') return !a.resolved;
+			if (statusFilter === 'completed') return a.resolved;
 			return true;
 		})
 	);
 
 	const stats = $derived({
-		total: MOCK_ASSIGNMENTS.length,
-		pending: MOCK_ASSIGNMENTS.filter((a) => !a.completed).length,
-		completed: MOCK_ASSIGNMENTS.filter((a) => a.completed).length,
-		overdue: MOCK_ASSIGNMENTS.filter(
-			(a) => !a.completed && a.deadline && new Date(a.deadline) < new Date()
+		total: data.assignments.length,
+		pending: data.assignments.filter((a) => !a.resolved).length,
+		completed: data.assignments.filter((a) => a.resolved).length,
+		overdue: data.assignments.filter(
+			(a) => !a.resolved && a.deadline && new Date(a.deadline) < new Date()
 		).length
 	});
 
@@ -37,7 +39,7 @@
 	];
 
 	function userName(userId: string) {
-		return MOCK_USERS.find((u) => u.id === userId)?.name ?? 'Unknown';
+		return data.users.find((u) => u.id === userId)?.name ?? 'Unknown';
 	}
 
 	function userInitials(userId: string) {
@@ -124,7 +126,7 @@
 				>
 					All assignees
 				</button>
-				{#each MOCK_USERS as user (user.id)}
+				{#each data.users as user (user.id)}
 					<button
 						class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors {selectedUserId ===
 						user.id
@@ -156,7 +158,7 @@
 			<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 				{#each filtered as assignment (assignment.id)}
 					{@const dl =
-						assignment.deadline && !assignment.completed ? deadlineInfo(assignment.deadline) : null}
+						assignment.deadline && !assignment.resolved ? deadlineInfo(assignment.deadline) : null}
 					<div
 						class="flex flex-col rounded-xl border bg-white shadow-sm transition-shadow hover:shadow-md"
 					>
@@ -168,7 +170,7 @@
 									{assignment.description}
 								</p>
 							</div>
-							{#if assignment.completed}
+							{#if assignment.resolved}
 								<span
 									class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100"
 								>
@@ -214,12 +216,12 @@
 							>
 								<span
 									class="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full text-[8px] font-bold text-white {avatarColor(
-										assignment.userId
+										assignment.assigneeId
 									)}"
 								>
-									{userInitials(assignment.userId)}
+									{userInitials(assignment.assigneeId)}
 								</span>
-								{userName(assignment.userId)}
+								{userName(assignment.assigneeId)}
 							</span>
 
 							{#if dl}
@@ -230,13 +232,6 @@
 								</span>
 							{/if}
 
-							{#if assignment.grade}
-								<span
-									class="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700"
-								>
-									{assignment.grade}
-								</span>
-							{/if}
 						</div>
 
 						<!-- Footer -->
@@ -256,7 +251,7 @@
 											d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 0 1 .865-.501 48.172 48.172 0 0 0 3.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z"
 										/>
 									</svg>
-									{assignment.commentCount}
+									{assignment.commentsCount}
 								</span>
 								<span class="flex items-center gap-1">
 									<svg
@@ -272,7 +267,7 @@
 											d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"
 										/>
 									</svg>
-									{assignment.submissionCount}
+									{assignment.versionsCount}
 								</span>
 							</div>
 							<a

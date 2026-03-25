@@ -1,15 +1,16 @@
 <script lang="ts">
 	import { workbenchStore } from '$lib/stores/workbench.svelte';
-	import { MOCK_ASSIGNMENTS, MOCK_USERS, type MockAssignment } from '$lib/mock-data';
+	import type { PageData } from './$types';
 	import UploadZone from '$lib/components/pdf/UploadZone.svelte';
 	import PdfViewer from '$lib/components/pdf/PdfViewer.svelte';
 	import CommentPanel from '$lib/components/pdf/CommentPanel.svelte';
 	import CommentDialog from '$lib/components/pdf/CommentDialog.svelte';
 	import ActivityLog from '$lib/components/pdf/ActivityLog.svelte';
 
-	// Use first mock assignment as default
-	const assignment: MockAssignment = MOCK_ASSIGNMENTS[0];
-	const user = MOCK_USERS.find((u) => u.id === assignment.userId);
+	let { data }: { data: PageData } = $props();
+
+	const assignment = $derived(data.assignment);
+	const user = $derived(data.user);
 
 	let currentPage = $state(0);
 	let sidePanel = $state<'comments' | 'activity'>('comments');
@@ -87,7 +88,7 @@
 	}
 
 	const dl = $derived(
-		!assignment.completed && assignment.deadline ? deadlineChip(assignment.deadline) : null
+		!assignment.resolved && assignment.deadline ? deadlineChip(assignment.deadline) : null
 	);
 </script>
 
@@ -164,35 +165,6 @@
 						{assignment.title}
 					</h2>
 					<p class="line-clamp-3 text-xs leading-relaxed text-gray-700">{assignment.description}</p>
-					{#if assignment.completed && assignment.grade}
-						<div class="pt-0.5">
-							<span
-								class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium {assignment.grade ===
-								'Failed'
-									? 'border-red-200 bg-red-50 text-red-600'
-									: assignment.grade === 'Needs Work'
-										? 'border-amber-200 bg-amber-50 text-amber-700'
-										: 'border-emerald-200 bg-emerald-50 text-emerald-700'}"
-							>
-								{#if assignment.grade === 'Passed'}
-									<svg
-										class="h-3 w-3 shrink-0"
-										fill="none"
-										viewBox="0 0 24 24"
-										stroke="currentColor"
-										stroke-width="2.5"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											d="m4.5 12.75 6 6 9-13.5"
-										/>
-									</svg>
-								{/if}
-								{assignment.grade}
-							</span>
-						</div>
-					{/if}
 				</div>
 			</div>
 

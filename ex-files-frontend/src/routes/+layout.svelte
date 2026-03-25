@@ -4,8 +4,17 @@
 	import { resolve } from '$app/paths';
 	import './layout.css';
 	import favicon from '$lib/assets/favicon.svg';
+	import type { LayoutData } from './$types';
 
-	let { children } = $props();
+	let { data, children }: { data: LayoutData; children: any } = $props();
+
+	const initials = $derived(
+		data.me.name
+			.split(' ')
+			.map((p: string) => p[0])
+			.join('')
+			.toUpperCase()
+	);
 </script>
 
 <svelte:head><link rel="icon" href={favicon} /></svelte:head>
@@ -35,6 +44,20 @@
 				>
 					Assignments
 				</a>
+			</div>
+
+			<div class="ml-auto flex items-center gap-2">
+				{#if data.me.role === 'manager'}
+					<span class="rounded-full bg-violet-100 px-2.5 py-0.5 text-xs font-medium text-violet-700">
+						Manager
+					</span>
+				{/if}
+				<div
+					title="{data.me.name} ({data.me.email})"
+					class="flex h-8 w-8 select-none items-center justify-center rounded-full bg-blue-600 text-xs font-semibold text-white"
+				>
+					{initials}
+				</div>
 			</div>
 		</div>
 	</nav>
