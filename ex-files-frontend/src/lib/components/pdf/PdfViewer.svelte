@@ -226,8 +226,11 @@
 						</div>
 
 						{#if hoveredCommentId === comment.id}
+							{@const showBelow = comment.y < 25}
 							<div
-								class="absolute bottom-full left-1/2 z-20 mb-2 w-56 -translate-x-1/2 rounded-lg bg-white p-3 shadow-xl ring-1 ring-gray-200"
+								class="absolute left-1/2 z-20 w-56 -translate-x-1/2 rounded-lg border bg-card p-3 shadow-xl {showBelow
+									? 'top-full mt-2'
+									: 'bottom-full mb-2'}"
 							>
 								<div class="flex items-center gap-2">
 									<div
@@ -238,14 +241,21 @@
 										{comment.author.charAt(0).toUpperCase()}
 									</div>
 									<div class="min-w-0">
-										<p class="truncate text-sm font-medium text-gray-900">{comment.author}</p>
-										<p class="text-xs text-gray-400">{formatTime(comment.createdAt)}</p>
+										<p class="truncate text-sm font-medium">{comment.author}</p>
+										<p class="text-xs text-muted-foreground">{formatTime(comment.createdAt)}</p>
 									</div>
 								</div>
-								<p class="mt-2 text-sm leading-snug text-gray-600">{comment.text}</p>
-								<div
-									class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-white"
-								></div>
+								<p class="mt-2 text-sm leading-snug text-muted-foreground">{comment.text}</p>
+								<!-- caret -->
+								{#if showBelow}
+									<div
+										class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-border"
+									></div>
+								{:else}
+									<div
+										class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-border"
+									></div>
+								{/if}
 							</div>
 						{/if}
 					</div>

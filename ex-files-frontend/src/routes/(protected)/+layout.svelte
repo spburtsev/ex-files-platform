@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { locales, localizeHref } from '$lib/paraglide/runtime';
-	import './layout.css';
+	import '../layout.css';
 	import favicon from '$lib/assets/favicon.svg';
 	import { getMe } from '$lib/data.remote';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
