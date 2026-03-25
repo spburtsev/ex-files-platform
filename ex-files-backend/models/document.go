@@ -12,17 +12,41 @@ const (
 	DocumentStatusChangesRequested DocumentStatus = "changes_requested"
 )
 
+// validTransitions defines allowed status transitions.
+var validTransitions = map[DocumentStatus][]DocumentStatus{
+	DocumentStatusPending:          {DocumentStatusInReview},
+	DocumentStatusInReview:         {DocumentStatusApproved, DocumentStatusRejected, DocumentStatusChangesRequested},
+	DocumentStatusChangesRequested: {DocumentStatusInReview},
+}
+
+// CanTransitionTo reports whether transitioning from the current status to next is valid.
+func (d *Document) CanTransitionTo(next DocumentStatus) bool {
+	allowed, ok := validTransitions[d.Status]
+	if !ok {
+		return false
+	}
+	for _, s := range allowed {
+		if s == next {
+			return true
+		}
+	}
+	return false
+}
+
 type Document struct {
 	gorm.Model
-	Name        string         `gorm:"not null"`
-	MimeType    string         `gorm:"not null"`
-	Size        int64          `gorm:"not null"`
-	Hash        string         `gorm:"type:varchar(64);not null;index"`
-	Status      DocumentStatus `gorm:"type:varchar(30);default:pending;not null"`
-	UploaderID  uint           `gorm:"not null;index"`
-	Uploader    User           `gorm:"foreignKey:UploaderID"`
-	WorkspaceID uint           `gorm:"not null;index"`
-	Workspace   Workspace      `gorm:"foreignKey:WorkspaceID"`
+	Name         string         `gorm:"not null"`
+	MimeType     string         `gorm:"not null"`
+	Size         int64          `gorm:"not null"`
+	Hash         string         `gorm:"type:varchar(64);not null;index"`
+	Status       DocumentStatus `gorm:"type:varchar(30);default:pending;not null"`
+	UploaderID   uint           `gorm:"not null;index"`
+	Uploader     User           `gorm:"foreignKey:UploaderID"`
+	WorkspaceID  uint           `gorm:"not null;index"`
+	Workspace    Workspace      `gorm:"foreignKey:WorkspaceID"`
+	ReviewerID   *uint          `gorm:"index"`
+	Reviewer     User           `gorm:"foreignKey:ReviewerID"`
+	ReviewerNote string         `gorm:"type:text"`
 }
 
 type DocumentVersion struct {

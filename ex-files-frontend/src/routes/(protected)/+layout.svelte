@@ -10,7 +10,16 @@
 	import * as Breadcrumb from '$lib/components/ui/breadcrumb/index.js';
 	import { Separator } from '$lib/components/ui/separator/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
-	import { LayoutDashboard, FolderOpen, Users, ChevronsUpDown, LogOut, User, FileCheck2 } from '@lucide/svelte';
+	import {
+		LayoutDashboard,
+		FolderOpen,
+		Users,
+		ChevronsUpDown,
+		LogOut,
+		User,
+		FileCheck2,
+		ScrollText
+	} from '@lucide/svelte';
 
 	let { children } = $props();
 
@@ -43,6 +52,12 @@
 			label: 'Users',
 			Icon: Users,
 			match: (p: string) => p.startsWith('/users')
+		},
+		{
+			href: '/audit',
+			label: 'Audit Log',
+			Icon: ScrollText,
+			match: (p: string) => p.startsWith('/audit')
 		}
 	];
 
@@ -57,7 +72,9 @@
 		<Sidebar.Header>
 			<a href="/" class="flex items-center gap-2 overflow-hidden px-2 py-1">
 				<FileCheck2 class="size-5 shrink-0 text-primary" />
-				<span class="truncate text-sm font-semibold tracking-wide group-data-[collapsible=icon]:hidden">
+				<span
+					class="truncate text-sm font-semibold tracking-wide group-data-[collapsible=icon]:hidden"
+				>
 					ex-files
 				</span>
 			</a>

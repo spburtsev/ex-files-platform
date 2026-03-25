@@ -47,6 +47,7 @@ type StorageService interface {
 type DocumentRepository interface {
 	Create(doc *models.Document) error
 	FindByID(id uint) (*models.Document, error)
+	Update(doc *models.Document) error
 	ListByWorkspace(workspaceID uint, search, status string, limit, offset int) ([]models.Document, int64, error)
 	Delete(id uint) error
 	CreateVersion(version *models.DocumentVersion) error

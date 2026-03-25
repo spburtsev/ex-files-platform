@@ -16,7 +16,7 @@ func (r *GormDocumentRepository) Create(doc *models.Document) error {
 
 func (r *GormDocumentRepository) FindByID(id uint) (*models.Document, error) {
 	var doc models.Document
-	if err := r.DB.Preload("Uploader").First(&doc, id).Error; err != nil {
+	if err := r.DB.Preload("Uploader").Preload("Reviewer").First(&doc, id).Error; err != nil {
 		return nil, err
 	}
 	return &doc, nil
@@ -43,6 +43,10 @@ func (r *GormDocumentRepository) ListByWorkspace(workspaceID uint, search, statu
 	}
 
 	return docs, total, nil
+}
+
+func (r *GormDocumentRepository) Update(doc *models.Document) error {
+	return r.DB.Save(doc).Error
 }
 
 func (r *GormDocumentRepository) Delete(id uint) error {

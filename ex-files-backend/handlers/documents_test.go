@@ -40,6 +40,10 @@ func (m *mockDocRepo) FindByID(id uint) (*models.Document, error) {
 	return nil, args.Error(1)
 }
 
+func (m *mockDocRepo) Update(doc *models.Document) error {
+	return m.Called(doc).Error(0)
+}
+
 func (m *mockDocRepo) ListByWorkspace(workspaceID uint, search, status string, limit, offset int) ([]models.Document, int64, error) {
 	args := m.Called(workspaceID, search, status, limit, offset)
 	return args.Get(0).([]models.Document), args.Get(1).(int64), args.Error(2)
@@ -302,6 +306,224 @@ func TestDocumentDelete(t *testing.T) {
 		h := newDocHandler(docRepo, &mockStorage{}, auditRepo)
 		w := docRequest(h.Delete, http.MethodDelete, "/documents/1", "/documents/:id", nil, "", 1, "manager")
 
+		assert.Equal(t, http.StatusOK, w.Code)
+		docRepo.AssertExpectations(t)
+	})
+}
+
+// --- TestDocumentSubmit ---
+
+func TestDocumentSubmit(t *testing.T) {
+	t.Run("not_found", func(t *testing.T) {
+		docRepo := &mockDocRepo{}
+		docRepo.On("FindByID", uint(99)).Return(nil, errors.New("not found"))
+		h := newDocHandler(docRepo, &mockStorage{}, nil)
+		w := docRequest(h.Submit, http.MethodPost, "/documents/99/submit", "/documents/:id/submit", nil, "", 1, "employee")
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("forbidden_not_uploader", func(t *testing.T) {
+		docRepo := &mockDocRepo{}
+		doc := &models.Document{Status: models.DocumentStatusPending, UploaderID: 2}
+		doc.ID = 1
+		docRepo.On("FindByID", uint(1)).Return(doc, nil)
+		h := newDocHandler(docRepo, &mockStorage{}, nil)
+		// user 1 tries to submit doc uploaded by user 2
+		w := docRequest(h.Submit, http.MethodPost, "/documents/1/submit", "/documents/:id/submit", nil, "", 1, "employee")
+		assert.Equal(t, http.StatusForbidden, w.Code)
+	})
+
+	t.Run("invalid_transition", func(t *testing.T) {
+		docRepo := &mockDocRepo{}
+		doc := &models.Document{Status: models.DocumentStatusApproved, UploaderID: 1}
+		doc.ID = 1
+		docRepo.On("FindByID", uint(1)).Return(doc, nil)
+		h := newDocHandler(docRepo, &mockStorage{}, nil)
+		w := docRequest(h.Submit, http.MethodPost, "/documents/1/submit", "/documents/:id/submit", nil, "", 1, "employee")
+		assert.Equal(t, http.StatusUnprocessableEntity, w.Code)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		docRepo := &mockDocRepo{}
+		auditRepo := &mockAuditRepo{}
+		doc := &models.Document{Status: models.DocumentStatusPending, UploaderID: 1, Uploader: models.User{Name: "Alice"}}
+		doc.ID = 1
+		docRepo.On("FindByID", uint(1)).Return(doc, nil)
+		docRepo.On("Update", mock.AnythingOfType("*models.Document")).Return(nil)
+		auditRepo.On("Append", mock.AnythingOfType("*models.AuditEntry")).Return(nil)
+		h := newDocHandler(docRepo, &mockStorage{}, auditRepo)
+		w := docRequest(h.Submit, http.MethodPost, "/documents/1/submit", "/documents/:id/submit", nil, "", 1, "employee")
+		assert.Equal(t, http.StatusOK, w.Code)
+		docRepo.AssertExpectations(t)
+	})
+}
+
+// --- TestDocumentApprove ---
+
+func TestDocumentApprove(t *testing.T) {
+	reviewerID := uint(5)
+
+	t.Run("forbidden_not_reviewer", func(t *testing.T) {
+		docRepo := &mockDocRepo{}
+		doc := &models.Document{Status: models.DocumentStatusInReview, UploaderID: 2, ReviewerID: &reviewerID}
+		doc.ID = 1
+		docRepo.On("FindByID", uint(1)).Return(doc, nil)
+		h := newDocHandler(docRepo, &mockStorage{}, nil)
+		// user 1 is not reviewer (5) and not manager
+		w := docRequest(h.Approve, http.MethodPost, "/documents/1/approve", "/documents/:id/approve", nil, "", 1, "employee")
+		assert.Equal(t, http.StatusForbidden, w.Code)
+	})
+
+	t.Run("invalid_transition_from_pending", func(t *testing.T) {
+		docRepo := &mockDocRepo{}
+		doc := &models.Document{Status: models.DocumentStatusPending, UploaderID: 2}
+		doc.ID = 1
+		docRepo.On("FindByID", uint(1)).Return(doc, nil)
+		h := newDocHandler(docRepo, &mockStorage{}, nil)
+		w := docRequest(h.Approve, http.MethodPost, "/documents/1/approve", "/documents/:id/approve", nil, "", 1, "manager")
+		assert.Equal(t, http.StatusUnprocessableEntity, w.Code)
+	})
+
+	t.Run("success_as_manager", func(t *testing.T) {
+		docRepo := &mockDocRepo{}
+		auditRepo := &mockAuditRepo{}
+		doc := &models.Document{Status: models.DocumentStatusInReview, UploaderID: 2, Uploader: models.User{Name: "Bob"}}
+		doc.ID = 1
+		docRepo.On("FindByID", uint(1)).Return(doc, nil)
+		docRepo.On("Update", mock.AnythingOfType("*models.Document")).Return(nil)
+		auditRepo.On("Append", mock.AnythingOfType("*models.AuditEntry")).Return(nil)
+		h := newDocHandler(docRepo, &mockStorage{}, auditRepo)
+		w := docRequest(h.Approve, http.MethodPost, "/documents/1/approve", "/documents/:id/approve", nil, "", 1, "manager")
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		docData := resp["document"].(map[string]any)
+		assert.Equal(t, "approved", docData["status"])
+		docRepo.AssertExpectations(t)
+	})
+
+	t.Run("success_as_assigned_reviewer", func(t *testing.T) {
+		docRepo := &mockDocRepo{}
+		auditRepo := &mockAuditRepo{}
+		doc := &models.Document{Status: models.DocumentStatusInReview, UploaderID: 2, ReviewerID: &reviewerID, Uploader: models.User{Name: "Bob"}}
+		doc.ID = 1
+		docRepo.On("FindByID", uint(1)).Return(doc, nil)
+		docRepo.On("Update", mock.AnythingOfType("*models.Document")).Return(nil)
+		auditRepo.On("Append", mock.AnythingOfType("*models.AuditEntry")).Return(nil)
+		h := newDocHandler(docRepo, &mockStorage{}, auditRepo)
+		// user 5 is the assigned reviewer
+		w := docRequest(h.Approve, http.MethodPost, "/documents/1/approve", "/documents/:id/approve", nil, "", reviewerID, "employee")
+		assert.Equal(t, http.StatusOK, w.Code)
+		docRepo.AssertExpectations(t)
+	})
+}
+
+// --- TestDocumentReject ---
+
+func TestDocumentReject(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		docRepo := &mockDocRepo{}
+		auditRepo := &mockAuditRepo{}
+		doc := &models.Document{Status: models.DocumentStatusInReview, UploaderID: 2, Uploader: models.User{Name: "Bob"}}
+		doc.ID = 1
+		docRepo.On("FindByID", uint(1)).Return(doc, nil)
+		docRepo.On("Update", mock.AnythingOfType("*models.Document")).Return(nil)
+		auditRepo.On("Append", mock.AnythingOfType("*models.AuditEntry")).Return(nil)
+		h := newDocHandler(docRepo, &mockStorage{}, auditRepo)
+
+		body := bytes.NewBufferString(`{"note":"Does not meet requirements"}`)
+		w := docRequest(h.Reject, http.MethodPost, "/documents/1/reject", "/documents/:id/reject", body, "application/json", 1, "manager")
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		docData := resp["document"].(map[string]any)
+		assert.Equal(t, "rejected", docData["status"])
+		docRepo.AssertExpectations(t)
+	})
+}
+
+// --- TestDocumentRequestChanges ---
+
+func TestDocumentRequestChanges(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		docRepo := &mockDocRepo{}
+		auditRepo := &mockAuditRepo{}
+		doc := &models.Document{Status: models.DocumentStatusInReview, UploaderID: 2, Uploader: models.User{Name: "Bob"}}
+		doc.ID = 1
+		docRepo.On("FindByID", uint(1)).Return(doc, nil)
+		docRepo.On("Update", mock.AnythingOfType("*models.Document")).Return(nil)
+		auditRepo.On("Append", mock.AnythingOfType("*models.AuditEntry")).Return(nil)
+		h := newDocHandler(docRepo, &mockStorage{}, auditRepo)
+
+		body := bytes.NewBufferString(`{"note":"Please fix section 2"}`)
+		w := docRequest(h.RequestChanges, http.MethodPost, "/documents/1/request-changes", "/documents/:id/request-changes", body, "application/json", 1, "manager")
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		docData := resp["document"].(map[string]any)
+		assert.Equal(t, "changes_requested", docData["status"])
+		docRepo.AssertExpectations(t)
+	})
+}
+
+// --- TestDocumentResubmit ---
+
+func TestDocumentResubmit(t *testing.T) {
+	t.Run("forbidden_not_uploader", func(t *testing.T) {
+		docRepo := &mockDocRepo{}
+		doc := &models.Document{Status: models.DocumentStatusChangesRequested, UploaderID: 2}
+		doc.ID = 1
+		docRepo.On("FindByID", uint(1)).Return(doc, nil)
+		h := newDocHandler(docRepo, &mockStorage{}, nil)
+		w := docRequest(h.Resubmit, http.MethodPost, "/documents/1/resubmit", "/documents/:id/resubmit", nil, "", 1, "employee")
+		assert.Equal(t, http.StatusForbidden, w.Code)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		docRepo := &mockDocRepo{}
+		auditRepo := &mockAuditRepo{}
+		doc := &models.Document{Status: models.DocumentStatusChangesRequested, UploaderID: 1, Uploader: models.User{Name: "Alice"}}
+		doc.ID = 1
+		docRepo.On("FindByID", uint(1)).Return(doc, nil)
+		docRepo.On("Update", mock.AnythingOfType("*models.Document")).Return(nil)
+		auditRepo.On("Append", mock.AnythingOfType("*models.AuditEntry")).Return(nil)
+		h := newDocHandler(docRepo, &mockStorage{}, auditRepo)
+		w := docRequest(h.Resubmit, http.MethodPost, "/documents/1/resubmit", "/documents/:id/resubmit", nil, "", 1, "employee")
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var resp map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		docData := resp["document"].(map[string]any)
+		assert.Equal(t, "in_review", docData["status"])
+		docRepo.AssertExpectations(t)
+	})
+}
+
+// --- TestAssignReviewer ---
+
+func TestAssignReviewer(t *testing.T) {
+	t.Run("forbidden_employee", func(t *testing.T) {
+		h := newDocHandler(&mockDocRepo{}, &mockStorage{}, nil)
+		body := bytes.NewBufferString(`{"reviewer_id":5}`)
+		w := docRequest(h.AssignReviewer, http.MethodPut, "/documents/1/reviewer", "/documents/:id/reviewer", body, "application/json", 1, "employee")
+		assert.Equal(t, http.StatusForbidden, w.Code)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		docRepo := &mockDocRepo{}
+		auditRepo := &mockAuditRepo{}
+		doc := &models.Document{Status: models.DocumentStatusInReview, UploaderID: 2, Uploader: models.User{Name: "Bob"}}
+		doc.ID = 1
+		docRepo.On("FindByID", uint(1)).Return(doc, nil)
+		docRepo.On("Update", mock.AnythingOfType("*models.Document")).Return(nil)
+		auditRepo.On("Append", mock.AnythingOfType("*models.AuditEntry")).Return(nil)
+		h := newDocHandler(docRepo, &mockStorage{}, auditRepo)
+
+		body := bytes.NewBufferString(`{"reviewer_id":5}`)
+		w := docRequest(h.AssignReviewer, http.MethodPut, "/documents/1/reviewer", "/documents/:id/reviewer", body, "application/json", 1, "manager")
 		assert.Equal(t, http.StatusOK, w.Code)
 		docRepo.AssertExpectations(t)
 	})

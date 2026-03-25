@@ -116,6 +116,12 @@ func main() {
 		documentRoutes.DELETE("/:id", docs.Delete)
 		documentRoutes.POST("/:id/versions", docs.UploadVersion)
 		documentRoutes.GET("/:id/versions/:versionId/download", docs.Download)
+		documentRoutes.POST("/:id/submit", docs.Submit)
+		documentRoutes.POST("/:id/resubmit", docs.Resubmit)
+		documentRoutes.POST("/:id/approve", docs.Approve)
+		documentRoutes.POST("/:id/reject", docs.Reject)
+		documentRoutes.POST("/:id/request-changes", docs.RequestChanges)
+		documentRoutes.PUT("/:id/reviewer", docs.AssignReviewer)
 	}
 
 	auditRoutes := router.Group("/audit", middleware.AuthMiddleware(ts))

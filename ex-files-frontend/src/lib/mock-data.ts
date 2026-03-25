@@ -18,4 +18,3 @@ export interface MockAssignment {
 	commentsCount: number;
 	versionsCount: number;
 }
-

@@ -16,12 +16,15 @@ const (
 	AuditActionWorkspaceDeleted  AuditAction = "workspace.deleted"
 	AuditActionMemberAdded       AuditAction = "workspace.member_added"
 	AuditActionMemberRemoved     AuditAction = "workspace.member_removed"
-	AuditActionDocumentUploaded  AuditAction = "document.uploaded"
-	AuditActionDocumentApproved  AuditAction = "document.approved"
-	AuditActionDocumentRejected  AuditAction = "document.rejected"
-	AuditActionVersionCreated    AuditAction = "document.version_created"
-	AuditActionCommentAdded      AuditAction = "document.comment_added"
-	AuditActionRoleChanged       AuditAction = "user.role_changed"
+	AuditActionDocumentUploaded         AuditAction = "document.uploaded"
+	AuditActionDocumentApproved         AuditAction = "document.approved"
+	AuditActionDocumentRejected         AuditAction = "document.rejected"
+	AuditActionDocumentSubmitted        AuditAction = "document.submitted"
+	AuditActionDocumentChangesRequested AuditAction = "document.changes_requested"
+	AuditActionDocumentReviewerAssigned AuditAction = "document.reviewer_assigned"
+	AuditActionVersionCreated           AuditAction = "document.version_created"
+	AuditActionCommentAdded             AuditAction = "document.comment_added"
+	AuditActionRoleChanged              AuditAction = "user.role_changed"
 )
 
 // AuditEntry is append-only. It has no UpdatedAt or DeletedAt fields.
