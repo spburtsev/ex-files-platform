@@ -97,11 +97,10 @@
 	"ws_delete_title": "Usuń przestrzeń roboczą",
 	"ws_delete_confirm": "Czy na pewno chcesz usunąć {name}? Tej operacji nie można cofnąć.",
 
-	"ws_documents_tab": "Dokumenty",
+	"ws_issues_tab": "Zagadnienia",
 	"ws_members_tab": "Członkowie",
-	"ws_search_documents": "Szukaj dokumentów…",
-	"ws_no_documents": "Brak dokumentów",
-	"ws_no_documents_hint": "Prześlij plik PDF, aby rozpocząć.",
+	"ws_no_issues": "Brak zagadnień",
+	"ws_no_issues_hint": "Utwórz zagadnienie, aby rozpocząć organizowanie dokumentów.",
 	"ws_members_heading": "Członkowie",
 	"ws_member_count": "{count} członek",
 	"ws_members_count": "{count} członków",
@@ -196,7 +195,7 @@
 	"workbench_no_submissions": "Brak zgłoszeń",
 	"workbench_upload_submission": "Prześlij zgłoszenie",
 	"workbench_details": "Szczegóły",
-	"workbench_assignment_details": "Szczegóły zadania",
+	"workbench_issue_details": "Szczegóły zagadnienia",
 	"workbench_instructions": "Instrukcje",
 	"workbench_instructions_text": "Upewnij się, że Twoje zgłoszenie jest zgodne z wytycznymi formatowania. Twoja praca musi być oryginalna i odpowiednio cytowana. Spóźnione zgłoszenia zostaną ukarane, chyba że wcześniej przyznano przedłużenie.",
 	"workbench_overdue": "Po terminie",
@@ -227,6 +226,9 @@
 	"pdf_zoom_in": "Powiększ",
 	"pdf_page_back": "Poprzednia strona",
 	"pdf_page_forward": "Następna strona",
+
+	"issue_open": "Otwarte",
+	"issue_resolved": "Rozwiązane",
 
 	"lang_switch": "Język"
 }

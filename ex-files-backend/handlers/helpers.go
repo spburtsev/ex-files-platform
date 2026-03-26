@@ -5,6 +5,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"google.golang.org/protobuf/proto"
@@ -32,6 +33,15 @@ func setPaginationHeaders(c *gin.Context, page, perPage int, total int64) {
 	c.Header("X-Page", fmt.Sprintf("%d", page))
 	c.Header("X-Per-Page", fmt.Sprintf("%d", perPage))
 	c.Header("X-Total-Pages", fmt.Sprintf("%d", totalPages))
+}
+
+func parseTime(s string) (time.Time, error) {
+	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04:05", "2006-01-02"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unrecognised time format: %s", s)
 }
 
 func protobufResponse(c *gin.Context, status int, msg proto.Message) {

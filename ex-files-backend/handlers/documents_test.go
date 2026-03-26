@@ -45,8 +45,8 @@ func (m *mockDocRepo) Update(doc *models.Document) error {
 	return m.Called(doc).Error(0)
 }
 
-func (m *mockDocRepo) ListByWorkspace(workspaceID uint, search, status string, limit, offset int) ([]models.Document, int64, error) {
-	args := m.Called(workspaceID, search, status, limit, offset)
+func (m *mockDocRepo) ListByIssue(issueID uint, search, status string, limit, offset int) ([]models.Document, int64, error) {
+	args := m.Called(issueID, search, status, limit, offset)
 	return args.Get(0).([]models.Document), args.Get(1).(int64), args.Error(2)
 }
 
@@ -143,10 +143,10 @@ func TestDocumentList(t *testing.T) {
 			{Name: "doc1.pdf", Uploader: models.User{Name: "Alice"}},
 			{Name: "doc2.pdf", Uploader: models.User{Name: "Bob"}},
 		}
-		docRepo.On("ListByWorkspace", uint(1), "", "", 20, 0).Return(docs, int64(2), nil)
+		docRepo.On("ListByIssue", uint(1), "", "", 20, 0).Return(docs, int64(2), nil)
 
 		h := newDocHandler(docRepo, &mockStorage{}, nil)
-		w := docRequest(h.List, http.MethodGet, "/workspaces/1/documents", "/workspaces/:id/documents", nil, "", 1, "manager")
+		w := docRequest(h.List, http.MethodGet, "/issues/1/documents", "/issues/:id/documents", nil, "", 1, "manager")
 
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, "2", w.Header().Get("X-Total-Count"))
@@ -159,11 +159,11 @@ func TestDocumentList(t *testing.T) {
 
 	t.Run("with_search_and_status", func(t *testing.T) {
 		docRepo := &mockDocRepo{}
-		docRepo.On("ListByWorkspace", uint(1), "report", "approved", 20, 0).Return(
+		docRepo.On("ListByIssue", uint(1), "report", "approved", 20, 0).Return(
 			[]models.Document{}, int64(0), nil,
 		)
 		h := newDocHandler(docRepo, &mockStorage{}, nil)
-		w := docRequest(h.List, http.MethodGet, "/workspaces/1/documents?search=report&status=approved", "/workspaces/:id/documents", nil, "", 1, "manager")
+		w := docRequest(h.List, http.MethodGet, "/issues/1/documents?search=report&status=approved", "/issues/:id/documents", nil, "", 1, "manager")
 
 		assert.Equal(t, http.StatusOK, w.Code)
 		docRepo.AssertExpectations(t)
@@ -171,11 +171,11 @@ func TestDocumentList(t *testing.T) {
 
 	t.Run("db_failure", func(t *testing.T) {
 		docRepo := &mockDocRepo{}
-		docRepo.On("ListByWorkspace", uint(1), "", "", 20, 0).Return(
+		docRepo.On("ListByIssue", uint(1), "", "", 20, 0).Return(
 			[]models.Document(nil), int64(0), errors.New("db error"),
 		)
 		h := newDocHandler(docRepo, &mockStorage{}, nil)
-		w := docRequest(h.List, http.MethodGet, "/workspaces/1/documents", "/workspaces/:id/documents", nil, "", 1, "manager")
+		w := docRequest(h.List, http.MethodGet, "/issues/1/documents", "/issues/:id/documents", nil, "", 1, "manager")
 
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
@@ -219,7 +219,7 @@ func TestDocumentGet(t *testing.T) {
 func TestDocumentUpload(t *testing.T) {
 	t.Run("no_file", func(t *testing.T) {
 		h := newDocHandler(&mockDocRepo{}, &mockStorage{}, nil)
-		w := docRequest(h.Upload, http.MethodPost, "/workspaces/1/documents", "/workspaces/:id/documents", nil, "", 1, "manager")
+		w := docRequest(h.Upload, http.MethodPost, "/issues/1/documents", "/issues/:id/documents", nil, "", 1, "manager")
 
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
@@ -241,7 +241,7 @@ func TestDocumentUpload(t *testing.T) {
 		h := newDocHandler(docRepo, storage, auditRepo)
 
 		body, contentType := createMultipartFile(t, "file", "test.pdf", "fake pdf content")
-		w := docRequest(h.Upload, http.MethodPost, "/workspaces/1/documents", "/workspaces/:id/documents", body, contentType, 1, "manager")
+		w := docRequest(h.Upload, http.MethodPost, "/issues/1/documents", "/issues/:id/documents", body, contentType, 1, "manager")
 
 		assert.Equal(t, http.StatusCreated, w.Code)
 		docRepo.AssertExpectations(t)
@@ -545,7 +545,7 @@ func TestDocumentUploadVersion(t *testing.T) {
 		storage := &mockStorage{}
 		auditRepo := &mockAuditRepo{}
 
-		doc := &models.Document{Name: "test.pdf", WorkspaceID: 1, Uploader: models.User{Name: "Alice"}}
+		doc := &models.Document{Name: "test.pdf", IssueID: 1, Uploader: models.User{Name: "Alice"}}
 		doc.ID = 1
 		docRepo.On("FindByID", uint(1)).Return(doc, nil)
 		docRepo.On("LatestVersionNumber", uint(1)).Return(1, nil)

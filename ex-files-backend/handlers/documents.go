@@ -32,7 +32,7 @@ func documentToProto(d *models.Document) *docsv1.Document {
 		Status:       string(d.Status),
 		UploaderId:   uint64(d.UploaderID),
 		UploaderName: d.Uploader.Name,
-		WorkspaceId:  uint64(d.WorkspaceID),
+		IssueId:      uint64(d.IssueID),
 		CreatedAt:    timestamppb.New(d.CreatedAt),
 		UpdatedAt:    timestamppb.New(d.UpdatedAt),
 	}
@@ -60,9 +60,9 @@ func versionToProto(v *models.DocumentVersion) *docsv1.DocumentVersion {
 
 func (h *DocumentHandler) Upload(c *gin.Context) {
 	userID, _ := c.Get("user_id")
-	wsID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	issueID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid workspace id"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid issue id"})
 		return
 	}
 
@@ -93,17 +93,17 @@ func (h *DocumentHandler) Upload(c *gin.Context) {
 		MimeType:    header.Header.Get("Content-Type"),
 		Size:        header.Size,
 		Hash:        hash,
-		Status:      models.DocumentStatusPending,
-		UploaderID:  userID.(uint),
-		WorkspaceID: uint(wsID),
+		Status:     models.DocumentStatusPending,
+		UploaderID: userID.(uint),
+		IssueID:    uint(issueID),
 	}
 	if err := h.Repo.Create(&doc); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create document"})
 		return
 	}
 
-	// Storage key: workspaces/<wsID>/documents/<docID>/v1/<filename>
-	storageKey := fmt.Sprintf("workspaces/%d/documents/%d/v1/%s", wsID, doc.ID, header.Filename)
+	// Storage key: issues/<issueID>/documents/<docID>/v1/<filename>
+	storageKey := fmt.Sprintf("issues/%d/documents/%d/v1/%s", issueID, doc.ID, header.Filename)
 
 	if err := h.Storage.Upload(c.Request.Context(), storageKey, file, header.Size, doc.MimeType); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to upload file"})
@@ -125,9 +125,9 @@ func (h *DocumentHandler) Upload(c *gin.Context) {
 	}
 
 	logAudit(h.Audit, models.AuditActionDocumentUploaded, userID.(uint), uintPtr(doc.ID), "document", map[string]any{
-		"name":         doc.Name,
-		"hash":         hash,
-		"workspace_id": wsID,
+		"name":     doc.Name,
+		"hash":     hash,
+		"issue_id": issueID,
 	})
 
 	// Reload doc to get uploader preloaded
@@ -192,7 +192,7 @@ func (h *DocumentHandler) UploadVersion(c *gin.Context) {
 	}
 	newVersion := latestVersion + 1
 
-	storageKey := fmt.Sprintf("workspaces/%d/documents/%d/v%d/%s", doc.WorkspaceID, doc.ID, newVersion, header.Filename)
+	storageKey := fmt.Sprintf("issues/%d/documents/%d/v%d/%s", doc.IssueID, doc.ID, newVersion, header.Filename)
 
 	if err := h.Storage.Upload(c.Request.Context(), storageKey, file, header.Size, header.Header.Get("Content-Type")); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to upload file"})
@@ -233,9 +233,9 @@ func (h *DocumentHandler) UploadVersion(c *gin.Context) {
 }
 
 func (h *DocumentHandler) List(c *gin.Context) {
-	wsID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	issueID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid workspace id"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid issue id"})
 		return
 	}
 
@@ -244,7 +244,7 @@ func (h *DocumentHandler) List(c *gin.Context) {
 	search := c.Query("search")
 	status := c.Query("status")
 
-	docs, total, err := h.Repo.ListByWorkspace(uint(wsID), search, status, perPage, offset)
+	docs, total, err := h.Repo.ListByIssue(uint(issueID), search, status, perPage, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch documents"})
 		return

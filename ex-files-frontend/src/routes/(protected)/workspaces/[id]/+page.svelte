@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { goto, invalidateAll } from '$app/navigation';
-	import { getWorkspaceDetail, getMe, getSystemUsers, getDocuments } from '$lib/data.remote';
+	import { getWorkspaceDetail, getMe, getSystemUsers, getIssues } from '$lib/data.remote';
 	import { protoTsToDate, roleName } from '$lib/proto-utils';
 	import {
 		updateWorkspace,
@@ -27,9 +27,6 @@
 		Calendar,
 		Crown,
 		FileText,
-		Search,
-		ChevronLeft,
-		ChevronRight,
 		ArrowRight
 	} from '@lucide/svelte';
 	import type { Timestamp } from '@bufbuild/protobuf/wkt';
@@ -56,22 +53,9 @@
 	const manager = $derived(detail?.manager);
 	const members = $derived(detail?.members ?? []);
 
-	// Documents — encode all params into a single query string for the unchecked query
-	const docPage = Number(page.url.searchParams.get('doc_page') ?? '1');
-	const docSearch = page.url.searchParams.get('doc_search') ?? '';
-	const docStatus = page.url.searchParams.get('doc_status') ?? '';
-	function buildQS(parts: Record<string, string>): string {
-		return Object.entries(parts)
-			.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
-			.join('&');
-	}
-	const docParts: Record<string, string> = { page: String(docPage) };
-	if (docSearch) docParts.search = docSearch;
-	if (docStatus) docParts.status = docStatus;
-	const documentsQuery = getDocuments(`${wsId}?${buildQS(docParts)}`);
-	const docsData = $derived(documentsQuery.current);
-	const documents = $derived(docsData?.documents ?? []);
-	const docTotalPages = $derived(docsData?.totalPages ?? 1);
+	// Issues
+	const issuesQuery = getIssues(wsId);
+	const issuesList = $derived(issuesQuery.current ?? []);
 
 	// Users (for add-member picker)
 	const usersQuery = getSystemUsers();
@@ -106,53 +90,11 @@
 		)
 	);
 
-	// Document search state (local – triggers URL navigation on submit)
-	let searchInput = $state(docSearch);
-	let uploading = $state(false);
-	let uploadError = $state('');
 
 	function formatDate(ts?: Timestamp): string {
 		const d = protoTsToDate(ts);
 		if (!d) return '—';
 		return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-	}
-
-	function formatSize(bytes: number): string {
-		if (bytes < 1024) return `${bytes} B`;
-		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-	}
-
-	function statusVariant(status: string): string {
-		switch (status) {
-			case 'approved':
-				return 'bg-emerald-100 text-emerald-700';
-			case 'rejected':
-				return 'bg-red-100 text-red-700';
-			case 'in_review':
-				return 'bg-blue-100 text-blue-700';
-			case 'changes_requested':
-				return 'bg-amber-100 text-amber-700';
-			default:
-				return 'bg-muted text-muted-foreground';
-		}
-	}
-
-	function statusLabel(status: string): string {
-		switch (status) {
-			case 'pending':
-				return m.status_pending();
-			case 'in_review':
-				return m.status_in_review();
-			case 'changes_requested':
-				return m.status_changes_requested();
-			case 'approved':
-				return m.status_approved();
-			case 'rejected':
-				return m.status_rejected();
-			default:
-				return status.charAt(0).toUpperCase() + status.slice(1);
-		}
 	}
 
 	function initials(name: string): string {
@@ -162,34 +104,6 @@
 			.join('')
 			.toUpperCase()
 			.slice(0, 2);
-	}
-
-	function navigateDocPage(p: number) {
-		const url = new URL(page.url);
-		url.searchParams.set('doc_page', String(p));
-		goto(url.toString());
-	}
-
-	function applyDocSearch() {
-		const url = new URL(page.url);
-		url.searchParams.set('doc_page', '1');
-		if (searchInput.trim()) {
-			url.searchParams.set('doc_search', searchInput.trim());
-		} else {
-			url.searchParams.delete('doc_search');
-		}
-		goto(url.toString());
-	}
-
-	function applyStatusFilter(status: string) {
-		const url = new URL(page.url);
-		url.searchParams.set('doc_page', '1');
-		if (status) {
-			url.searchParams.set('doc_status', status);
-		} else {
-			url.searchParams.delete('doc_status');
-		}
-		goto(url.toString());
 	}
 
 	function openEdit() {
@@ -319,15 +233,15 @@
 			</Card.Header>
 		</Card.Root>
 
-		<!-- Tabbed content: Documents / Members -->
-		<Tabs.Root value="documents">
+		<!-- Tabbed content: Issues / Members -->
+		<Tabs.Root value="issues">
 			<Tabs.List>
-				<Tabs.Trigger value="documents">
+				<Tabs.Trigger value="issues">
 					<FileText class="mr-1.5 size-3.5" />
-					{m.ws_documents_tab()}
-					{#if docsData && docsData.total > 0}
+					{m.ws_issues_tab()}
+					{#if issuesList.length > 0}
 						<span class="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold">
-							{docsData.total}
+							{issuesList.length}
 						</span>
 					{/if}
 				</Tabs.Trigger>
@@ -342,88 +256,43 @@
 				</Tabs.Trigger>
 			</Tabs.List>
 
-			<!-- Documents tab -->
-			<Tabs.Content value="documents" class="mt-4 flex flex-col gap-4">
-				<!-- Search + filter -->
-				<div class="flex flex-wrap items-center gap-2">
-					<form
-						class="flex flex-1 items-center gap-2"
-						onsubmit={(e) => {
-							e.preventDefault();
-							applyDocSearch();
-						}}
-					>
-						<div class="relative min-w-48 flex-1">
-							<Search
-								class="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
-							/>
-							<Input placeholder={m.ws_search_documents()} class="pl-8" bind:value={searchInput} />
-						</div>
-						<Button type="submit" size="sm" variant="secondary">{m.common_search()}</Button>
-						{#if docSearch}
-							<Button
-								type="button"
-								size="sm"
-								variant="ghost"
-								onclick={() => {
-									searchInput = '';
-									applyDocSearch();
-								}}
-							>
-								{m.common_clear()}
-							</Button>
-						{/if}
-					</form>
-					<!-- Status filter -->
-					<div class="flex gap-1">
-						{#each [['', m.ws_filter_all()], ['pending', m.status_pending()], ['in_review', m.status_in_review()], ['approved', m.status_approved()], ['rejected', m.status_rejected()]] as [val, label] (val)}
-							<Button
-								variant={docStatus === val ? 'default' : 'outline'}
-								size="sm"
-								class="h-8 text-xs"
-								onclick={() => applyStatusFilter(val)}
-							>
-								{label}
-							</Button>
-						{/each}
-					</div>
-				</div>
-
-				<!-- Document list -->
-				{#if documents.length === 0}
+			<!-- Issues tab -->
+			<Tabs.Content value="issues" class="mt-4 flex flex-col gap-4">
+				{#if issuesList.length === 0}
 					<Card.Root class="flex flex-col items-center justify-center py-12 text-center">
 						<Card.Content>
 							<FileText class="mx-auto mb-3 size-8 text-muted-foreground/40" />
-							<p class="text-sm font-medium">{m.ws_no_documents()}</p>
-							<p class="mt-1 text-xs text-muted-foreground">{m.ws_no_documents_hint()}</p>
+							<p class="text-sm font-medium">{m.ws_no_issues()}</p>
+							<p class="mt-1 text-xs text-muted-foreground">{m.ws_no_issues_hint()}</p>
 						</Card.Content>
 					</Card.Root>
 				{:else}
 					<div class="flex flex-col gap-2">
-						{#each documents as doc (doc.id)}
+						{#each issuesList as issue (issue.id)}
 							<Card.Root class="transition-shadow hover:shadow-sm">
 								<Card.Content class="flex items-center gap-3 py-3">
 									<FileText class="size-8 shrink-0 text-muted-foreground/60" />
 									<div class="min-w-0 flex-1">
-										<p class="truncate text-sm font-medium">{doc.name}</p>
-										<div
-											class="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
-										>
-											<span>{formatSize(Number(doc.size))}</span>
-											<span>·</span>
-											<span>{doc.uploaderName}</span>
-											<span>·</span>
-											<span>{formatDate(doc.createdAt)}</span>
-										</div>
+										<p class="truncate text-sm font-medium">{issue.title}</p>
+										{#if issue.description}
+											<p class="mt-0.5 truncate text-xs text-muted-foreground">
+												{issue.description}
+											</p>
+										{/if}
 									</div>
-									<Badge variant="secondary" class="shrink-0 text-xs {statusVariant(doc.status)}">
-										{statusLabel(doc.status)}
+									<Badge
+										variant="secondary"
+										class="shrink-0 text-xs {issue.resolved
+											? 'bg-emerald-100 text-emerald-700'
+											: 'bg-blue-100 text-blue-700'}"
+									>
+										{issue.resolved ? m.issue_resolved() : m.issue_open()}
 									</Badge>
 									<Button
 										variant="ghost"
 										size="sm"
 										class="shrink-0 gap-1"
-										href="/workspaces/{wsId}/documents/{doc.id}"
+										href="/workspaces/{wsId}/issues/{issue.id}"
 									>
 										{m.common_view()}
 										<ArrowRight class="size-3.5" />
@@ -432,42 +301,6 @@
 							</Card.Root>
 						{/each}
 					</div>
-
-					<!-- Upload zone (below documents) -->
-					{#if uploading}
-						<p class="text-center text-sm text-muted-foreground">{m.common_uploading()}</p>
-					{/if}
-					{#if uploadError}
-						<p class="text-center text-sm text-destructive">{uploadError}</p>
-					{/if}
-
-					{#if docTotalPages > 1}
-						<div class="flex items-center justify-center gap-2">
-							<Button
-								variant="outline"
-								size="sm"
-								class="gap-1"
-								disabled={docPage <= 1}
-								onclick={() => navigateDocPage(docPage - 1)}
-							>
-								<ChevronLeft class="size-4" />
-								{m.common_prev()}
-							</Button>
-							<span class="text-sm text-muted-foreground">
-								{m.common_page_of({ current: String(docPage), total: String(docTotalPages) })}
-							</span>
-							<Button
-								variant="outline"
-								size="sm"
-								class="gap-1"
-								disabled={docPage >= docTotalPages}
-								onclick={() => navigateDocPage(docPage + 1)}
-							>
-								{m.common_next()}
-								<ChevronRight class="size-4" />
-							</Button>
-						</div>
-					{/if}
 				{/if}
 			</Tabs.Content>
 

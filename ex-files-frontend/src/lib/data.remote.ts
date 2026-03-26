@@ -2,10 +2,10 @@ import { query, getRequestEvent } from '$app/server';
 import { env } from '$env/dynamic/private';
 import { fromBinary } from '@bufbuild/protobuf';
 import {
-	GetAssignmentsResponseSchema,
+	GetIssuesResponseSchema,
 	GetUsersResponseSchema,
-	GetAssignmentResponseSchema
-} from '$lib/gen/assignments/v1/assignments_pb';
+	GetIssueResponseSchema
+} from '$lib/gen/issues/v1/issues_pb';
 import { MeResponseSchema } from '$lib/gen/auth/v1/auth_pb';
 import {
 	GetWorkspacesResponseSchema,
@@ -67,19 +67,19 @@ export const getUsers = query(async () => {
 	return r.users;
 });
 
-export const getAssignments = query(async () => {
+export const getIssues = query('unchecked', async (workspaceId: string) => {
 	const { fetch } = getRequestEvent();
-	const bytes = await fetchProto(`${BACKEND}/assignments`, fetch);
+	const bytes = await fetchProto(`${BACKEND}/workspaces/${workspaceId}/issues`, fetch);
 	if (!bytes) return [];
-	const r = fromBinary(GetAssignmentsResponseSchema, bytes);
-	return r.assignments;
+	const r = fromBinary(GetIssuesResponseSchema, bytes);
+	return r.issues;
 });
 
-export const getAssignment = query('unchecked', async (id: string) => {
+export const getIssue = query('unchecked', async (id: string) => {
 	const { fetch } = getRequestEvent();
-	const bytes = await fetchProto(`${BACKEND}/assignments/${id}`, fetch);
+	const bytes = await fetchProto(`${BACKEND}/issues/${id}`, fetch);
 	if (!bytes) return null;
-	return fromBinary(GetAssignmentResponseSchema, bytes);
+	return fromBinary(GetIssueResponseSchema, bytes);
 });
 
 // ---------------------------------------------------------------------------
@@ -122,13 +122,13 @@ export const getSystemUsers = query(async () => {
 
 export const getDocuments = query('unchecked', async (queryStr: string) => {
 	const sep = queryStr.indexOf('?');
-	const wsId = sep === -1 ? queryStr : queryStr.slice(0, sep);
+	const issueId = sep === -1 ? queryStr : queryStr.slice(0, sep);
 	const qs = sep === -1 ? '' : queryStr.slice(sep + 1);
 	const sp = new URLSearchParams(qs);
 	if (!sp.has('page')) sp.set('page', '1');
 	if (!sp.has('per_page')) sp.set('per_page', '20');
 	const { fetch } = getRequestEvent();
-	const res = await safeFetch(`${BACKEND}/workspaces/${wsId}/documents?${sp}`, fetch);
+	const res = await safeFetch(`${BACKEND}/issues/${issueId}/documents?${sp}`, fetch);
 	if (!res || !res.ok) return { documents: [] as never[], ...paginationFromHeaders(res) };
 	const bytes = new Uint8Array(await res.arrayBuffer());
 	const r = fromBinary(ListDocumentsResponseSchema, bytes);

@@ -22,11 +22,11 @@ func (r *GormDocumentRepository) FindByID(id uint) (*models.Document, error) {
 	return &doc, nil
 }
 
-func (r *GormDocumentRepository) ListByWorkspace(workspaceID uint, search, status string, limit, offset int) ([]models.Document, int64, error) {
+func (r *GormDocumentRepository) ListByIssue(issueID uint, search, status string, limit, offset int) ([]models.Document, int64, error) {
 	var docs []models.Document
 	var total int64
 
-	q := r.DB.Model(&models.Document{}).Where("workspace_id = ?", workspaceID)
+	q := r.DB.Model(&models.Document{}).Where("issue_id = ?", issueID)
 
 	if search != "" {
 		q = q.Where("name ILIKE ?", "%"+search+"%")

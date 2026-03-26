@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { workbenchStore } from '$lib/stores/workbench.svelte';
-	import { getAssignment } from '$lib/data.remote';
+	import { getIssue } from '$lib/data.remote';
 	import { protoTsToDate } from '$lib/proto-utils';
 	import { m } from '$lib/paraglide/messages.js';
 	import UploadZone from '$lib/components/pdf/UploadZone.svelte';
@@ -14,8 +14,8 @@
 	import * as ScrollArea from '$lib/components/ui/scroll-area/index.js';
 	import { ChevronRight, ChevronLeft, Upload, MessageSquare, Clock, Info } from '@lucide/svelte';
 
-	const workbenchQuery = getAssignment('1');
-	const assignment = $derived(workbenchQuery.current?.assignment);
+	const workbenchQuery = getIssue('1');
+	const issue = $derived(workbenchQuery.current?.issue);
 	const user = $derived(workbenchQuery.current?.user);
 
 	let currentPage = $state(0);
@@ -94,8 +94,8 @@
 	}
 
 	const dl = $derived.by(() => {
-		if (!assignment || assignment.resolved || !assignment.deadline) return null;
-		const d = protoTsToDate(assignment.deadline);
+		if (!issue || issue.resolved || !issue.deadline) return null;
+		const d = protoTsToDate(issue.deadline);
 		return d ? deadlineChip(d) : null;
 	});
 </script>
@@ -104,7 +104,7 @@
 	<title>{m.workbench_page_title()}</title>
 </svelte:head>
 
-{#if assignment}
+{#if issue}
 	<div class="flex flex-1 overflow-hidden">
 		<!-- Left Sidebar -->
 		<aside
@@ -145,17 +145,17 @@
 					</Button>
 				</div>
 			{:else}
-				<!-- Assignment info -->
+				<!-- Issue info -->
 				<div class="border-b px-3 py-3">
 					<div class="space-y-1.5 rounded-lg border bg-muted/40 px-3 py-2.5">
 						{#if user}
 							<p class="truncate text-[10px] font-medium text-muted-foreground">{user.name}</p>
 						{/if}
 						<h2 class="line-clamp-2 text-sm leading-snug font-semibold">
-							{assignment.title}
+							{issue.title}
 						</h2>
 						<p class="line-clamp-3 text-xs leading-relaxed text-muted-foreground">
-							{assignment.description}
+							{issue.description}
 						</p>
 					</div>
 				</div>
@@ -244,8 +244,8 @@
 				<!-- Upload State -->
 				<div class="flex flex-1 flex-col items-center justify-center gap-6 p-8">
 					<div class="text-center">
-						<h2 class="text-xl font-semibold">{assignment.title}</h2>
-						<p class="mt-1 text-sm text-muted-foreground">{assignment.description}</p>
+						<h2 class="text-xl font-semibold">{issue.title}</h2>
+						<p class="mt-1 text-sm text-muted-foreground">{issue.description}</p>
 					</div>
 					<div class="w-full max-w-lg">
 						<UploadZone onupload={handleUpload} />
@@ -388,14 +388,14 @@
 	<Dialog.Root bind:open={detailsOpen}>
 		<Dialog.Content class="max-w-lg">
 			<Dialog.Header>
-				<Dialog.Title>{assignment.title}</Dialog.Title>
-				<Dialog.Description>{m.workbench_assignment_details()}</Dialog.Description>
+				<Dialog.Title>{issue.title}</Dialog.Title>
+				<Dialog.Description>{m.workbench_issue_details()}</Dialog.Description>
 			</Dialog.Header>
 
 			<div class="space-y-4 py-2">
 				<section>
 					<h3 class="mb-2 text-xs font-semibold text-muted-foreground">{m.workbench_instructions()}</h3>
-					<p class="text-sm leading-relaxed">{assignment.description}</p>
+					<p class="text-sm leading-relaxed">{issue.description}</p>
 					<p class="mt-2 text-sm leading-relaxed text-muted-foreground">
 						{m.workbench_instructions_text()}
 					</p>

@@ -97,11 +97,10 @@
 	"ws_delete_title": "Delete Workspace",
 	"ws_delete_confirm": "Are you sure you want to delete {name}? This action cannot be undone.",
 
-	"ws_documents_tab": "Documents",
+	"ws_issues_tab": "Issues",
 	"ws_members_tab": "Members",
-	"ws_search_documents": "Search documents…",
-	"ws_no_documents": "No documents yet",
-	"ws_no_documents_hint": "Upload a PDF to get started.",
+	"ws_no_issues": "No issues yet",
+	"ws_no_issues_hint": "Create an issue to start organizing documents.",
 	"ws_members_heading": "Members",
 	"ws_member_count": "{count} member",
 	"ws_members_count": "{count} members",
@@ -196,7 +195,7 @@
 	"workbench_no_submissions": "No submissions yet",
 	"workbench_upload_submission": "Upload submission",
 	"workbench_details": "Details",
-	"workbench_assignment_details": "Assignment details",
+	"workbench_issue_details": "Issue details",
 	"workbench_instructions": "Instructions",
 	"workbench_instructions_text": "Please ensure your submission follows the formatting guidelines. Your work must be original and properly cited. Late submissions will be penalised unless an extension has been granted in advance.",
 	"workbench_overdue": "Overdue",
@@ -227,6 +226,9 @@
 	"pdf_zoom_in": "Zoom In",
 	"pdf_page_back": "Go One Page Back",
 	"pdf_page_forward": "Go One Page Forward",
+
+	"issue_open": "Open",
+	"issue_resolved": "Resolved",
 
 	"lang_switch": "Language"
 }
