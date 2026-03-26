@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { register } from '$lib/commands.remote';
 	import { FileCheck2 } from '@lucide/svelte';
 	import * as Card from '$lib/components/ui/card/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -16,14 +17,9 @@
 		loading = true;
 		error = null;
 		try {
-			const res = await fetch('/api/auth/register', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ name, email, password })
-			});
-			if (!res.ok) {
-				const body = await res.json().catch(() => ({}));
-				error = body.error ?? 'Registration failed. Please try again.';
+			const result = await register({ name, email, password });
+			if (!result.ok) {
+				error = result.error ?? 'Registration failed. Please try again.';
 			} else {
 				window.location.href = '/';
 			}

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { workbenchStore } from '$lib/stores/workbench.svelte';
 	import { getAssignment } from '$lib/data.remote';
+	import { protoTsToDate } from '$lib/proto-utils';
 	import UploadZone from '$lib/components/pdf/UploadZone.svelte';
 	import PdfViewer from '$lib/components/pdf/PdfViewer.svelte';
 	import CommentPanel from '$lib/components/pdf/CommentPanel.svelte';
@@ -12,7 +13,7 @@
 	import * as ScrollArea from '$lib/components/ui/scroll-area/index.js';
 	import { ChevronRight, ChevronLeft, Upload, MessageSquare, Clock, Info } from '@lucide/svelte';
 
-	const workbenchQuery = getAssignment('a1');
+	const workbenchQuery = getAssignment('1');
 	const assignment = $derived(workbenchQuery.current?.assignment);
 	const user = $derived(workbenchQuery.current?.user);
 
@@ -75,8 +76,8 @@
 		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 	}
 
-	function deadlineChip(iso: string) {
-		const h = (new Date(iso).getTime() - Date.now()) / 3_600_000;
+	function deadlineChip(d: Date) {
+		const h = (d.getTime() - Date.now()) / 3_600_000;
 		if (h < 0) return { label: 'Overdue', cls: 'border-red-200 bg-red-50 text-red-600' };
 		if (h < 24)
 			return { label: `${Math.round(h)}h left`, cls: 'border-red-200 bg-red-50 text-red-600' };
@@ -86,16 +87,16 @@
 				cls: 'border-amber-200 bg-amber-50 text-amber-700'
 			};
 		return {
-			label: new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+			label: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
 			cls: 'border-border bg-muted/40 text-muted-foreground'
 		};
 	}
 
-	const dl = $derived(
-		assignment && !assignment.resolved && assignment.deadline
-			? deadlineChip(assignment.deadline)
-			: null
-	);
+	const dl = $derived.by(() => {
+		if (!assignment || assignment.resolved || !assignment.deadline) return null;
+		const d = protoTsToDate(assignment.deadline);
+		return d ? deadlineChip(d) : null;
+	});
 </script>
 
 <svelte:head>

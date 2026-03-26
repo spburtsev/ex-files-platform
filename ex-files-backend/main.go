@@ -33,7 +33,7 @@ func main() {
 		log.Fatal("failed to connect to database:", err)
 	}
 
-	if err := db.AutoMigrate(&models.User{}, &models.Workspace{}, &models.WorkspaceMember{}, &models.AuditEntry{}, &models.Document{}, &models.DocumentVersion{}); err != nil {
+	if err := db.AutoMigrate(&models.User{}, &models.Workspace{}, &models.WorkspaceMember{}, &models.AuditEntry{}, &models.Document{}, &models.DocumentVersion{}, &models.Assignment{}); err != nil {
 		log.Fatal("auto-migrate failed:", err)
 	}
 
@@ -84,7 +84,8 @@ func main() {
 		AllowCredentials: true,
 	}))
 
-	assignments := &handlers.AssignmentsHandler{}
+	assignmentRepo := &services.GormAssignmentRepository{DB: db}
+	assignments := &handlers.AssignmentsHandler{Repo: assignmentRepo, UserRepo: repo}
 	router.GET("/users", assignments.GetUsers)
 	router.GET("/assignments", assignments.GetAssignments)
 	router.GET("/assignments/:id", assignments.GetAssignment)
@@ -95,6 +96,7 @@ func main() {
 		authRoutes.POST("/login", auth.Login)
 		authRoutes.POST("/logout", auth.Logout)
 		authRoutes.GET("/me", middleware.AuthMiddleware(ts), auth.Me)
+		authRoutes.GET("/users", middleware.AuthMiddleware(ts), auth.ListUsers)
 	}
 
 	workspaceRoutes := router.Group("/workspaces", middleware.AuthMiddleware(ts))

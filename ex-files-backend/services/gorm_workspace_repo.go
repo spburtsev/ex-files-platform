@@ -61,6 +61,19 @@ func (r *GormWorkspaceRepository) Delete(id uint) error {
 }
 
 func (r *GormWorkspaceRepository) AddMember(member *models.WorkspaceMember) error {
+	// Check for a soft-deleted record and restore it instead of inserting a duplicate.
+	var existing models.WorkspaceMember
+	err := r.DB.Unscoped().
+		Where("workspace_id = ? AND user_id = ?", member.WorkspaceID, member.UserID).
+		First(&existing).Error
+	if err == nil && existing.DeletedAt.Valid {
+		// Restore the soft-deleted row
+		member.ID = existing.ID
+		return r.DB.Unscoped().Model(member).Updates(map[string]any{
+			"deleted_at": nil,
+			"updated_at": gorm.Expr("NOW()"),
+		}).Error
+	}
 	return r.DB.Create(member).Error
 }
 

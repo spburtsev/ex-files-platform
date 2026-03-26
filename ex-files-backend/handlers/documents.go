@@ -137,7 +137,7 @@ func (h *DocumentHandler) Upload(c *gin.Context) {
 		doc = *loadedDoc
 	}
 
-	c.JSON(http.StatusCreated, &docsv1.UploadDocumentResponse{
+	protobufResponse(c, http.StatusCreated, &docsv1.UploadDocumentResponse{
 		Document: documentToProto(&doc),
 		Version: &docsv1.DocumentVersion{
 			Id:         uint64(version.ID),
@@ -217,7 +217,7 @@ func (h *DocumentHandler) UploadVersion(c *gin.Context) {
 		"hash":    hash,
 	})
 
-	c.JSON(http.StatusCreated, &docsv1.UploadDocumentResponse{
+	protobufResponse(c, http.StatusCreated, &docsv1.UploadDocumentResponse{
 		Document: documentToProto(doc),
 		Version: &docsv1.DocumentVersion{
 			Id:         uint64(version.ID),
@@ -257,7 +257,7 @@ func (h *DocumentHandler) List(c *gin.Context) {
 		pbDocs[i] = documentToProto(&docs[i])
 	}
 
-	c.JSON(http.StatusOK, &docsv1.ListDocumentsResponse{
+	protobufResponse(c, http.StatusOK, &docsv1.ListDocumentsResponse{
 		Documents: pbDocs,
 	})
 }
@@ -286,7 +286,7 @@ func (h *DocumentHandler) Get(c *gin.Context) {
 		pbVersions[i] = versionToProto(&versions[i])
 	}
 
-	c.JSON(http.StatusOK, &docsv1.GetDocumentResponse{
+	protobufResponse(c, http.StatusOK, &docsv1.GetDocumentResponse{
 		Document: &docsv1.DocumentDetail{
 			Document: documentToProto(doc),
 			Versions: pbVersions,
@@ -313,7 +313,7 @@ func (h *DocumentHandler) Download(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, &docsv1.GetDownloadURLResponse{
+	protobufResponse(c, http.StatusOK, &docsv1.GetDownloadURLResponse{
 		Url: url,
 	})
 }
@@ -355,7 +355,7 @@ func (h *DocumentHandler) Submit(c *gin.Context) {
 		"document_id": doc.ID,
 	})
 
-	c.JSON(http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
+	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
 }
 
 // AssignReviewer sets the reviewer for a document. Only managers and root users may do this.
@@ -397,7 +397,7 @@ func (h *DocumentHandler) AssignReviewer(c *gin.Context) {
 		"reviewer_id": body.ReviewerID,
 	})
 
-	c.JSON(http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
+	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
 }
 
 // canReview returns true if the caller is the assigned reviewer, a manager, or root.
@@ -444,7 +444,7 @@ func (h *DocumentHandler) Approve(c *gin.Context) {
 		"document_id": doc.ID,
 	})
 
-	c.JSON(http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
+	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
 }
 
 // Reject transitions a document from in_review → rejected.
@@ -490,7 +490,7 @@ func (h *DocumentHandler) Reject(c *gin.Context) {
 		"note":        body.Note,
 	})
 
-	c.JSON(http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
+	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
 }
 
 // RequestChanges transitions a document from in_review → changes_requested.
@@ -536,7 +536,7 @@ func (h *DocumentHandler) RequestChanges(c *gin.Context) {
 		"note":        body.Note,
 	})
 
-	c.JSON(http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
+	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
 }
 
 // Resubmit transitions a document from changes_requested → in_review.
@@ -577,7 +577,7 @@ func (h *DocumentHandler) Resubmit(c *gin.Context) {
 		"resubmit":    true,
 	})
 
-	c.JSON(http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
+	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
 }
 
 func (h *DocumentHandler) Delete(c *gin.Context) {
@@ -604,7 +604,7 @@ func (h *DocumentHandler) Delete(c *gin.Context) {
 		"action": "deleted",
 	})
 
-	c.JSON(http.StatusOK, &docsv1.DeleteDocumentResponse{
+	protobufResponse(c, http.StatusOK, &docsv1.DeleteDocumentResponse{
 		Message: "document deleted",
 	})
 }

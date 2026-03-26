@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { login } from '$lib/commands.remote';
 	import { FileCheck2 } from '@lucide/svelte';
 	import * as Card from '$lib/components/ui/card/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -15,14 +16,9 @@
 		loading = true;
 		error = null;
 		try {
-			const res = await fetch('/api/auth/login', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ email, password })
-			});
-			if (!res.ok) {
-				const body = await res.json().catch(() => ({}));
-				error = body.error ?? 'Invalid email or password.';
+			const result = await login({ email, password });
+			if (!result.ok) {
+				error = result.error ?? 'Invalid email or password.';
 			} else {
 				window.location.href = '/';
 			}

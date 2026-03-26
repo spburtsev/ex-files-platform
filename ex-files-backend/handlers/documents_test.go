@@ -3,7 +3,6 @@ package handlers_test
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"mime/multipart"
@@ -16,8 +15,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 	"gorm.io/gorm"
 
+	docsv1 "github.com/spburtsev/ex-files-backend/gen/documents/v1"
 	"github.com/spburtsev/ex-files-backend/handlers"
 	"github.com/spburtsev/ex-files-backend/models"
 )
@@ -150,10 +151,9 @@ func TestDocumentList(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, "2", w.Header().Get("X-Total-Count"))
 
-		var resp map[string]any
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		docList := resp["documents"].([]any)
-		assert.Len(t, docList, 2)
+		var resp docsv1.ListDocumentsResponse
+		require.NoError(t, proto.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Len(t, resp.Documents, 2)
 		docRepo.AssertExpectations(t)
 	})
 
@@ -205,12 +205,11 @@ func TestDocumentGet(t *testing.T) {
 		w := docRequest(h.Get, http.MethodGet, "/documents/1", "/documents/:id", nil, "", 1, "manager")
 
 		assert.Equal(t, http.StatusOK, w.Code)
-		var resp map[string]any
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		detail := resp["document"].(map[string]any)
-		assert.NotNil(t, detail["document"])
-		versions := detail["versions"].([]any)
-		assert.Len(t, versions, 1)
+		var resp docsv1.GetDocumentResponse
+		require.NoError(t, proto.Unmarshal(w.Body.Bytes(), &resp))
+		require.NotNil(t, resp.Document)
+		assert.NotNil(t, resp.Document.Document)
+		assert.Len(t, resp.Document.Versions, 1)
 		docRepo.AssertExpectations(t)
 	})
 }
@@ -274,9 +273,9 @@ func TestDocumentDownload(t *testing.T) {
 		w := docRequest(h.Download, http.MethodGet, "/documents/1/versions/1/download", "/documents/:id/versions/:versionId/download", nil, "", 1, "manager")
 
 		assert.Equal(t, http.StatusOK, w.Code)
-		var resp map[string]any
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		assert.Contains(t, resp["url"], "signed-url")
+		var resp docsv1.GetDownloadURLResponse
+		require.NoError(t, proto.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Contains(t, resp.Url, "signed-url")
 		docRepo.AssertExpectations(t)
 		storage.AssertExpectations(t)
 	})
@@ -396,10 +395,10 @@ func TestDocumentApprove(t *testing.T) {
 		w := docRequest(h.Approve, http.MethodPost, "/documents/1/approve", "/documents/:id/approve", nil, "", 1, "manager")
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		var resp map[string]any
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		docData := resp["document"].(map[string]any)
-		assert.Equal(t, "approved", docData["status"])
+		var resp docsv1.UpdateDocumentResponse
+		require.NoError(t, proto.Unmarshal(w.Body.Bytes(), &resp))
+		require.NotNil(t, resp.Document)
+		assert.Equal(t, "approved", resp.Document.Status)
 		docRepo.AssertExpectations(t)
 	})
 
@@ -436,10 +435,10 @@ func TestDocumentReject(t *testing.T) {
 		w := docRequest(h.Reject, http.MethodPost, "/documents/1/reject", "/documents/:id/reject", body, "application/json", 1, "manager")
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		var resp map[string]any
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		docData := resp["document"].(map[string]any)
-		assert.Equal(t, "rejected", docData["status"])
+		var resp docsv1.UpdateDocumentResponse
+		require.NoError(t, proto.Unmarshal(w.Body.Bytes(), &resp))
+		require.NotNil(t, resp.Document)
+		assert.Equal(t, "rejected", resp.Document.Status)
 		docRepo.AssertExpectations(t)
 	})
 }
@@ -461,10 +460,10 @@ func TestDocumentRequestChanges(t *testing.T) {
 		w := docRequest(h.RequestChanges, http.MethodPost, "/documents/1/request-changes", "/documents/:id/request-changes", body, "application/json", 1, "manager")
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		var resp map[string]any
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		docData := resp["document"].(map[string]any)
-		assert.Equal(t, "changes_requested", docData["status"])
+		var resp docsv1.UpdateDocumentResponse
+		require.NoError(t, proto.Unmarshal(w.Body.Bytes(), &resp))
+		require.NotNil(t, resp.Document)
+		assert.Equal(t, "changes_requested", resp.Document.Status)
 		docRepo.AssertExpectations(t)
 	})
 }
@@ -494,10 +493,10 @@ func TestDocumentResubmit(t *testing.T) {
 		w := docRequest(h.Resubmit, http.MethodPost, "/documents/1/resubmit", "/documents/:id/resubmit", nil, "", 1, "employee")
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		var resp map[string]any
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		docData := resp["document"].(map[string]any)
-		assert.Equal(t, "in_review", docData["status"])
+		var resp docsv1.UpdateDocumentResponse
+		require.NoError(t, proto.Unmarshal(w.Body.Bytes(), &resp))
+		require.NotNil(t, resp.Document)
+		assert.Equal(t, "in_review", resp.Document.Status)
 		docRepo.AssertExpectations(t)
 	})
 }

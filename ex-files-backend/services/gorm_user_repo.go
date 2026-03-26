@@ -29,3 +29,11 @@ func (r *GormUserRepository) FindByID(id uint) (*models.User, error) {
 func (r *GormUserRepository) Create(user *models.User) error {
 	return r.DB.Create(user).Error
 }
+
+func (r *GormUserRepository) ListAll() ([]models.User, error) {
+	var users []models.User
+	if err := r.DB.Find(&users).Error; err != nil {
+		return nil, err
+	}
+	return users, nil
+}

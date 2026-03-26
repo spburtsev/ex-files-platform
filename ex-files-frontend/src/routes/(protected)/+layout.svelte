@@ -4,6 +4,9 @@
 	import '../layout.css';
 	import favicon from '$lib/assets/favicon.svg';
 	import { getMe } from '$lib/data.remote';
+	import { logout } from '$lib/commands.remote';
+	import { isManager } from '$lib/proto-utils';
+	import { Skeleton } from '$lib/components/ui/skeleton/index.js';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import * as Avatar from '$lib/components/ui/avatar/index.js';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
@@ -20,11 +23,14 @@
 		FileCheck2,
 		ScrollText
 	} from '@lucide/svelte';
+	import { extraBreadcrumbs } from '$lib/stores/breadcrumbs';
 
 	let { children } = $props();
 
 	const meQuery = getMe();
-	const me = $derived(meQuery.current);
+	const meLoading = $derived(meQuery.current === undefined);
+	const me = $derived(meQuery.current?.user);
+	const meError = $derived(meQuery.current?.error);
 
 	const initials = $derived(
 		me?.name
@@ -108,78 +114,97 @@
 		<Sidebar.Footer>
 			<Sidebar.Menu>
 				<Sidebar.MenuItem>
-					<DropdownMenu.Root>
-						<DropdownMenu.Trigger>
-							{#snippet child({ props })}
-								<Sidebar.MenuButton size="lg" tooltipContent={me?.name ?? ''} {...props}>
-									<Avatar.Root class="h-8 w-8 rounded-lg">
-										<Avatar.Fallback
-											class="rounded-lg bg-primary text-xs font-semibold text-primary-foreground"
-										>
-											{initials}
-										</Avatar.Fallback>
-									</Avatar.Root>
-									<div class="grid flex-1 text-left text-xs leading-tight">
-										<span class="truncate font-semibold">{me?.name ?? ''}</span>
-										{#if me?.role === 'manager'}
-											<span class="text-muted-foreground">Manager</span>
-										{:else}
-											<span class="truncate text-muted-foreground">{me?.email ?? ''}</span>
-										{/if}
-									</div>
-									<ChevronsUpDown class="ml-auto size-4" />
-								</Sidebar.MenuButton>
-							{/snippet}
-						</DropdownMenu.Trigger>
-						<DropdownMenu.Content
-							class="w-[--bits-dropdown-menu-anchor-width] min-w-56 rounded-lg"
-							side="bottom"
-							align="end"
-							sideOffset={4}
-						>
-							<DropdownMenu.Label class="p-0 font-normal">
-								<div class="flex items-center gap-2 px-1 py-1.5 text-left text-xs">
-									<Avatar.Root class="h-8 w-8 rounded-lg">
-										<Avatar.Fallback
-											class="rounded-lg bg-primary text-xs font-semibold text-primary-foreground"
-										>
-											{initials}
-										</Avatar.Fallback>
-									</Avatar.Root>
-									<div class="grid flex-1 text-left leading-tight">
-										<div class="flex items-center gap-1.5">
-											<span class="truncate font-semibold">{me?.name}</span>
-											{#if me?.role === 'manager'}
-												<Badge variant="secondary" class="h-4 px-1 text-[10px] text-violet-700"
-													>Manager</Badge
-												>
+					{#if meLoading}
+						<div class="flex h-12 items-center gap-2 rounded-md px-2">
+							<Skeleton class="h-8 w-8 shrink-0 rounded-lg" />
+							<div class="grid flex-1 gap-1.5 group-data-[collapsible=icon]:hidden">
+								<Skeleton class="h-3.5 w-24 rounded" />
+								<Skeleton class="h-3 w-16 rounded" />
+							</div>
+						</div>
+					{:else if meError}
+						<div class="flex h-12 items-center gap-2 rounded-md px-2 text-destructive">
+							<div
+								class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-destructive/10 text-sm"
+							>
+								!
+							</div>
+							<span class="truncate text-xs group-data-[collapsible=icon]:hidden">Offline</span>
+						</div>
+					{:else}
+						<DropdownMenu.Root>
+							<DropdownMenu.Trigger>
+								{#snippet child({ props })}
+									<Sidebar.MenuButton size="lg" tooltipContent={me?.name ?? ''} {...props}>
+										<Avatar.Root class="h-8 w-8 rounded-lg">
+											<Avatar.Fallback
+												class="rounded-lg bg-primary text-xs font-semibold text-primary-foreground"
+											>
+												{initials}
+											</Avatar.Fallback>
+										</Avatar.Root>
+										<div class="grid flex-1 text-left text-xs leading-tight">
+											<span class="truncate font-semibold">{me?.name ?? ''}</span>
+											{#if isManager(me?.role)}
+												<span class="text-muted-foreground">Manager</span>
+											{:else}
+												<span class="truncate text-muted-foreground">{me?.email ?? ''}</span>
 											{/if}
 										</div>
-										<span class="truncate text-muted-foreground">{me?.email}</span>
-									</div>
-								</div>
-							</DropdownMenu.Label>
-							<DropdownMenu.Separator />
-							<DropdownMenu.Item>
-								{#snippet child({ props })}
-									<a href="/profile" {...props}>
-										<User class="size-4" />
-										Profile
-									</a>
+										<ChevronsUpDown class="ml-auto size-4" />
+									</Sidebar.MenuButton>
 								{/snippet}
-							</DropdownMenu.Item>
-							<DropdownMenu.Item
-								class="text-destructive focus:text-destructive"
-								onclick={async () => {
-									await fetch('/api/auth/logout', { method: 'POST' });
-									window.location.href = '/login';
-								}}
+							</DropdownMenu.Trigger>
+							<DropdownMenu.Content
+								class="w-[--bits-dropdown-menu-anchor-width] min-w-56 rounded-lg"
+								side="bottom"
+								align="end"
+								sideOffset={4}
 							>
-								<LogOut class="size-4" />
-								Log out
-							</DropdownMenu.Item>
-						</DropdownMenu.Content>
-					</DropdownMenu.Root>
+								<DropdownMenu.Label class="p-0 font-normal">
+									<div class="flex items-center gap-2 px-1 py-1.5 text-left text-xs">
+										<Avatar.Root class="h-8 w-8 rounded-lg">
+											<Avatar.Fallback
+												class="rounded-lg bg-primary text-xs font-semibold text-primary-foreground"
+											>
+												{initials}
+											</Avatar.Fallback>
+										</Avatar.Root>
+										<div class="grid flex-1 text-left leading-tight">
+											<div class="flex items-center gap-1.5">
+												<span class="truncate font-semibold">{me?.name}</span>
+												{#if isManager(me?.role)}
+													<Badge variant="secondary" class="h-4 px-1 text-[10px] text-violet-700"
+														>Manager</Badge
+													>
+												{/if}
+											</div>
+											<span class="truncate text-muted-foreground">{me?.email}</span>
+										</div>
+									</div>
+								</DropdownMenu.Label>
+								<DropdownMenu.Separator />
+								<DropdownMenu.Item>
+									{#snippet child({ props })}
+										<a href="/profile" {...props}>
+											<User class="size-4" />
+											Profile
+										</a>
+									{/snippet}
+								</DropdownMenu.Item>
+								<DropdownMenu.Item
+									class="text-destructive focus:text-destructive"
+									onclick={async () => {
+										await logout();
+										window.location.href = '/login';
+									}}
+								>
+									<LogOut class="size-4" />
+									Log out
+								</DropdownMenu.Item>
+							</DropdownMenu.Content>
+						</DropdownMenu.Root>
+					{/if}
 				</Sidebar.MenuItem>
 			</Sidebar.Menu>
 		</Sidebar.Footer>
@@ -194,9 +219,27 @@
 			<Separator orientation="vertical" class="me-2 data-[orientation=vertical]:h-4" />
 			<Breadcrumb.Root>
 				<Breadcrumb.List>
-					<Breadcrumb.Item>
-						<Breadcrumb.Page>{pageLabel}</Breadcrumb.Page>
-					</Breadcrumb.Item>
+					{#if $extraBreadcrumbs.length > 0}
+						<Breadcrumb.Item>
+							<Breadcrumb.Link href={navLinks.find((l) => l.match(page.url.pathname))?.href ?? '/'}>
+								{pageLabel}
+							</Breadcrumb.Link>
+						</Breadcrumb.Item>
+						{#each $extraBreadcrumbs as segment (segment.label)}
+							<Breadcrumb.Separator />
+							<Breadcrumb.Item>
+								{#if segment.href}
+									<Breadcrumb.Link href={segment.href}>{segment.label}</Breadcrumb.Link>
+								{:else}
+									<Breadcrumb.Page>{segment.label}</Breadcrumb.Page>
+								{/if}
+							</Breadcrumb.Item>
+						{/each}
+					{:else}
+						<Breadcrumb.Item>
+							<Breadcrumb.Page>{pageLabel}</Breadcrumb.Page>
+						</Breadcrumb.Item>
+					{/if}
 				</Breadcrumb.List>
 			</Breadcrumb.Root>
 		</header>

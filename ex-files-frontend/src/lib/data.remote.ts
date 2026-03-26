@@ -1,339 +1,178 @@
 import { query, getRequestEvent } from '$app/server';
 import { env } from '$env/dynamic/private';
 import { fromBinary } from '@bufbuild/protobuf';
-import type { Timestamp } from '@bufbuild/protobuf/wkt';
 import {
 	GetAssignmentsResponseSchema,
 	GetUsersResponseSchema,
-	GetAssignmentResponseSchema,
-	Role
+	GetAssignmentResponseSchema
 } from '$lib/gen/assignments/v1/assignments_pb';
-import type { MockAssignment, MockUser } from '$lib/mock-data';
-
-// ---------------------------------------------------------------------------
-// Workspace types (proto JSON shape from c.JSON() with Go proto structs)
-// ---------------------------------------------------------------------------
-
-export interface ProtoTimestamp {
-	seconds: number;
-	nanos?: number;
-}
-
-export interface Workspace {
-	id: number;
-	name: string;
-	managerId: number;
-	createdAt?: ProtoTimestamp;
-	updatedAt?: ProtoTimestamp;
-}
-
-export interface WorkspaceUser {
-	id: number;
-	name: string;
-	email: string;
-	role: number; // 1=root, 2=manager, 3=employee
-	avatarUrl?: string;
-}
-
-export interface WorkspaceDetail {
-	workspace: Workspace;
-	manager: WorkspaceUser;
-	members: WorkspaceUser[];
-}
-
-export interface WorkspaceListData {
-	workspaces: Workspace[];
-	total: number;
-	totalPages: number;
-	page: number;
-	perPage: number;
-}
-
-export function protoTsToDate(ts?: ProtoTimestamp): Date | null {
-	if (!ts) return null;
-	return new Date(Number(ts.seconds) * 1000);
-}
-
-export function workspaceUserRole(role: number): 'root' | 'manager' | 'employee' {
-	if (role === 1) return 'root';
-	if (role === 2) return 'manager';
-	return 'employee';
-}
+import { MeResponseSchema } from '$lib/gen/auth/v1/auth_pb';
+import {
+	GetWorkspacesResponseSchema,
+	GetWorkspaceResponseSchema
+} from '$lib/gen/workspaces/v1/workspaces_pb';
+import {
+	ListDocumentsResponseSchema,
+	GetDocumentResponseSchema
+} from '$lib/gen/documents/v1/documents_pb';
+import { GetAuditLogResponseSchema } from '$lib/gen/audit/v1/audit_pb';
 
 const BACKEND = env.BACKEND_URL ?? 'http://localhost:8080';
 
-async function fetchProto(url: string): Promise<Uint8Array> {
-	const res = await fetch(url);
-	return new Uint8Array(await res.arrayBuffer());
+/** Fetch a URL and return the raw bytes, or null on any failure (network error, non-2xx). */
+async function fetchProto(url: string, fetchFn: typeof fetch) {
+	try {
+		const res = await fetchFn(url);
+		if (!res.ok) return null;
+		return new Uint8Array(await res.arrayBuffer());
+	} catch {
+		return null;
+	}
 }
 
-function tsToIso(ts?: Timestamp): string | undefined {
-	return ts ? new Date(Number(ts.seconds) * 1000).toISOString().slice(0, 19) : undefined;
+/** Fetch a URL and return the Response, or null on network error. */
+async function safeFetch(url: string, fetchFn: typeof fetch, init?: RequestInit) {
+	try {
+		return await fetchFn(url, init);
+	} catch {
+		return null;
+	}
 }
 
-export const getMe = query(async (): Promise<MockUser | null> => {
-	const event = getRequestEvent();
-	const token = event.cookies.get('session');
-	if (!token) return null;
-	const res = await fetch(`${BACKEND}/auth/me`, {
-		headers: { Authorization: `Bearer ${token}` }
-	});
-	if (!res.ok) return null;
-	const { user: u } = await res.json();
+function paginationFromHeaders(res: Response | null) {
+	if (!res) return { total: 0, totalPages: 0, page: 1, perPage: 20 };
 	return {
-		id: String(u.id),
-		name: u.name,
-		email: u.email,
-		// auth proto: ROLE_MANAGER=2, ROLE_EMPLOYEE=3, ROLE_ROOT=1
-		role: u.role === 2 ? 'manager' : 'employee'
+		total: Number(res.headers.get('X-Total-Count') ?? 0),
+		totalPages: Number(res.headers.get('X-Total-Pages') ?? 1),
+		page: Number(res.headers.get('X-Page') ?? 1),
+		perPage: Number(res.headers.get('X-Per-Page') ?? 20)
 	};
+}
+
+export const getMe = query(async () => {
+	const { fetch } = getRequestEvent();
+	const res = await safeFetch(`${BACKEND}/auth/me`, fetch);
+	if (!res) return { user: null, error: 'Unable to reach the server' as const };
+	if (!res.ok) return { user: null, error: null };
+	const bytes = new Uint8Array(await res.arrayBuffer());
+	const r = fromBinary(MeResponseSchema, bytes);
+	return { user: r.user ?? null, error: null };
 });
 
-export const getUsers = query(async (): Promise<MockUser[]> => {
-	const r = fromBinary(GetUsersResponseSchema, await fetchProto(`${BACKEND}/users`));
-	return r.users.map((u) => ({
-		id: u.id,
-		name: u.name,
-		email: u.email,
-		role: u.role === Role.MANAGER ? 'manager' : 'employee'
-	}));
+export const getUsers = query(async () => {
+	const { fetch } = getRequestEvent();
+	const bytes = await fetchProto(`${BACKEND}/users`, fetch);
+	if (!bytes) return [];
+	const r = fromBinary(GetUsersResponseSchema, bytes);
+	return r.users;
 });
 
-export const getAssignments = query(async (): Promise<MockAssignment[]> => {
-	const r = fromBinary(GetAssignmentsResponseSchema, await fetchProto(`${BACKEND}/assignments`));
-	return r.assignments.map((a) => ({
-		id: a.id,
-		creatorId: a.creatorId,
-		assigneeId: a.assigneeId,
-		title: a.title,
-		description: a.description,
-		deadline: tsToIso(a.deadline),
-		resolved: a.resolved,
-		commentsCount: a.commentsCount,
-		versionsCount: a.versionsCount
-	}));
+export const getAssignments = query(async () => {
+	const { fetch } = getRequestEvent();
+	const bytes = await fetchProto(`${BACKEND}/assignments`, fetch);
+	if (!bytes) return [];
+	const r = fromBinary(GetAssignmentsResponseSchema, bytes);
+	return r.assignments;
 });
 
 export const getAssignment = query('unchecked', async (id: string) => {
-	const r = fromBinary(
-		GetAssignmentResponseSchema,
-		await fetchProto(`${BACKEND}/assignments/${id}`)
-	);
-	const a = r.assignment!;
-	const u = r.user;
-	return {
-		assignment: {
-			id: a.id,
-			creatorId: a.creatorId,
-			assigneeId: a.assigneeId,
-			title: a.title,
-			description: a.description,
-			deadline: tsToIso(a.deadline),
-			resolved: a.resolved,
-			commentsCount: a.commentsCount,
-			versionsCount: a.versionsCount
-		} satisfies MockAssignment,
-		user: u
-			? ({
-					id: u.id,
-					name: u.name,
-					email: u.email,
-					role: u.role === Role.MANAGER ? 'manager' : 'employee'
-				} satisfies MockUser)
-			: null
-	};
+	const { fetch } = getRequestEvent();
+	const bytes = await fetchProto(`${BACKEND}/assignments/${id}`, fetch);
+	if (!bytes) return null;
+	return fromBinary(GetAssignmentResponseSchema, bytes);
 });
 
 // ---------------------------------------------------------------------------
 // Workspace queries
 // ---------------------------------------------------------------------------
 
-export const getWorkspaces = query(
-	'unchecked',
-	async (page: number = 1): Promise<WorkspaceListData> => {
-		const event = getRequestEvent();
-		const token = event.cookies.get('session');
-		const res = await fetch(`${BACKEND}/workspaces?page=${page}&per_page=20`, {
-			headers: { Authorization: `Bearer ${token}` }
-		});
-		if (!res.ok) return { workspaces: [], total: 0, totalPages: 0, page: 1, perPage: 20 };
-		const data = await res.json();
-		return {
-			workspaces: (data.workspaces ?? []) as Workspace[],
-			total: Number(res.headers.get('X-Total-Count') ?? 0),
-			totalPages: Number(res.headers.get('X-Total-Pages') ?? 1),
-			page: Number(res.headers.get('X-Page') ?? 1),
-			perPage: Number(res.headers.get('X-Per-Page') ?? 20)
-		};
-	}
-);
+export const getWorkspaces = query('unchecked', async (page: number = 1) => {
+	const { fetch } = getRequestEvent();
+	const res = await safeFetch(`${BACKEND}/workspaces?page=${page}&per_page=20`, fetch);
+	if (!res || !res.ok) return { workspaces: [] as never[], ...paginationFromHeaders(res) };
+	const bytes = new Uint8Array(await res.arrayBuffer());
+	const r = fromBinary(GetWorkspacesResponseSchema, bytes);
+	return {
+		workspaces: r.workspaces,
+		...paginationFromHeaders(res)
+	};
+});
 
-export const getWorkspaceDetail = query(
-	'unchecked',
-	async (id: string): Promise<WorkspaceDetail | null> => {
-		const event = getRequestEvent();
-		const token = event.cookies.get('session');
-		const res = await fetch(`${BACKEND}/workspaces/${id}`, {
-			headers: { Authorization: `Bearer ${token}` }
-		});
-		if (!res.ok) return null;
-		const data = await res.json();
-		// Response shape: { workspace: WorkspaceDetail }
-		return data.workspace as WorkspaceDetail;
-	}
-);
+export const getWorkspaceDetail = query('unchecked', async (id: string) => {
+	const { fetch } = getRequestEvent();
+	const res = await safeFetch(`${BACKEND}/workspaces/${id}`, fetch);
+	if (!res || !res.ok) return null;
+	const bytes = new Uint8Array(await res.arrayBuffer());
+	const r = fromBinary(GetWorkspaceResponseSchema, bytes);
+	return r.workspace ?? null;
+});
 
-// ---------------------------------------------------------------------------
-// Document types
-// ---------------------------------------------------------------------------
-
-export interface Document {
-	id: number;
-	name: string;
-	mimeType: string;
-	size: number;
-	hash: string;
-	status: string; // pending | in_review | approved | rejected | changes_requested
-	uploaderId: number;
-	uploaderName: string;
-	workspaceId: number;
-	createdAt?: ProtoTimestamp;
-	updatedAt?: ProtoTimestamp;
-	reviewerId?: number;
-	reviewerName?: string;
-	reviewerNote?: string;
-}
-
-export interface DocumentVersion {
-	id: number;
-	documentId: number;
-	version: number;
-	hash: string;
-	size: number;
-	storageKey: string;
-	uploaderId: number;
-	uploaderName: string;
-	createdAt?: ProtoTimestamp;
-}
-
-export interface DocumentDetail {
-	document: Document;
-	versions: DocumentVersion[];
-}
-
-export interface DocumentListData {
-	documents: Document[];
-	total: number;
-	totalPages: number;
-	page: number;
-	perPage: number;
-}
+// getSystemUsers: auth endpoint still returns JSON (no ListUsersResponse proto)
+export const getSystemUsers = query(async () => {
+	const { fetch } = getRequestEvent();
+	const res = await safeFetch(`${BACKEND}/auth/users`, fetch);
+	if (!res || !res.ok) return [];
+	const data = await res.json();
+	return (data.users ?? []) as Array<{ id: number; name: string; email: string; role: number }>;
+});
 
 // ---------------------------------------------------------------------------
 // Document queries
 // ---------------------------------------------------------------------------
 
-// getDocuments accepts a single encoded string: "<wsId>?page=1&search=foo&status=bar"
-export const getDocuments = query(
-	'unchecked',
-	async (queryStr: string): Promise<DocumentListData> => {
-		const sep = queryStr.indexOf('?');
-		const wsId = sep === -1 ? queryStr : queryStr.slice(0, sep);
-		const qs = sep === -1 ? '' : queryStr.slice(sep + 1);
-		const sp = new URLSearchParams(qs);
-		if (!sp.has('page')) sp.set('page', '1');
-		if (!sp.has('per_page')) sp.set('per_page', '20');
-		const event = getRequestEvent();
-		const token = event.cookies.get('session');
-		const res = await fetch(`${BACKEND}/workspaces/${wsId}/documents?${sp}`, {
-			headers: { Authorization: `Bearer ${token}` }
-		});
-		if (!res.ok) return { documents: [], total: 0, totalPages: 0, page: 1, perPage: 20 };
-		const data = await res.json();
-		return {
-			documents: (data.documents ?? []) as Document[],
-			total: Number(res.headers.get('X-Total-Count') ?? 0),
-			totalPages: Number(res.headers.get('X-Total-Pages') ?? 1),
-			page: Number(res.headers.get('X-Page') ?? 1),
-			perPage: Number(res.headers.get('X-Per-Page') ?? 20)
-		};
-	}
-);
+export const getDocuments = query('unchecked', async (queryStr: string) => {
+	const sep = queryStr.indexOf('?');
+	const wsId = sep === -1 ? queryStr : queryStr.slice(0, sep);
+	const qs = sep === -1 ? '' : queryStr.slice(sep + 1);
+	const sp = new URLSearchParams(qs);
+	if (!sp.has('page')) sp.set('page', '1');
+	if (!sp.has('per_page')) sp.set('per_page', '20');
+	const { fetch } = getRequestEvent();
+	const res = await safeFetch(`${BACKEND}/workspaces/${wsId}/documents?${sp}`, fetch);
+	if (!res || !res.ok) return { documents: [] as never[], ...paginationFromHeaders(res) };
+	const bytes = new Uint8Array(await res.arrayBuffer());
+	const r = fromBinary(ListDocumentsResponseSchema, bytes);
+	return {
+		documents: r.documents,
+		...paginationFromHeaders(res)
+	};
+});
 
-export const getDocumentDetail = query(
-	'unchecked',
-	async (docId: string): Promise<DocumentDetail | null> => {
-		const event = getRequestEvent();
-		const token = event.cookies.get('session');
-		const res = await fetch(`${BACKEND}/documents/${docId}`, {
-			headers: { Authorization: `Bearer ${token}` }
-		});
-		if (!res.ok) return null;
-		const data = await res.json();
-		// Response shape: { document: DocumentDetail }
-		return data.document as DocumentDetail;
-	}
-);
-
-// ---------------------------------------------------------------------------
-// Audit types
-// ---------------------------------------------------------------------------
-
-export interface AuditEntry {
-	id: number;
-	action: string;
-	actorId: number;
-	actorName: string;
-	targetId?: number;
-	targetType: string;
-	metadata?: Record<string, unknown>;
-	createdAt?: ProtoTimestamp;
-}
-
-export interface AuditListData {
-	entries: AuditEntry[];
-	total: number;
-	totalPages: number;
-	page: number;
-	perPage: number;
-}
+export const getDocumentDetail = query('unchecked', async (docId: string) => {
+	const { fetch } = getRequestEvent();
+	const res = await safeFetch(`${BACKEND}/documents/${docId}`, fetch);
+	if (!res || !res.ok) return null;
+	const bytes = new Uint8Array(await res.arrayBuffer());
+	const r = fromBinary(GetDocumentResponseSchema, bytes);
+	return r.document ?? null;
+});
 
 // ---------------------------------------------------------------------------
 // Audit query
 // ---------------------------------------------------------------------------
 
-// getAuditLog accepts a single URLSearchParams-encoded string:
-// "page=1&action=document.uploaded&target_type=document&from=2026-01-01&to=2026-12-31"
-export const getAuditLog = query(
-	'unchecked',
-	async (queryStr: string = ''): Promise<AuditListData> => {
-		const sp = new URLSearchParams(queryStr);
-		if (!sp.has('page')) sp.set('page', '1');
-		if (!sp.has('per_page')) sp.set('per_page', '25');
+export const getAuditLog = query('unchecked', async (queryStr: string = '') => {
+	const sp = new URLSearchParams(queryStr);
+	if (!sp.has('page')) sp.set('page', '1');
+	if (!sp.has('per_page')) sp.set('per_page', '25');
 
-		// Convert date-only strings to RFC3339 for the backend
-		const from = sp.get('from');
-		const to = sp.get('to');
-		if (from) sp.set('from', new Date(from).toISOString());
-		if (to) {
-			const d = new Date(to);
-			d.setHours(23, 59, 59, 999);
-			sp.set('to', d.toISOString());
-		}
-
-		const event = getRequestEvent();
-		const token = event.cookies.get('session');
-		const res = await fetch(`${BACKEND}/audit?${sp}`, {
-			headers: { Authorization: `Bearer ${token}` }
-		});
-		if (!res.ok) return { entries: [], total: 0, totalPages: 0, page: 1, perPage: 25 };
-		const data = await res.json();
-		return {
-			entries: (data.entries ?? []) as AuditEntry[],
-			total: Number(res.headers.get('X-Total-Count') ?? 0),
-			totalPages: Number(res.headers.get('X-Total-Pages') ?? 1),
-			page: Number(res.headers.get('X-Page') ?? 1),
-			perPage: Number(res.headers.get('X-Per-Page') ?? 25)
-		};
+	const from = sp.get('from');
+	const to = sp.get('to');
+	if (from) sp.set('from', new Date(from).toISOString());
+	if (to) {
+		const d = new Date(to);
+		d.setHours(23, 59, 59, 999);
+		sp.set('to', d.toISOString());
 	}
-);
+
+	const { fetch } = getRequestEvent();
+	const res = await safeFetch(`${BACKEND}/audit?${sp}`, fetch);
+	if (!res || !res.ok)
+		return { entries: [] as never[], total: 0, totalPages: 0, page: 1, perPage: 25 };
+	const bytes = new Uint8Array(await res.arrayBuffer());
+	const r = fromBinary(GetAuditLogResponseSchema, bytes);
+	return {
+		entries: r.entries,
+		...paginationFromHeaders(res)
+	};
+});

@@ -1,46 +1,49 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
-	import { getAuditLog, protoTsToDate } from '$lib/data.remote';
+	import { getAuditLog } from '$lib/data.remote';
 	import * as Card from '$lib/components/ui/card/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
 	import { Separator } from '$lib/components/ui/separator/index.js';
+	import { Skeleton } from '$lib/components/ui/skeleton/index.js';
 	import { ChevronLeft, ChevronRight, Filter, X } from '@lucide/svelte';
+	import { protoTsToDate } from '$lib/proto-utils';
+	import type { Timestamp } from '@bufbuild/protobuf/wkt';
 
-	// Read all filters from URL
-	const currentPage = Number(page.url.searchParams.get('page') ?? '1');
-	const filterAction = page.url.searchParams.get('action') ?? '';
-	const filterTargetType = page.url.searchParams.get('target_type') ?? '';
-	const filterFrom = page.url.searchParams.get('from') ?? '';
-	const filterTo = page.url.searchParams.get('to') ?? '';
+	// Read all filters from URL (reactive)
+	const currentPage = $derived(Number(page.url.searchParams.get('page') ?? '1'));
+	const filterAction = $derived(page.url.searchParams.get('action') ?? '');
+	const filterTargetType = $derived(page.url.searchParams.get('target_type') ?? '');
+	const filterFrom = $derived(page.url.searchParams.get('from') ?? '');
+	const filterTo = $derived(page.url.searchParams.get('to') ?? '');
 
 	// Encode all params into a single query string for the unchecked query
-	function buildQS(parts: Record<string, string>): string {
+	const auditQueryStr = $derived.by(() => {
+		const parts: Record<string, string> = { page: String(currentPage) };
+		if (filterAction) parts.action = filterAction;
+		if (filterTargetType) parts.target_type = filterTargetType;
+		if (filterFrom) parts.from = filterFrom;
+		if (filterTo) parts.to = filterTo;
 		return Object.entries(parts)
 			.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
 			.join('&');
-	}
-	const auditParts: Record<string, string> = { page: String(currentPage) };
-	if (filterAction) auditParts.action = filterAction;
-	if (filterTargetType) auditParts.target_type = filterTargetType;
-	if (filterFrom) auditParts.from = filterFrom;
-	if (filterTo) auditParts.to = filterTo;
-	const auditQueryStr = buildQS(auditParts);
+	});
 
-	const logQuery = getAuditLog(auditQueryStr);
+	const logQuery = $derived(getAuditLog(auditQueryStr));
+	const loading = $derived(logQuery.current === undefined);
 	const logData = $derived(logQuery.current);
 	const entries = $derived(logData?.entries ?? []);
 	const totalPages = $derived(logData?.totalPages ?? 1);
 	const total = $derived(logData?.total ?? 0);
 
 	// Local filter form state
-	let formAction = $state(filterAction);
-	let formTargetType = $state(filterTargetType);
-	let formFrom = $state(filterFrom);
-	let formTo = $state(filterTo);
+	let formAction = $state(page.url.searchParams.get('action') ?? '');
+	let formTargetType = $state(page.url.searchParams.get('target_type') ?? '');
+	let formFrom = $state(page.url.searchParams.get('from') ?? '');
+	let formTo = $state(page.url.searchParams.get('to') ?? '');
 
 	const hasFilters = $derived(filterAction || filterTargetType || filterFrom || filterTo);
 
@@ -83,7 +86,7 @@
 		}
 	}
 
-	function formatDate(ts?: { seconds: number }): string {
+	function formatDate(ts?: Timestamp): string {
 		const d = protoTsToDate(ts);
 		if (!d) return '—';
 		return d.toLocaleString('en-US', {
@@ -219,7 +222,25 @@
 	</Card.Root>
 
 	<!-- Entries -->
-	{#if entries.length === 0}
+	{#if loading}
+		<Card.Root>
+			<Card.Content class="p-0">
+				<div class="divide-y">
+					{#each { length: 8 } as _, i (i)}
+						<div class="flex items-center gap-3 px-4 py-3">
+							<Skeleton class="h-3 w-36 shrink-0 rounded" />
+							<Separator orientation="vertical" class="h-6 self-stretch" />
+							<Skeleton class="h-5 w-40 shrink-0 rounded-full" />
+							<div class="min-w-0 flex-1">
+								<Skeleton class="h-4 w-24 rounded" />
+								<Skeleton class="mt-1 h-3 w-16 rounded" />
+							</div>
+						</div>
+					{/each}
+				</div>
+			</Card.Content>
+		</Card.Root>
+	{:else if entries.length === 0}
 		<Card.Root class="flex flex-col items-center justify-center py-16 text-center">
 			<Card.Content>
 				<p class="text-sm font-medium">No entries found</p>

@@ -1,21 +1,25 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
-	import { getWorkspaces, getMe, protoTsToDate } from '$lib/data.remote';
-	import * as Card from '$lib/components/ui/card/index.js';
+	import { getWorkspaces, getMe } from '$lib/data.remote';
+	import { createWorkspace } from '$lib/commands.remote';
+	import { protoTsToDate, isManager } from '$lib/proto-utils';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
+	import * as Card from '$lib/components/ui/card/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
+	import { Skeleton } from '$lib/components/ui/skeleton/index.js';
 	import { FolderOpen, Plus, ArrowRight, ChevronLeft, ChevronRight, Users } from '@lucide/svelte';
 
 	const meQuery = getMe();
-	const me = $derived(meQuery.current);
+	const me = $derived(meQuery.current?.user);
 
 	const currentPage = Number(page.url.searchParams.get('page') ?? '1');
 	const workspacesQuery = getWorkspaces(currentPage);
 	const data = $derived(workspacesQuery.current);
+	const loading = $derived(workspacesQuery.current === undefined);
 	const workspaces = $derived(data?.workspaces ?? []);
 	const totalPages = $derived(data?.totalPages ?? 1);
 
@@ -24,7 +28,7 @@
 	let creating = $state(false);
 	let createError = $state('');
 
-	function formatDate(ts?: { seconds: number }): string {
+	function formatDate(ts?: import('@bufbuild/protobuf/wkt').Timestamp): string {
 		const d = protoTsToDate(ts);
 		if (!d) return '—';
 		return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -41,20 +45,14 @@
 		creating = true;
 		createError = '';
 		try {
-			const res = await fetch('/api/workspaces', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ name: createName.trim() })
-			});
-			if (!res.ok) {
-				const err = await res.json().catch(() => ({}));
-				createError = err.error ?? 'Failed to create workspace';
+			const result = await createWorkspace(createName.trim());
+			if (!result.ok) {
+				createError = result.error ?? 'Failed to create workspace';
 				return;
 			}
-			const { workspace } = await res.json();
 			createOpen = false;
 			createName = '';
-			goto(`/workspaces/${workspace.id}`);
+			goto(`/workspaces/${result.workspace.id}`);
 		} catch {
 			createError = 'Network error, please try again';
 		} finally {
@@ -75,7 +73,7 @@
 				Organize related documents into workspaces for streamlined review.
 			</p>
 		</div>
-		{#if me?.role === 'manager'}
+		{#if isManager(me?.role)}
 			<Dialog.Root bind:open={createOpen}>
 				<Dialog.Trigger>
 					{#snippet child({ props })}
@@ -119,13 +117,33 @@
 		{/if}
 	</div>
 
-	{#if workspaces.length === 0}
+	{#if loading}
+		<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+			{#each { length: 6 } as _, i (i)}
+				<Card.Root class="flex flex-col">
+					<Card.Header>
+						<div class="flex items-start justify-between gap-2">
+							<Skeleton class="h-4 w-32 rounded" />
+							<Skeleton class="h-5 w-14 rounded-full" />
+						</div>
+					</Card.Header>
+					<Card.Content class="pb-3">
+						<Skeleton class="h-3 w-28 rounded" />
+						<Skeleton class="mt-2 h-3 w-36 rounded" />
+					</Card.Content>
+					<Card.Footer class="mt-auto border-t pt-3">
+						<Skeleton class="h-8 w-full rounded-md" />
+					</Card.Footer>
+				</Card.Root>
+			{/each}
+		</div>
+	{:else if workspaces.length === 0}
 		<Card.Root class="flex flex-col items-center justify-center py-16 text-center">
 			<Card.Content>
 				<FolderOpen class="mx-auto mb-3 size-10 text-muted-foreground/40" />
 				<p class="text-sm font-medium">No workspaces yet</p>
 				<p class="mt-1 text-xs text-muted-foreground">
-					{me?.role === 'manager'
+					{isManager(me?.role)
 						? 'Create a workspace to get started.'
 						: 'You have not been added to any workspaces.'}
 				</p>

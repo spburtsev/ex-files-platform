@@ -1,14 +1,14 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { goto, invalidateAll } from '$app/navigation';
+	import { getWorkspaceDetail, getMe, getSystemUsers, getDocuments } from '$lib/data.remote';
+	import { protoTsToDate, roleName } from '$lib/proto-utils';
 	import {
-		getWorkspaceDetail,
-		getMe,
-		getUsers,
-		getDocuments,
-		protoTsToDate,
-		workspaceUserRole
-	} from '$lib/data.remote';
+		updateWorkspace,
+		deleteWorkspace,
+		addWorkspaceMember,
+		removeWorkspaceMember
+	} from '$lib/commands.remote';
 	import * as Card from '$lib/components/ui/card/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import * as Avatar from '$lib/components/ui/avatar/index.js';
@@ -17,9 +17,8 @@
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
-	import UploadZone from '$lib/components/pdf/UploadZone.svelte';
+	import { Skeleton } from '$lib/components/ui/skeleton/index.js';
 	import {
-		ArrowLeft,
 		Pencil,
 		Trash2,
 		UserPlus,
@@ -30,14 +29,25 @@
 		Search,
 		ChevronLeft,
 		ChevronRight,
-		ArrowRight,
-		Upload
+		ArrowRight
 	} from '@lucide/svelte';
+	import type { Timestamp } from '@bufbuild/protobuf/wkt';
+	import { extraBreadcrumbs } from '$lib/stores/breadcrumbs';
+	import { onDestroy } from 'svelte';
 
 	const wsId = page.params.id ?? '';
 
+	// Set breadcrumb when workspace name is available
+	$effect(() => {
+		const name = ws?.name;
+		if (name) {
+			extraBreadcrumbs.set([{ label: name }]);
+		}
+	});
+	onDestroy(() => extraBreadcrumbs.set([]));
+
 	const meQuery = getMe();
-	const me = $derived(meQuery.current);
+	const me = $derived(meQuery.current?.user);
 
 	const detailQuery = getWorkspaceDetail(wsId);
 	const detail = $derived(detailQuery.current);
@@ -63,12 +73,12 @@
 	const docTotalPages = $derived(docsData?.totalPages ?? 1);
 
 	// Users (for add-member picker)
-	const usersQuery = getUsers();
+	const usersQuery = getSystemUsers();
 	const allUsers = $derived(usersQuery.current ?? []);
 	const memberIds = $derived(new Set(members.map((m) => String(m.id))));
 	const nonMembers = $derived(allUsers.filter((u) => !memberIds.has(String(u.id))));
 
-	const isOwner = $derived(manager && me && String(manager.id) === me.id);
+	const isOwner = $derived(manager && me && manager.id === me.id);
 
 	// Edit dialog
 	let editOpen = $state(false);
@@ -100,7 +110,7 @@
 	let uploading = $state(false);
 	let uploadError = $state('');
 
-	function formatDate(ts?: { seconds: number }): string {
+	function formatDate(ts?: Timestamp): string {
 		const d = protoTsToDate(ts);
 		if (!d) return '—';
 		return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -175,29 +185,6 @@
 		goto(url.toString());
 	}
 
-	async function handleUpload(file: File) {
-		uploading = true;
-		uploadError = '';
-		try {
-			const form = new FormData();
-			form.append('file', file);
-			const res = await fetch(`/api/workspaces/${wsId}/documents`, {
-				method: 'POST',
-				body: form
-			});
-			if (!res.ok) {
-				const err = await res.json().catch(() => ({}));
-				uploadError = err.error ?? 'Upload failed';
-				return;
-			}
-			await invalidateAll();
-		} catch {
-			uploadError = 'Network error, please try again';
-		} finally {
-			uploading = false;
-		}
-	}
-
 	function openEdit() {
 		editName = ws?.name ?? '';
 		editError = '';
@@ -209,14 +196,9 @@
 		editing = true;
 		editError = '';
 		try {
-			const res = await fetch(`/api/workspaces/${wsId}`, {
-				method: 'PUT',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ name: editName.trim() })
-			});
-			if (!res.ok) {
-				const err = await res.json().catch(() => ({}));
-				editError = err.error ?? 'Failed to update workspace';
+			const result = await updateWorkspace({ id: wsId, name: editName.trim() });
+			if (!result.ok) {
+				editError = result.error ?? 'Failed to update workspace';
 				return;
 			}
 			editOpen = false;
@@ -231,8 +213,8 @@
 	async function handleDelete() {
 		deleting = true;
 		try {
-			const res = await fetch(`/api/workspaces/${wsId}`, { method: 'DELETE' });
-			if (!res.ok) return;
+			const result = await deleteWorkspace(wsId);
+			if (!result.ok) return;
 			goto('/workspaces');
 		} catch {
 			// ignore
@@ -246,14 +228,9 @@
 		addingId = userId;
 		addError = '';
 		try {
-			const res = await fetch(`/api/workspaces/${wsId}/members`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ user_id: Number(userId) })
-			});
-			if (!res.ok) {
-				const err = await res.json().catch(() => ({}));
-				addError = err.error ?? 'Failed to add member';
+			const result = await addWorkspaceMember({ workspaceId: wsId, userId: Number(userId) });
+			if (!result.ok) {
+				addError = result.error ?? 'Failed to add member';
 				return;
 			}
 			await invalidateAll();
@@ -265,10 +242,10 @@
 		}
 	}
 
-	async function handleRemoveMember(userId: number) {
+	async function handleRemoveMember(userId: bigint) {
 		try {
-			const res = await fetch(`/api/workspaces/${wsId}/members/${userId}`, { method: 'DELETE' });
-			if (!res.ok) return;
+			const result = await removeWorkspaceMember({ workspaceId: wsId, userId });
+			if (!result.ok) return;
 			await invalidateAll();
 		} catch {
 			// ignore
@@ -281,36 +258,20 @@
 </svelte:head>
 
 <div class="flex flex-1 flex-col gap-6 p-6">
-	<!-- Back link + header actions -->
-	<div class="flex items-start justify-between gap-4">
-		<Button variant="ghost" size="sm" href="/workspaces" class="-ml-1 gap-1 text-muted-foreground">
-			<ArrowLeft class="size-4" />
-			Workspaces
-		</Button>
-		{#if isOwner}
-			<div class="flex gap-2">
-				<Button variant="outline" size="sm" class="gap-1.5" onclick={openEdit}>
-					<Pencil class="size-3.5" />
-					Edit
-				</Button>
-				<Button
-					variant="outline"
-					size="sm"
-					class="gap-1.5 text-destructive hover:text-destructive"
-					onclick={() => (deleteOpen = true)}
-				>
-					<Trash2 class="size-3.5" />
-					Delete
-				</Button>
-			</div>
-		{/if}
-	</div>
-
 	{#if !detail}
-		<Card.Root class="flex items-center justify-center py-16">
-			<Card.Content>
-				<p class="text-sm text-muted-foreground">Loading workspace…</p>
-			</Card.Content>
+		<!-- Loading skeleton -->
+		<Card.Root>
+			<Card.Header>
+				<div class="flex items-start gap-3">
+					<div class="min-w-0 flex-1 space-y-2">
+						<Skeleton class="h-5 w-48" />
+						<div class="flex gap-3">
+							<Skeleton class="h-4 w-32" />
+							<Skeleton class="h-4 w-36" />
+						</div>
+					</div>
+				</div>
+			</Card.Header>
 		</Card.Root>
 	{:else}
 		<!-- Workspace info card -->
@@ -330,7 +291,23 @@
 							</span>
 						</Card.Description>
 					</div>
-					<Badge variant="secondary" class="shrink-0 text-xs">Active</Badge>
+					{#if isOwner}
+						<div class="flex shrink-0 gap-2">
+							<Button variant="outline" size="sm" class="gap-1.5" onclick={openEdit}>
+								<Pencil class="size-3.5" />
+								Edit
+							</Button>
+							<Button
+								variant="outline"
+								size="sm"
+								class="gap-1.5 text-destructive hover:text-destructive"
+								onclick={() => (deleteOpen = true)}
+							>
+								<Trash2 class="size-3.5" />
+								Delete
+							</Button>
+						</div>
+					{/if}
 				</div>
 			</Card.Header>
 		</Card.Root>
@@ -360,26 +337,6 @@
 
 			<!-- Documents tab -->
 			<Tabs.Content value="documents" class="mt-4 flex flex-col gap-4">
-				<!-- Upload zone -->
-				<Card.Root>
-					<Card.Header class="pb-3">
-						<Card.Title class="text-sm">Upload Document</Card.Title>
-					</Card.Header>
-					<Card.Content>
-						{#if uploading}
-							<div class="flex items-center justify-center py-8">
-								<Upload class="mr-2 size-5 animate-pulse text-primary" />
-								<span class="text-sm text-muted-foreground">Uploading…</span>
-							</div>
-						{:else}
-							<UploadZone onupload={handleUpload} />
-						{/if}
-						{#if uploadError}
-							<p class="mt-2 text-sm text-destructive">{uploadError}</p>
-						{/if}
-					</Card.Content>
-				</Card.Root>
-
 				<!-- Search + filter -->
 				<div class="flex flex-wrap items-center gap-2">
 					<form
@@ -445,7 +402,7 @@
 										<div
 											class="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
 										>
-											<span>{formatSize(doc.size)}</span>
+											<span>{formatSize(Number(doc.size))}</span>
 											<span>·</span>
 											<span>{doc.uploaderName}</span>
 											<span>·</span>
@@ -468,6 +425,14 @@
 							</Card.Root>
 						{/each}
 					</div>
+
+					<!-- Upload zone (below documents) -->
+					{#if uploading}
+						<p class="text-center text-sm text-muted-foreground">Uploading…</p>
+					{/if}
+					{#if uploadError}
+						<p class="text-center text-sm text-destructive">{uploadError}</p>
+					{/if}
 
 					{#if docTotalPages > 1}
 						<div class="flex items-center justify-center gap-2">
@@ -593,7 +558,7 @@
 						{:else}
 							<ul class="divide-y">
 								{#each members as member (member.id)}
-									{@const role = workspaceUserRole(member.role)}
+									{@const role = roleName(member.role)}
 									<li class="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
 										<Avatar.Root class="h-8 w-8 shrink-0">
 											<Avatar.Fallback

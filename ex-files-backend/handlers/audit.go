@@ -90,7 +90,7 @@ func (h *AuditHandler) List(c *gin.Context) {
 		pbEntries[i] = auditEntryToProto(&entries[i])
 	}
 
-	c.JSON(http.StatusOK, &auditv1.GetAuditLogResponse{
+	protobufResponse(c, http.StatusOK, &auditv1.GetAuditLogResponse{
 		Entries: pbEntries,
 	})
 }

@@ -1,7 +1,19 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { goto, invalidateAll } from '$app/navigation';
-	import { getDocumentDetail, getMe, getWorkspaceDetail, protoTsToDate } from '$lib/data.remote';
+	import { getDocumentDetail, getMe, getWorkspaceDetail } from '$lib/data.remote';
+	import { protoTsToDate, isManager, bid } from '$lib/proto-utils';
+	import {
+		submitDocument,
+		resubmitDocument,
+		approveDocument,
+		rejectDocument,
+		requestDocumentChanges,
+		assignDocumentReviewer,
+		getDocumentDownloadUrl,
+		uploadDocumentVersion,
+		deleteDocument
+	} from '$lib/commands.remote';
 	import * as Card from '$lib/components/ui/card/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
@@ -10,7 +22,6 @@
 	import { Label } from '$lib/components/ui/label/index.js';
 	import UploadZone from '$lib/components/pdf/UploadZone.svelte';
 	import {
-		ArrowLeft,
 		Download,
 		Trash2,
 		Clock,
@@ -26,6 +37,8 @@
 		RotateCcw,
 		UserCheck
 	} from '@lucide/svelte';
+	import { extraBreadcrumbs } from '$lib/stores/breadcrumbs';
+	import { onDestroy } from 'svelte';
 
 	const wsId = page.params.id ?? '';
 	const docId = page.params.docId ?? '';
@@ -36,23 +49,33 @@
 	const versions = $derived(detail?.versions ?? []);
 
 	const meQuery = getMe();
-	const me = $derived(meQuery.current);
+	const me = $derived(meQuery.current?.user);
 
 	const wsQuery = getWorkspaceDetail(wsId);
 	const wsDetail = $derived(wsQuery.current);
+	const wsName = $derived(wsDetail?.workspace?.name);
 	const members = $derived(wsDetail?.members ?? []);
 
+	// Set breadcrumbs: Workspaces > {wsName} > {docName}
+	$effect(() => {
+		const segments: { label: string; href?: string }[] = [];
+		if (wsName) segments.push({ label: wsName, href: `/workspaces/${wsId}` });
+		if (doc?.name) segments.push({ label: doc.name });
+		if (segments.length > 0) extraBreadcrumbs.set(segments);
+	});
+	onDestroy(() => extraBreadcrumbs.set([]));
+
 	// Permission flags
-	const isUploader = $derived(doc && me ? Number(me.id) === doc.uploaderId : false);
-	const isManager = $derived(me?.role === 'manager');
-	const isAssignedReviewer = $derived(doc && me ? doc.reviewerId === Number(me.id) : false);
-	const canReview = $derived(isManager || isAssignedReviewer);
+	const isUploaderFlag = $derived(doc && me ? bid(me.id) === bid(doc.uploaderId) : false);
+	const isManagerFlag = $derived(isManager(me?.role));
+	const isAssignedReviewer = $derived(doc && me ? bid(doc.reviewerId) === bid(me.id) : false);
+	const canReview = $derived(isManagerFlag || isAssignedReviewer);
 
 	// Which action buttons to show
-	const showSubmit = $derived(isUploader && doc?.status === 'pending');
-	const showResubmit = $derived(isUploader && doc?.status === 'changes_requested');
+	const showSubmit = $derived(isUploaderFlag && doc?.status === 'pending');
+	const showResubmit = $derived(isUploaderFlag && doc?.status === 'changes_requested');
 	const showReviewActions = $derived(canReview && doc?.status === 'in_review');
-	const showAssignReviewer = $derived(isManager && !!doc);
+	const showAssignReviewer = $derived(isManagerFlag && !!doc);
 
 	// Dialog / loading state
 	let deleteOpen = $state(false);
@@ -60,7 +83,7 @@
 
 	let uploadingVersion = $state(false);
 	let uploadVersionError = $state('');
-	let downloadingId = $state<number | null>(null);
+	let downloadingId = $state<bigint | null>(null);
 
 	let rejectOpen = $state(false);
 	let rejectNote = $state('');
@@ -71,13 +94,13 @@
 	let requestingChanges = $state(false);
 
 	let assignReviewerOpen = $state(false);
-	let selectedReviewerId = $state<number | null>(null);
+	let selectedReviewerId = $state<bigint | null>(null);
 	let assigningReviewer = $state(false);
 	let assignReviewerError = $state('');
 
 	let actionError = $state('');
 
-	function formatDate(ts?: { seconds: number }): string {
+	function formatDate(ts?: import('@bufbuild/protobuf/wkt').Timestamp): string {
 		const d = protoTsToDate(ts);
 		if (!d) return '—';
 		return d.toLocaleString('en-US', {
@@ -89,10 +112,11 @@
 		});
 	}
 
-	function formatSize(bytes: number): string {
-		if (bytes < 1024) return `${bytes} B`;
-		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+	function formatSize(bytes: number | bigint): string {
+		const b = Number(bytes);
+		if (b < 1024) return `${b} B`;
+		if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+		return `${(b / (1024 * 1024)).toFixed(1)} MB`;
 	}
 
 	function statusVariant(status: string): string {
@@ -121,42 +145,43 @@
 		}
 	}
 
-	async function simpleAction(endpoint: string) {
+	async function handleSubmit() {
 		actionError = '';
-		const res = await fetch(`/api/documents/${docId}/${endpoint}`, { method: 'POST' });
-		if (!res.ok) {
-			const err = await res.json().catch(() => ({}));
-			actionError = err.error ?? 'Action failed';
-			return false;
+		const result = await submitDocument(docId);
+		if (!result.ok) {
+			actionError = result.error ?? 'Action failed';
+			return;
 		}
 		await invalidateAll();
-		return true;
-	}
-
-	async function handleSubmit() {
-		await simpleAction('submit');
 	}
 
 	async function handleResubmit() {
-		await simpleAction('resubmit');
+		actionError = '';
+		const result = await resubmitDocument(docId);
+		if (!result.ok) {
+			actionError = result.error ?? 'Action failed';
+			return;
+		}
+		await invalidateAll();
 	}
 
 	async function handleApprove() {
-		await simpleAction('approve');
+		actionError = '';
+		const result = await approveDocument(docId);
+		if (!result.ok) {
+			actionError = result.error ?? 'Action failed';
+			return;
+		}
+		await invalidateAll();
 	}
 
 	async function handleReject() {
 		rejecting = true;
 		actionError = '';
 		try {
-			const res = await fetch(`/api/documents/${docId}/reject`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ note: rejectNote })
-			});
-			if (!res.ok) {
-				const err = await res.json().catch(() => ({}));
-				actionError = err.error ?? 'Action failed';
+			const result = await rejectDocument({ id: docId, note: rejectNote });
+			if (!result.ok) {
+				actionError = result.error ?? 'Action failed';
 				return;
 			}
 			rejectOpen = false;
@@ -171,14 +196,9 @@
 		requestingChanges = true;
 		actionError = '';
 		try {
-			const res = await fetch(`/api/documents/${docId}/request-changes`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ note: changesNote })
-			});
-			if (!res.ok) {
-				const err = await res.json().catch(() => ({}));
-				actionError = err.error ?? 'Action failed';
+			const result = await requestDocumentChanges({ id: docId, note: changesNote });
+			if (!result.ok) {
+				actionError = result.error ?? 'Action failed';
 				return;
 			}
 			changesOpen = false;
@@ -194,14 +214,12 @@
 		assigningReviewer = true;
 		assignReviewerError = '';
 		try {
-			const res = await fetch(`/api/documents/${docId}/reviewer`, {
-				method: 'PUT',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ reviewer_id: selectedReviewerId })
+			const result = await assignDocumentReviewer({
+				id: docId,
+				reviewerId: Number(selectedReviewerId)
 			});
-			if (!res.ok) {
-				const err = await res.json().catch(() => ({}));
-				assignReviewerError = err.error ?? 'Failed to assign reviewer';
+			if (!result.ok) {
+				assignReviewerError = result.error ?? 'Failed to assign reviewer';
 				return;
 			}
 			assignReviewerOpen = false;
@@ -212,12 +230,11 @@
 		}
 	}
 
-	async function handleDownload(versionId: number) {
+	async function handleDownload(versionId: bigint) {
 		downloadingId = versionId;
 		try {
-			const res = await fetch(`/api/documents/${docId}/versions/${versionId}/download`);
-			if (!res.ok) return;
-			const { url } = await res.json();
+			const { url } = await getDocumentDownloadUrl({ docId, versionId: Number(versionId) });
+			if (!url) return;
 			window.open(url, '_blank');
 		} catch {
 			// ignore
@@ -230,15 +247,9 @@
 		uploadingVersion = true;
 		uploadVersionError = '';
 		try {
-			const form = new FormData();
-			form.append('file', file);
-			const res = await fetch(`/api/documents/${docId}/versions`, {
-				method: 'POST',
-				body: form
-			});
-			if (!res.ok) {
-				const err = await res.json().catch(() => ({}));
-				uploadVersionError = err.error ?? 'Upload failed';
+			const result = await uploadDocumentVersion({ docId, file });
+			if (!result.ok) {
+				uploadVersionError = result.error ?? 'Upload failed';
 				return;
 			}
 			await invalidateAll();
@@ -252,8 +263,8 @@
 	async function handleDelete() {
 		deleting = true;
 		try {
-			const res = await fetch(`/api/documents/${docId}`, { method: 'DELETE' });
-			if (!res.ok) return;
+			const result = await deleteDocument(docId);
+			if (!result.ok) return;
 			goto(`/workspaces/${wsId}`);
 		} catch {
 			// ignore
@@ -269,30 +280,6 @@
 </svelte:head>
 
 <div class="flex flex-1 flex-col gap-6 p-6">
-	<!-- Back link + delete -->
-	<div class="flex items-center justify-between gap-4">
-		<Button
-			variant="ghost"
-			size="sm"
-			href="/workspaces/{wsId}"
-			class="-ml-1 gap-1 text-muted-foreground"
-		>
-			<ArrowLeft class="size-4" />
-			Workspace
-		</Button>
-		{#if doc}
-			<Button
-				variant="outline"
-				size="sm"
-				class="gap-1.5 text-destructive hover:text-destructive"
-				onclick={() => (deleteOpen = true)}
-			>
-				<Trash2 class="size-3.5" />
-				Delete
-			</Button>
-		{/if}
-	</div>
-
 	{#if !detail}
 		<Card.Root class="flex items-center justify-center py-16">
 			<Card.Content>
@@ -330,9 +317,20 @@
 							{/if}
 						</div>
 					</div>
-					<Badge variant="secondary" class="shrink-0 {statusVariant(doc?.status ?? '')}">
-						{statusLabel(doc?.status ?? 'pending')}
-					</Badge>
+					<div class="flex shrink-0 items-center gap-2">
+						<Badge variant="secondary" class={`${statusVariant(doc?.status ?? '')}`}>
+							{statusLabel(doc?.status ?? 'pending')}
+						</Badge>
+						<Button
+							variant="outline"
+							size="sm"
+							class="gap-1.5 text-destructive hover:text-destructive"
+							onclick={() => (deleteOpen = true)}
+						>
+							<Trash2 class="size-3.5" />
+							Delete
+						</Button>
+					</div>
 				</div>
 			</Card.Header>
 

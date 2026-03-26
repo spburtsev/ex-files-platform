@@ -2,7 +2,6 @@ package handlers_test
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -12,8 +11,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 	"gorm.io/gorm"
 
+	workspacesv1 "github.com/spburtsev/ex-files-backend/gen/workspaces/v1"
 	"github.com/spburtsev/ex-files-backend/handlers"
 	"github.com/spburtsev/ex-files-backend/models"
 )
@@ -133,10 +134,10 @@ func TestWorkspaceCreate(t *testing.T) {
 		w := wsRequest(h.Create, http.MethodPost, "/workspaces", "/workspaces", body, 5, "manager")
 
 		assert.Equal(t, http.StatusCreated, w.Code)
-		var resp map[string]any
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		ws := resp["workspace"].(map[string]any)
-		assert.Equal(t, "Test WS", ws["name"])
+		assert.Equal(t, "application/x-protobuf", w.Header().Get("Content-Type"))
+		var resp workspacesv1.CreateWorkspaceResponse
+		require.NoError(t, proto.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "Test WS", resp.Workspace.Name)
 		wsRepo.AssertExpectations(t)
 	})
 
@@ -243,12 +244,10 @@ func TestWorkspaceGet(t *testing.T) {
 		w := wsRequest(h.Get, http.MethodGet, "/workspaces/1", "/workspaces/:id", nil, 5, "manager")
 
 		assert.Equal(t, http.StatusOK, w.Code)
-		var resp map[string]any
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		detail := resp["workspace"].(map[string]any)
-		assert.Equal(t, "Manager", detail["manager"].(map[string]any)["name"])
-		members := detail["members"].([]any)
-		assert.Len(t, members, 1)
+		var resp workspacesv1.GetWorkspaceResponse
+		require.NoError(t, proto.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Equal(t, "Manager", resp.Workspace.Manager.Name)
+		assert.Len(t, resp.Workspace.Members, 1)
 		wsRepo.AssertExpectations(t)
 		userRepo.AssertExpectations(t)
 	})
