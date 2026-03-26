@@ -42,8 +42,8 @@ type Document struct {
 	Status       DocumentStatus `gorm:"type:varchar(30);default:pending;not null"`
 	UploaderID   uint           `gorm:"not null;index"`
 	Uploader     User           `gorm:"foreignKey:UploaderID"`
-	WorkspaceID  uint           `gorm:"not null;index"`
-	Workspace    Workspace      `gorm:"foreignKey:WorkspaceID"`
+	IssueID      uint           `gorm:"not null;index"`
+	Issue        Issue          `gorm:"foreignKey:IssueID"`
 	ReviewerID   *uint          `gorm:"index"`
 	Reviewer     User           `gorm:"foreignKey:ReviewerID"`
 	ReviewerNote string         `gorm:"type:text"`

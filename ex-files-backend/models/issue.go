@@ -6,8 +6,10 @@ import (
 	"gorm.io/gorm"
 )
 
-type Assignment struct {
+type Issue struct {
 	gorm.Model
+	WorkspaceID   uint       `gorm:"not null;index"`
+	Workspace     Workspace  `gorm:"foreignKey:WorkspaceID"`
 	CreatorID     uint       `gorm:"not null;index"`
 	Creator       User       `gorm:"foreignKey:CreatorID"`
 	AssigneeID    uint       `gorm:"not null;index"`

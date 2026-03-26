@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { getUsers } from '$lib/data.remote';
-	import { Role } from '$lib/gen/assignments/v1/assignments_pb';
+	import { Role } from '$lib/gen/issues/v1/issues_pb';
 	import { m } from '$lib/paraglide/messages.js';
 	import * as Card from '$lib/components/ui/card/index.js';
 	import * as Avatar from '$lib/components/ui/avatar/index.js';
