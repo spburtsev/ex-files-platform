@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { ActivityEntry } from '$lib/stores/workbench.svelte';
 	import { Upload, MessageSquare, X, Eye } from '@lucide/svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		entries: ActivityEntry[];
@@ -30,12 +31,12 @@
 
 <div class="flex h-full flex-col">
 	<div class="border-b px-4 py-3">
-		<h3 class="text-sm font-semibold">Activity Log ({entries.length})</h3>
+		<h3 class="text-sm font-semibold">{m.pdf_activity_log({ count: String(entries.length) })}</h3>
 	</div>
 
 	<div class="flex-1 overflow-y-auto">
 		{#if entries.length === 0}
-			<div class="px-4 py-8 text-center text-sm text-muted-foreground">No activity yet</div>
+			<div class="px-4 py-8 text-center text-sm text-muted-foreground">{m.pdf_no_activity()}</div>
 		{:else}
 			<div class="divide-y">
 				{#each entries as entry (entry.id)}

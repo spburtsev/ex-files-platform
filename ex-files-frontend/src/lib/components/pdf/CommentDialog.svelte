@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Textarea } from '$lib/components/ui/textarea/index.js';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		page: number;
@@ -45,22 +46,22 @@
 		style="left: {left}px; top: {top}px;"
 		onclick={(e) => e.stopPropagation()}
 	>
-		<h4 class="mb-1 text-sm font-semibold">Add Comment</h4>
+		<h4 class="mb-1 text-sm font-semibold">{m.pdf_add_comment()}</h4>
 		<p class="mb-3 text-xs text-muted-foreground">
-			Page {page + 1} &middot; Position ({Math.round(x)}%, {Math.round(y)}%)
+			{m.pdf_comment_position({ page: String(page + 1), x: String(Math.round(x)), y: String(Math.round(y)) })}
 		</p>
 
 		<form onsubmit={handleSubmit} class="flex flex-col gap-3">
 			<Textarea
 				autofocus
 				bind:value={text}
-				placeholder="Write your comment..."
+				placeholder={m.pdf_comment_placeholder()}
 				rows={3}
 				class="resize-none text-sm"
 			/>
 			<div class="flex justify-end gap-2">
-				<Button type="button" variant="ghost" size="sm" onclick={oncancel}>Cancel</Button>
-				<Button type="submit" size="sm" disabled={!text.trim()}>Add Comment</Button>
+				<Button type="button" variant="ghost" size="sm" onclick={oncancel}>{m.common_cancel()}</Button>
+				<Button type="submit" size="sm" disabled={!text.trim()}>{m.pdf_add_comment()}</Button>
 			</div>
 		</form>
 	</div>

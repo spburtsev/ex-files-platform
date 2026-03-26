@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { register } from '$lib/commands.remote';
+	import { m } from '$lib/paraglide/messages.js';
 	import { FileCheck2 } from '@lucide/svelte';
 	import * as Card from '$lib/components/ui/card/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -19,12 +20,12 @@
 		try {
 			const result = await register({ name, email, password });
 			if (!result.ok) {
-				error = result.error ?? 'Registration failed. Please try again.';
+				error = result.error ?? m.signup_error();
 			} else {
 				window.location.href = '/';
 			}
 		} catch {
-			error = 'Could not reach the server. Please try again.';
+			error = m.error_network();
 		} finally {
 			loading = false;
 		}
@@ -32,7 +33,7 @@
 </script>
 
 <svelte:head>
-	<title>Sign up — ex-files</title>
+	<title>{m.signup_page_title()}</title>
 </svelte:head>
 
 <div class="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
@@ -46,8 +47,8 @@
 
 			<Card.Root>
 				<Card.Header class="text-center">
-					<Card.Title class="text-xl">Create an account</Card.Title>
-					<Card.Description>Enter your details to get started</Card.Description>
+					<Card.Title class="text-xl">{m.signup_heading()}</Card.Title>
+					<Card.Description>{m.signup_description()}</Card.Description>
 				</Card.Header>
 				<Card.Content>
 					<form onsubmit={handleSubmit} class="flex flex-col gap-4">
@@ -56,11 +57,11 @@
 						{/if}
 
 						<div class="flex flex-col gap-2">
-							<Label for="name">Full name</Label>
+							<Label for="name">{m.signup_full_name()}</Label>
 							<Input
 								id="name"
 								type="text"
-								placeholder="Alex Johnson"
+								placeholder={m.signup_name_placeholder()}
 								bind:value={name}
 								required
 								autocomplete="name"
@@ -68,11 +69,11 @@
 						</div>
 
 						<div class="flex flex-col gap-2">
-							<Label for="email">Email</Label>
+							<Label for="email">{m.common_email()}</Label>
 							<Input
 								id="email"
 								type="email"
-								placeholder="you@example.com"
+								placeholder={m.signup_email_placeholder()}
 								bind:value={email}
 								required
 								autocomplete="email"
@@ -80,27 +81,27 @@
 						</div>
 
 						<div class="flex flex-col gap-2">
-							<Label for="password">Password</Label>
+							<Label for="password">{m.common_password()}</Label>
 							<Input
 								id="password"
 								type="password"
-								placeholder="••••••••"
+								placeholder={m.signup_password_placeholder()}
 								bind:value={password}
 								required
 								minlength={8}
 								autocomplete="new-password"
 							/>
-							<p class="text-xs text-muted-foreground">Must be at least 8 characters.</p>
+							<p class="text-xs text-muted-foreground">{m.signup_password_hint()}</p>
 						</div>
 
 						<Button type="submit" class="w-full" disabled={loading}>
-							{loading ? 'Creating account…' : 'Create account'}
+							{loading ? m.signup_submitting() : m.signup_submit()}
 						</Button>
 					</form>
 				</Card.Content>
 				<Card.Footer class="justify-center text-sm text-muted-foreground">
-					Already have an account?&nbsp;
-					<a href="/login" class="text-foreground underline-offset-4 hover:underline">Log in</a>
+					{m.signup_has_account()}&nbsp;
+					<a href="/login" class="text-foreground underline-offset-4 hover:underline">{m.signup_login_link()}</a>
 				</Card.Footer>
 			</Card.Root>
 		</div>
