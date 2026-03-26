@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { getAuditLog } from '$lib/data.remote';
+	import { m } from '$lib/paraglide/messages.js';
 	import * as Card from '$lib/components/ui/card/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -134,17 +135,17 @@
 </script>
 
 <svelte:head>
-	<title>Audit Log — ex-files</title>
+	<title>{m.audit_page_title()}</title>
 </svelte:head>
 
 <div class="flex flex-1 flex-col gap-6 p-6">
 	<div class="flex items-start justify-between gap-4">
 		<div>
-			<h1 class="text-lg font-semibold">Audit Log</h1>
+			<h1 class="text-lg font-semibold">{m.audit_heading()}</h1>
 			<p class="text-sm text-muted-foreground">
-				Immutable record of all platform actions.
+				{m.audit_description()}
 				{#if total > 0}
-					<span class="font-medium text-foreground">{total.toLocaleString()}</span> entries.
+					<span class="font-medium text-foreground">{m.audit_entries_count({ count: total.toLocaleString() })}</span>.
 				{/if}
 			</p>
 		</div>
@@ -155,7 +156,7 @@
 		<Card.Header class="pb-3">
 			<div class="flex items-center gap-1.5">
 				<Filter class="size-3.5 text-muted-foreground" />
-				<Card.Title class="text-sm">Filters</Card.Title>
+				<Card.Title class="text-sm">{m.audit_filters()}</Card.Title>
 				{#if hasFilters}
 					<Button
 						variant="ghost"
@@ -164,7 +165,7 @@
 						onclick={clearFilters}
 					>
 						<X class="size-3" />
-						Clear
+						{m.common_clear()}
 					</Button>
 				{/if}
 			</div>
@@ -179,12 +180,12 @@
 			>
 				<!-- Action filter -->
 				<div class="grid gap-1.5">
-					<Label class="text-xs">Action</Label>
+					<Label class="text-xs">{m.audit_action_label()}</Label>
 					<select
 						class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none"
 						bind:value={formAction}
 					>
-						<option value="">All actions</option>
+						<option value="">{m.audit_all_actions()}</option>
 						{#each KNOWN_ACTIONS as a (a)}
 							<option value={a}>{a}</option>
 						{/each}
@@ -193,29 +194,29 @@
 
 				<!-- Target type filter -->
 				<div class="grid gap-1.5">
-					<Label class="text-xs">Target type</Label>
+					<Label class="text-xs">{m.audit_target_type()}</Label>
 					<select
 						class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none"
 						bind:value={formTargetType}
 					>
 						{#each TARGET_TYPES as t (t)}
-							<option value={t}>{t || 'All types'}</option>
+							<option value={t}>{t || m.audit_all_types()}</option>
 						{/each}
 					</select>
 				</div>
 
 				<!-- Date range -->
 				<div class="grid gap-1.5">
-					<Label class="text-xs">From</Label>
+					<Label class="text-xs">{m.audit_from()}</Label>
 					<Input type="date" bind:value={formFrom} />
 				</div>
 				<div class="grid gap-1.5">
-					<Label class="text-xs">To</Label>
+					<Label class="text-xs">{m.audit_to()}</Label>
 					<Input type="date" bind:value={formTo} />
 				</div>
 
 				<div class="flex items-end sm:col-span-2 lg:col-span-4">
-					<Button type="submit" size="sm">Apply Filters</Button>
+					<Button type="submit" size="sm">{m.audit_apply_filters()}</Button>
 				</div>
 			</form>
 		</Card.Content>
@@ -243,9 +244,9 @@
 	{:else if entries.length === 0}
 		<Card.Root class="flex flex-col items-center justify-center py-16 text-center">
 			<Card.Content>
-				<p class="text-sm font-medium">No entries found</p>
+				<p class="text-sm font-medium">{m.audit_no_entries()}</p>
 				<p class="mt-1 text-xs text-muted-foreground">
-					{hasFilters ? 'Try adjusting your filters.' : 'Actions will appear here as they occur.'}
+					{hasFilters ? m.audit_adjust_filters() : m.audit_empty()}
 				</p>
 			</Card.Content>
 		</Card.Root>
@@ -310,9 +311,9 @@
 					onclick={() => navigatePage(currentPage - 1)}
 				>
 					<ChevronLeft class="size-4" />
-					Prev
+					{m.common_prev()}
 				</Button>
-				<span class="text-sm text-muted-foreground">Page {currentPage} of {totalPages}</span>
+				<span class="text-sm text-muted-foreground">{m.common_page_of({ current: String(currentPage), total: String(totalPages) })}</span>
 				<Button
 					variant="outline"
 					size="sm"
@@ -320,7 +321,7 @@
 					disabled={currentPage >= totalPages}
 					onclick={() => navigatePage(currentPage + 1)}
 				>
-					Next
+					{m.common_next()}
 					<ChevronRight class="size-4" />
 				</Button>
 			</div>

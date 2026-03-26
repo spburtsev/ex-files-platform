@@ -2,6 +2,7 @@
 	import { workbenchStore } from '$lib/stores/workbench.svelte';
 	import { getAssignment } from '$lib/data.remote';
 	import { protoTsToDate } from '$lib/proto-utils';
+	import { m } from '$lib/paraglide/messages.js';
 	import UploadZone from '$lib/components/pdf/UploadZone.svelte';
 	import PdfViewer from '$lib/components/pdf/PdfViewer.svelte';
 	import CommentPanel from '$lib/components/pdf/CommentPanel.svelte';
@@ -78,12 +79,12 @@
 
 	function deadlineChip(d: Date) {
 		const h = (d.getTime() - Date.now()) / 3_600_000;
-		if (h < 0) return { label: 'Overdue', cls: 'border-red-200 bg-red-50 text-red-600' };
+		if (h < 0) return { label: m.workbench_overdue(), cls: 'border-red-200 bg-red-50 text-red-600' };
 		if (h < 24)
-			return { label: `${Math.round(h)}h left`, cls: 'border-red-200 bg-red-50 text-red-600' };
+			return { label: m.workbench_hours_left({ hours: String(Math.round(h)) }), cls: 'border-red-200 bg-red-50 text-red-600' };
 		if (h < 72)
 			return {
-				label: `${Math.floor(h / 24)}d ${Math.round(h % 24)}h left`,
+				label: m.workbench_days_hours_left({ days: String(Math.floor(h / 24)), hours: String(Math.round(h % 24)) }),
 				cls: 'border-amber-200 bg-amber-50 text-amber-700'
 			};
 		return {
@@ -100,7 +101,7 @@
 </script>
 
 <svelte:head>
-	<title>ex-files - Document Review</title>
+	<title>{m.workbench_page_title()}</title>
 </svelte:head>
 
 {#if assignment}
@@ -113,7 +114,7 @@
 		>
 			<!-- Clickable edge -->
 			<button
-				title="Toggle Sidebar"
+				title={m.workbench_toggle_sidebar()}
 				class="absolute inset-y-0 right-0 z-10 w-1 cursor-col-resize transition-all hover:bg-primary/20"
 				onclick={() => (leftCollapsed = !leftCollapsed)}
 			></button>
@@ -125,7 +126,7 @@
 						variant="outline"
 						size="icon"
 						class="size-7"
-						title="Expand sidebar"
+						title={m.workbench_expand_sidebar()}
 						onclick={() => (leftCollapsed = false)}
 					>
 						<ChevronRight class="size-4" />
@@ -134,7 +135,7 @@
 						variant="outline"
 						size="icon"
 						class="size-7"
-						title="Upload document"
+						title={m.workbench_upload_document()}
 						onclick={() => {
 							leftCollapsed = false;
 							showUpload = true;
@@ -175,16 +176,16 @@
 							onclick={() => (detailsOpen = true)}
 						>
 							<Info class="size-3 shrink-0" />
-							Details
+							{m.workbench_details()}
 						</Button>
 					</div>
-					<p class="text-[10px] font-semibold text-muted-foreground">Submissions</p>
+					<p class="text-[10px] font-semibold text-muted-foreground">{m.workbench_submissions()}</p>
 				</div>
 
 				<!-- Document list -->
 				<ScrollArea.Root class="min-h-0 flex-1">
 					{#if workbenchStore.documents.length === 0}
-						<p class="px-3 py-2 text-xs text-muted-foreground">No submissions yet</p>
+						<p class="px-3 py-2 text-xs text-muted-foreground">{m.workbench_no_submissions()}</p>
 					{:else}
 						<ul class="pb-1">
 							{#each workbenchStore.documents as doc, docIdx (docIdx)}
@@ -219,7 +220,7 @@
 								class="text-xs"
 								onclick={() => (showUpload = false)}
 							>
-								Cancel
+								{m.common_cancel()}
 							</Button>
 						</div>
 					{:else}
@@ -230,7 +231,7 @@
 							onclick={() => (showUpload = true)}
 						>
 							<Upload class="size-3.5" />
-							Upload submission
+							{m.workbench_upload_submission()}
 						</Button>
 					{/if}
 				</div>
@@ -279,7 +280,7 @@
 				>
 					<!-- Clickable edge -->
 					<button
-						title="Toggle Activity Sidebar"
+						title={m.workbench_toggle_activity()}
 						class="absolute inset-y-0 left-0 z-10 w-1 cursor-col-resize transition-all hover:bg-primary/20"
 						onclick={() => (rightCollapsed = !rightCollapsed)}
 					></button>
@@ -290,7 +291,7 @@
 								variant="outline"
 								size="icon"
 								class="size-7"
-								title="Expand sidebar"
+								title={m.workbench_expand_sidebar()}
 								onclick={() => (rightCollapsed = false)}
 							>
 								<ChevronLeft class="size-4" />
@@ -303,10 +304,10 @@
 									: ''}"
 								disabled={!hasComments}
 								title={!hasComments
-									? 'No markers to show'
+									? m.workbench_no_markers()
 									: showMarkers
-										? 'Hide markers'
-										: 'Show markers'}
+										? m.workbench_hide_markers()
+										: m.workbench_show_markers()}
 								onclick={() => (showMarkers = !showMarkers)}
 							>
 								<MessageSquare class="size-4" />
@@ -325,7 +326,7 @@
 									onclick={() => (showMarkers = !showMarkers)}
 								>
 									<MessageSquare class="size-3.5 shrink-0" />
-									{showMarkers ? 'Hide markers' : 'Show markers'}
+									{showMarkers ? m.workbench_hide_markers() : m.workbench_show_markers()}
 								</Button>
 							</div>
 
@@ -338,7 +339,7 @@
 											: 'text-muted-foreground hover:text-foreground'}"
 										onclick={() => (sidePanel = 'comments')}
 									>
-										Comments
+										{m.workbench_comments()}
 									</button>
 									<button
 										class="flex-1 px-4 py-2.5 text-sm font-medium transition-colors {sidePanel ===
@@ -347,7 +348,7 @@
 											: 'text-muted-foreground hover:text-foreground'}"
 										onclick={() => (sidePanel = 'activity')}
 									>
-										Activity
+										{m.workbench_activity()}
 									</button>
 								</div>
 								<div class="min-h-0 flex-1 overflow-hidden">
@@ -388,17 +389,15 @@
 		<Dialog.Content class="max-w-lg">
 			<Dialog.Header>
 				<Dialog.Title>{assignment.title}</Dialog.Title>
-				<Dialog.Description>Assignment details</Dialog.Description>
+				<Dialog.Description>{m.workbench_assignment_details()}</Dialog.Description>
 			</Dialog.Header>
 
 			<div class="space-y-4 py-2">
 				<section>
-					<h3 class="mb-2 text-xs font-semibold text-muted-foreground">Instructions</h3>
+					<h3 class="mb-2 text-xs font-semibold text-muted-foreground">{m.workbench_instructions()}</h3>
 					<p class="text-sm leading-relaxed">{assignment.description}</p>
 					<p class="mt-2 text-sm leading-relaxed text-muted-foreground">
-						Please ensure your submission follows the formatting guidelines. Your work must be
-						original and properly cited. Late submissions will be penalised unless an extension has
-						been granted in advance.
+						{m.workbench_instructions_text()}
 					</p>
 				</section>
 			</div>

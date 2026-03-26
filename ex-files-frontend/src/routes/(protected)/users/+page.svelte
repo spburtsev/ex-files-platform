@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { getUsers } from '$lib/data.remote';
 	import { Role } from '$lib/gen/assignments/v1/assignments_pb';
+	import { m } from '$lib/paraglide/messages.js';
 	import * as Card from '$lib/components/ui/card/index.js';
 	import * as Avatar from '$lib/components/ui/avatar/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
@@ -34,13 +35,13 @@
 </script>
 
 <svelte:head>
-	<title>Users — ex-files</title>
+	<title>{m.users_page_title()}</title>
 </svelte:head>
 
 <div class="flex flex-1 flex-col gap-6 p-6">
 	<div>
-		<h1 class="text-lg font-semibold">Users</h1>
-		<p class="text-sm text-muted-foreground">Manage platform members and their roles.</p>
+		<h1 class="text-lg font-semibold">{m.users_heading()}</h1>
+		<p class="text-sm text-muted-foreground">{m.users_description()}</p>
 	</div>
 
 	{#if loading}
@@ -77,9 +78,9 @@
 					</Card.Header>
 					<Card.Content>
 						{#if user.role === Role.MANAGER}
-							<Badge variant="secondary" class="text-violet-700">Manager</Badge>
+							<Badge variant="secondary" class="text-violet-700">{m.role_manager()}</Badge>
 						{:else}
-							<Badge variant="outline">Employee</Badge>
+							<Badge variant="outline">{m.role_employee()}</Badge>
 						{/if}
 					</Card.Content>
 				</Card.Root>

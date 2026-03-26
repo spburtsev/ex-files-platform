@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { getMe } from '$lib/data.remote';
+	import { m } from '$lib/paraglide/messages.js';
 	import { Skeleton } from '$lib/components/ui/skeleton/index.js';
 	import { TriangleAlert } from '@lucide/svelte';
 
@@ -11,7 +12,7 @@
 </script>
 
 <svelte:head>
-	<title>Dashboard — ex-files</title>
+	<title>{m.dashboard_page_title()}</title>
 </svelte:head>
 
 <div class="flex flex-1 flex-col p-6">
@@ -23,6 +24,6 @@
 			<p class="text-sm">{meError}</p>
 		</div>
 	{:else}
-		<h1 class="text-2xl font-semibold">Hello, {firstName}!</h1>
+		<h1 class="text-2xl font-semibold">{m.dashboard_greeting({ name: firstName })}</h1>
 	{/if}
 </div>
