@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { workbenchStore } from '$lib/stores/workbench.svelte';
 	import { getAssignment } from '$lib/data.remote';
+	import { protoTsToDate } from '$lib/proto-utils';
 	import UploadZone from '$lib/components/pdf/UploadZone.svelte';
 	import PdfViewer from '$lib/components/pdf/PdfViewer.svelte';
 	import CommentPanel from '$lib/components/pdf/CommentPanel.svelte';
@@ -10,16 +11,9 @@
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import * as ScrollArea from '$lib/components/ui/scroll-area/index.js';
-	import {
-		ChevronRight,
-		ChevronLeft,
-		Upload,
-		MessageSquare,
-		Clock,
-		Info,
-	} from '@lucide/svelte';
+	import { ChevronRight, ChevronLeft, Upload, MessageSquare, Clock, Info } from '@lucide/svelte';
 
-	const workbenchQuery = getAssignment('a1');
+	const workbenchQuery = getAssignment('1');
 	const assignment = $derived(workbenchQuery.current?.assignment);
 	const user = $derived(workbenchQuery.current?.user);
 
@@ -82,8 +76,8 @@
 		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 	}
 
-	function deadlineChip(iso: string) {
-		const h = (new Date(iso).getTime() - Date.now()) / 3_600_000;
+	function deadlineChip(d: Date) {
+		const h = (d.getTime() - Date.now()) / 3_600_000;
 		if (h < 0) return { label: 'Overdue', cls: 'border-red-200 bg-red-50 text-red-600' };
 		if (h < 24)
 			return { label: `${Math.round(h)}h left`, cls: 'border-red-200 bg-red-50 text-red-600' };
@@ -93,16 +87,16 @@
 				cls: 'border-amber-200 bg-amber-50 text-amber-700'
 			};
 		return {
-			label: new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+			label: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
 			cls: 'border-border bg-muted/40 text-muted-foreground'
 		};
 	}
 
-	const dl = $derived(
-		assignment && !assignment.resolved && assignment.deadline
-			? deadlineChip(assignment.deadline)
-			: null
-	);
+	const dl = $derived.by(() => {
+		if (!assignment || assignment.resolved || !assignment.deadline) return null;
+		const d = protoTsToDate(assignment.deadline);
+		return d ? deadlineChip(d) : null;
+	});
 </script>
 
 <svelte:head>
@@ -156,7 +150,7 @@
 						{#if user}
 							<p class="truncate text-[10px] font-medium text-muted-foreground">{user.name}</p>
 						{/if}
-						<h2 class="line-clamp-2 text-sm font-semibold leading-snug">
+						<h2 class="line-clamp-2 text-sm leading-snug font-semibold">
 							{assignment.title}
 						</h2>
 						<p class="line-clamp-3 text-xs leading-relaxed text-muted-foreground">
@@ -166,7 +160,7 @@
 				</div>
 
 				<!-- Controls: deadline pill + details button -->
-				<div class="shrink-0 space-y-2 px-3 pb-1 pt-4">
+				<div class="shrink-0 space-y-2 px-3 pt-4 pb-1">
 					<div class="flex flex-wrap items-center gap-2">
 						{#if dl}
 							<Badge variant="outline" class="gap-1 text-[11px] {dl.cls}">
@@ -219,7 +213,12 @@
 					{#if showUpload}
 						<div class="flex flex-col gap-2">
 							<UploadZone onupload={handleUpload} />
-							<Button variant="ghost" size="sm" class="text-xs" onclick={() => (showUpload = false)}>
+							<Button
+								variant="ghost"
+								size="sm"
+								class="text-xs"
+								onclick={() => (showUpload = false)}
+							>
 								Cancel
 							</Button>
 						</div>
@@ -333,7 +332,8 @@
 							<div class="flex min-h-0 flex-1 flex-col">
 								<div class="flex shrink-0 border-b bg-card">
 									<button
-										class="flex-1 px-4 py-2.5 text-sm font-medium transition-colors {sidePanel === 'comments'
+										class="flex-1 px-4 py-2.5 text-sm font-medium transition-colors {sidePanel ===
+										'comments'
 											? 'border-b-2 border-primary text-primary'
 											: 'text-muted-foreground hover:text-foreground'}"
 										onclick={() => (sidePanel = 'comments')}
@@ -341,7 +341,8 @@
 										Comments
 									</button>
 									<button
-										class="flex-1 px-4 py-2.5 text-sm font-medium transition-colors {sidePanel === 'activity'
+										class="flex-1 px-4 py-2.5 text-sm font-medium transition-colors {sidePanel ===
+										'activity'
 											? 'border-b-2 border-primary text-primary'
 											: 'text-muted-foreground hover:text-foreground'}"
 										onclick={() => (sidePanel = 'activity')}

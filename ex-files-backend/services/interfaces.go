@@ -12,6 +12,7 @@ type UserRepository interface {
 	FindByEmail(email string) (*models.User, error)
 	FindByID(id uint) (*models.User, error)
 	Create(user *models.User) error
+	ListAll() ([]models.User, error)
 }
 
 type TokenService interface {
@@ -47,12 +48,19 @@ type StorageService interface {
 type DocumentRepository interface {
 	Create(doc *models.Document) error
 	FindByID(id uint) (*models.Document, error)
+	Update(doc *models.Document) error
 	ListByWorkspace(workspaceID uint, search, status string, limit, offset int) ([]models.Document, int64, error)
 	Delete(id uint) error
 	CreateVersion(version *models.DocumentVersion) error
 	GetVersions(documentID uint) ([]models.DocumentVersion, error)
 	GetVersion(id uint) (*models.DocumentVersion, error)
 	LatestVersionNumber(documentID uint) (int, error)
+}
+
+type AssignmentRepository interface {
+	ListAll() ([]models.Assignment, error)
+	FindByID(id uint) (*models.Assignment, error)
+	Create(a *models.Assignment) error
 }
 
 type WorkspaceRepository interface {

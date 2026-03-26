@@ -23,7 +23,7 @@ type DocumentHandler struct {
 }
 
 func documentToProto(d *models.Document) *docsv1.Document {
-	return &docsv1.Document{
+	pb := &docsv1.Document{
 		Id:           uint64(d.ID),
 		Name:         d.Name,
 		MimeType:     d.MimeType,
@@ -36,6 +36,12 @@ func documentToProto(d *models.Document) *docsv1.Document {
 		CreatedAt:    timestamppb.New(d.CreatedAt),
 		UpdatedAt:    timestamppb.New(d.UpdatedAt),
 	}
+	if d.ReviewerID != nil {
+		pb.ReviewerId = uint64(*d.ReviewerID)
+		pb.ReviewerName = d.Reviewer.Name
+	}
+	pb.ReviewerNote = d.ReviewerNote
+	return pb
 }
 
 func versionToProto(v *models.DocumentVersion) *docsv1.DocumentVersion {
@@ -131,7 +137,7 @@ func (h *DocumentHandler) Upload(c *gin.Context) {
 		doc = *loadedDoc
 	}
 
-	c.JSON(http.StatusCreated, &docsv1.UploadDocumentResponse{
+	protobufResponse(c, http.StatusCreated, &docsv1.UploadDocumentResponse{
 		Document: documentToProto(&doc),
 		Version: &docsv1.DocumentVersion{
 			Id:         uint64(version.ID),
@@ -211,7 +217,7 @@ func (h *DocumentHandler) UploadVersion(c *gin.Context) {
 		"hash":    hash,
 	})
 
-	c.JSON(http.StatusCreated, &docsv1.UploadDocumentResponse{
+	protobufResponse(c, http.StatusCreated, &docsv1.UploadDocumentResponse{
 		Document: documentToProto(doc),
 		Version: &docsv1.DocumentVersion{
 			Id:         uint64(version.ID),
@@ -251,7 +257,7 @@ func (h *DocumentHandler) List(c *gin.Context) {
 		pbDocs[i] = documentToProto(&docs[i])
 	}
 
-	c.JSON(http.StatusOK, &docsv1.ListDocumentsResponse{
+	protobufResponse(c, http.StatusOK, &docsv1.ListDocumentsResponse{
 		Documents: pbDocs,
 	})
 }
@@ -280,7 +286,7 @@ func (h *DocumentHandler) Get(c *gin.Context) {
 		pbVersions[i] = versionToProto(&versions[i])
 	}
 
-	c.JSON(http.StatusOK, &docsv1.GetDocumentResponse{
+	protobufResponse(c, http.StatusOK, &docsv1.GetDocumentResponse{
 		Document: &docsv1.DocumentDetail{
 			Document: documentToProto(doc),
 			Versions: pbVersions,
@@ -307,9 +313,271 @@ func (h *DocumentHandler) Download(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, &docsv1.GetDownloadURLResponse{
+	protobufResponse(c, http.StatusOK, &docsv1.GetDownloadURLResponse{
 		Url: url,
 	})
+}
+
+// Submit transitions a document from pending → in_review.
+// Only the uploader may submit their own document.
+func (h *DocumentHandler) Submit(c *gin.Context) {
+	userID, _ := c.Get("user_id")
+	docID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid document id"})
+		return
+	}
+
+	doc, err := h.Repo.FindByID(uint(docID))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "document not found"})
+		return
+	}
+
+	if doc.UploaderID != userID.(uint) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "only the uploader may submit this document"})
+		return
+	}
+
+	if !doc.CanTransitionTo(models.DocumentStatusInReview) {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "document cannot be submitted from its current status"})
+		return
+	}
+
+	doc.Status = models.DocumentStatusInReview
+	doc.ReviewerNote = ""
+	if err := h.Repo.Update(doc); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update document"})
+		return
+	}
+
+	logAudit(h.Audit, models.AuditActionDocumentSubmitted, userID.(uint), uintPtr(doc.ID), "document", map[string]any{
+		"document_id": doc.ID,
+	})
+
+	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
+}
+
+// AssignReviewer sets the reviewer for a document. Only managers and root users may do this.
+func (h *DocumentHandler) AssignReviewer(c *gin.Context) {
+	userID, _ := c.Get("user_id")
+	role, _ := c.Get("role")
+	if role.(string) != string(models.RoleManager) && role.(string) != string(models.RoleRoot) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "only managers may assign reviewers"})
+		return
+	}
+
+	docID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid document id"})
+		return
+	}
+
+	var body struct {
+		ReviewerID uint `json:"reviewer_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "reviewer_id is required"})
+		return
+	}
+
+	doc, err := h.Repo.FindByID(uint(docID))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "document not found"})
+		return
+	}
+
+	doc.ReviewerID = &body.ReviewerID
+	if err := h.Repo.Update(doc); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update document"})
+		return
+	}
+
+	logAudit(h.Audit, models.AuditActionDocumentReviewerAssigned, userID.(uint), uintPtr(doc.ID), "document", map[string]any{
+		"reviewer_id": body.ReviewerID,
+	})
+
+	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
+}
+
+// canReview returns true if the caller is the assigned reviewer, a manager, or root.
+func canReview(doc *models.Document, callerID uint, role string) bool {
+	if role == string(models.RoleManager) || role == string(models.RoleRoot) {
+		return true
+	}
+	return doc.ReviewerID != nil && *doc.ReviewerID == callerID
+}
+
+// Approve transitions a document from in_review → approved.
+func (h *DocumentHandler) Approve(c *gin.Context) {
+	userID, _ := c.Get("user_id")
+	role, _ := c.Get("role")
+	docID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid document id"})
+		return
+	}
+
+	doc, err := h.Repo.FindByID(uint(docID))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "document not found"})
+		return
+	}
+
+	if !canReview(doc, userID.(uint), role.(string)) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "not authorized to review this document"})
+		return
+	}
+
+	if !doc.CanTransitionTo(models.DocumentStatusApproved) {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "document cannot be approved from its current status"})
+		return
+	}
+
+	doc.Status = models.DocumentStatusApproved
+	if err := h.Repo.Update(doc); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update document"})
+		return
+	}
+
+	logAudit(h.Audit, models.AuditActionDocumentApproved, userID.(uint), uintPtr(doc.ID), "document", map[string]any{
+		"document_id": doc.ID,
+	})
+
+	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
+}
+
+// Reject transitions a document from in_review → rejected.
+func (h *DocumentHandler) Reject(c *gin.Context) {
+	userID, _ := c.Get("user_id")
+	role, _ := c.Get("role")
+	docID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid document id"})
+		return
+	}
+
+	var body struct {
+		Note string `json:"note"`
+	}
+	_ = c.ShouldBindJSON(&body)
+
+	doc, err := h.Repo.FindByID(uint(docID))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "document not found"})
+		return
+	}
+
+	if !canReview(doc, userID.(uint), role.(string)) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "not authorized to review this document"})
+		return
+	}
+
+	if !doc.CanTransitionTo(models.DocumentStatusRejected) {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "document cannot be rejected from its current status"})
+		return
+	}
+
+	doc.Status = models.DocumentStatusRejected
+	doc.ReviewerNote = body.Note
+	if err := h.Repo.Update(doc); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update document"})
+		return
+	}
+
+	logAudit(h.Audit, models.AuditActionDocumentRejected, userID.(uint), uintPtr(doc.ID), "document", map[string]any{
+		"document_id": doc.ID,
+		"note":        body.Note,
+	})
+
+	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
+}
+
+// RequestChanges transitions a document from in_review → changes_requested.
+func (h *DocumentHandler) RequestChanges(c *gin.Context) {
+	userID, _ := c.Get("user_id")
+	role, _ := c.Get("role")
+	docID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid document id"})
+		return
+	}
+
+	var body struct {
+		Note string `json:"note"`
+	}
+	_ = c.ShouldBindJSON(&body)
+
+	doc, err := h.Repo.FindByID(uint(docID))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "document not found"})
+		return
+	}
+
+	if !canReview(doc, userID.(uint), role.(string)) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "not authorized to review this document"})
+		return
+	}
+
+	if !doc.CanTransitionTo(models.DocumentStatusChangesRequested) {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "document cannot have changes requested from its current status"})
+		return
+	}
+
+	doc.Status = models.DocumentStatusChangesRequested
+	doc.ReviewerNote = body.Note
+	if err := h.Repo.Update(doc); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update document"})
+		return
+	}
+
+	logAudit(h.Audit, models.AuditActionDocumentChangesRequested, userID.(uint), uintPtr(doc.ID), "document", map[string]any{
+		"document_id": doc.ID,
+		"note":        body.Note,
+	})
+
+	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
+}
+
+// Resubmit transitions a document from changes_requested → in_review.
+// Only the uploader may resubmit.
+func (h *DocumentHandler) Resubmit(c *gin.Context) {
+	userID, _ := c.Get("user_id")
+	docID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid document id"})
+		return
+	}
+
+	doc, err := h.Repo.FindByID(uint(docID))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "document not found"})
+		return
+	}
+
+	if doc.UploaderID != userID.(uint) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "only the uploader may resubmit this document"})
+		return
+	}
+
+	if !doc.CanTransitionTo(models.DocumentStatusInReview) {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "document cannot be resubmitted from its current status"})
+		return
+	}
+
+	doc.Status = models.DocumentStatusInReview
+	doc.ReviewerNote = ""
+	if err := h.Repo.Update(doc); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update document"})
+		return
+	}
+
+	logAudit(h.Audit, models.AuditActionDocumentSubmitted, userID.(uint), uintPtr(doc.ID), "document", map[string]any{
+		"document_id": doc.ID,
+		"resubmit":    true,
+	})
+
+	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
 }
 
 func (h *DocumentHandler) Delete(c *gin.Context) {
@@ -336,7 +604,7 @@ func (h *DocumentHandler) Delete(c *gin.Context) {
 		"action": "deleted",
 	})
 
-	c.JSON(http.StatusOK, &docsv1.DeleteDocumentResponse{
+	protobufResponse(c, http.StatusOK, &docsv1.DeleteDocumentResponse{
 		Message: "document deleted",
 	})
 }

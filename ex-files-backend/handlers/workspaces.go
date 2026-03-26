@@ -1,8 +1,6 @@
 package handlers
 
 import (
-	"fmt"
-	"math"
 	"net/http"
 	"strconv"
 
@@ -59,33 +57,9 @@ func (h *WorkspaceHandler) Create(c *gin.Context) {
 		"name": ws.Name,
 	})
 
-	c.JSON(http.StatusCreated, &workspacesv1.CreateWorkspaceResponse{
+	protobufResponse(c, http.StatusCreated, &workspacesv1.CreateWorkspaceResponse{
 		Workspace: workspaceToProto(&ws),
 	})
-}
-
-const defaultPageSize = 20
-
-func parsePagination(c *gin.Context) (page, perPage int) {
-	page = 1
-	perPage = defaultPageSize
-
-	if v, err := strconv.Atoi(c.Query("page")); err == nil && v > 0 {
-		page = v
-	}
-	if v, err := strconv.Atoi(c.Query("per_page")); err == nil && v > 0 && v <= 100 {
-		perPage = v
-	}
-	return
-}
-
-func setPaginationHeaders(c *gin.Context, page, perPage int, total int64) {
-	totalPages := int(math.Ceil(float64(total) / float64(perPage)))
-
-	c.Header("X-Total-Count", fmt.Sprintf("%d", total))
-	c.Header("X-Page", fmt.Sprintf("%d", page))
-	c.Header("X-Per-Page", fmt.Sprintf("%d", perPage))
-	c.Header("X-Total-Pages", fmt.Sprintf("%d", totalPages))
 }
 
 func (h *WorkspaceHandler) List(c *gin.Context) {
@@ -117,7 +91,7 @@ func (h *WorkspaceHandler) List(c *gin.Context) {
 		pbWorkspaces[i] = workspaceToProto(&workspaces[i])
 	}
 
-	c.JSON(http.StatusOK, &workspacesv1.GetWorkspacesResponse{
+	protobufResponse(c, http.StatusOK, &workspacesv1.GetWorkspacesResponse{
 		Workspaces: pbWorkspaces,
 	})
 }
@@ -152,7 +126,7 @@ func (h *WorkspaceHandler) Get(c *gin.Context) {
 		pbMembers[i] = userToProto(&members[i])
 	}
 
-	c.JSON(http.StatusOK, &workspacesv1.GetWorkspaceResponse{
+	protobufResponse(c, http.StatusOK, &workspacesv1.GetWorkspaceResponse{
 		Workspace: &workspacesv1.WorkspaceDetail{
 			Workspace: workspaceToProto(ws),
 			Manager:   userToProto(manager),
@@ -196,7 +170,7 @@ func (h *WorkspaceHandler) Update(c *gin.Context) {
 		"name": ws.Name,
 	})
 
-	c.JSON(http.StatusOK, &workspacesv1.UpdateWorkspaceResponse{
+	protobufResponse(c, http.StatusOK, &workspacesv1.UpdateWorkspaceResponse{
 		Workspace: workspaceToProto(ws),
 	})
 }
@@ -229,7 +203,7 @@ func (h *WorkspaceHandler) Delete(c *gin.Context) {
 		"name": ws.Name,
 	})
 
-	c.JSON(http.StatusOK, &workspacesv1.DeleteWorkspaceResponse{
+	protobufResponse(c, http.StatusOK, &workspacesv1.DeleteWorkspaceResponse{
 		Message: "workspace deleted",
 	})
 }
@@ -272,7 +246,7 @@ func (h *WorkspaceHandler) AddMember(c *gin.Context) {
 		"member_user_id": req.UserId,
 	})
 
-	c.JSON(http.StatusCreated, &workspacesv1.AddMemberResponse{
+	protobufResponse(c, http.StatusCreated, &workspacesv1.AddMemberResponse{
 		Member: &workspacesv1.WorkspaceMember{
 			Id:          uint64(member.ID),
 			WorkspaceId: uint64(member.WorkspaceID),
@@ -316,7 +290,7 @@ func (h *WorkspaceHandler) RemoveMember(c *gin.Context) {
 		"member_user_id": memberUserID,
 	})
 
-	c.JSON(http.StatusOK, &workspacesv1.RemoveMemberResponse{
+	protobufResponse(c, http.StatusOK, &workspacesv1.RemoveMemberResponse{
 		Message: "member removed",
 	})
 }

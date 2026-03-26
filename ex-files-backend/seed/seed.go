@@ -13,7 +13,7 @@ type seedUser struct {
 	Role                  models.Role
 }
 
-var mockUsers = []seedUser{
+var seedUsers = []seedUser{
 	{"Sergei Burtsev", "sergei.p.burtsev@gmail.com", "admin", models.RoleRoot},
 	{"Alex Johnson", "a.johnson@acme.org", "password123", models.RoleEmployee},
 	{"Maria Chen", "m.chen@acme.org", "password123", models.RoleEmployee},
@@ -22,7 +22,8 @@ var mockUsers = []seedUser{
 }
 
 func Run(db *gorm.DB, hasher services.Hasher) {
-	for _, su := range mockUsers {
+	// Seed users
+	for _, su := range seedUsers {
 		var existing models.User
 		if db.Where("email = ?", su.Email).First(&existing).Error == nil {
 			continue
@@ -41,7 +42,7 @@ func Run(db *gorm.DB, hasher services.Hasher) {
 		if err := db.Create(&u).Error; err != nil {
 			log.Printf("seed: create error for %s: %v", su.Email, err)
 		} else {
-			log.Printf("seed: created %s (%s)", su.Name, su.Email)
+			log.Printf("seed: created user %s (%s)", su.Name, su.Email)
 		}
 	}
 }

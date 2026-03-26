@@ -1,7 +1,6 @@
 package handlers_test
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -12,9 +11,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 
+	auditv1 "github.com/spburtsev/ex-files-backend/gen/audit/v1"
 	"github.com/spburtsev/ex-files-backend/handlers"
 	"github.com/spburtsev/ex-files-backend/models"
 	"github.com/spburtsev/ex-files-backend/services"
@@ -83,14 +84,13 @@ func TestAuditList(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, "2", w.Header().Get("X-Total-Count"))
 
-		var resp map[string]any
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		entryList := resp["entries"].([]any)
-		assert.Len(t, entryList, 2)
+		var resp auditv1.GetAuditLogResponse
+		require.NoError(t, proto.Unmarshal(w.Body.Bytes(), &resp))
+		assert.Len(t, resp.Entries, 2)
 
-		first := entryList[0].(map[string]any)
-		assert.Equal(t, "user.registered", first["action"])
-		assert.Equal(t, "Alice", first["actor_name"])
+		first := resp.Entries[0]
+		assert.Equal(t, "user.registered", first.Action)
+		assert.Equal(t, "Alice", first.ActorName)
 
 		auditRepo.AssertExpectations(t)
 	})

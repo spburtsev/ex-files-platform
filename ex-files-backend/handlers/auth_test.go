@@ -12,8 +12,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 	"gorm.io/gorm"
 
+	authv1 "github.com/spburtsev/ex-files-backend/gen/auth/v1"
 	"github.com/spburtsev/ex-files-backend/handlers"
 	"github.com/spburtsev/ex-files-backend/models"
 )
@@ -46,6 +48,14 @@ func (m *mockRepo) Create(user *models.User) error {
 	args := m.Called(user)
 	user.ID = 1 // simulate DB-assigned ID
 	return args.Error(0)
+}
+
+func (m *mockRepo) ListAll() ([]models.User, error) {
+	args := m.Called()
+	if u, ok := args.Get(0).([]models.User); ok {
+		return u, args.Error(1)
+	}
+	return nil, args.Error(1)
 }
 
 type mockTokens struct{ mock.Mock }
@@ -357,10 +367,9 @@ func TestMe(t *testing.T) {
 
 			assert.Equal(t, tc.wantStatus, w.Code)
 			if tc.wantEmail != "" {
-				var resp map[string]any
-				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-				user, _ := resp["user"].(map[string]any)
-			assert.Equal(t, tc.wantEmail, user["email"])
+				var resp authv1.MeResponse
+				require.NoError(t, proto.Unmarshal(w.Body.Bytes(), &resp))
+				assert.Equal(t, tc.wantEmail, resp.User.Email)
 			}
 			repo.AssertExpectations(t)
 		})

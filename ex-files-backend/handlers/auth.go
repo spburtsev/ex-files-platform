@@ -72,7 +72,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	})
 
 	setSessionCookie(c, token)
-	c.JSON(http.StatusCreated, &authv1.RegisterResponse{
+	protobufResponse(c, http.StatusCreated, &authv1.RegisterResponse{
 		User:  userToProto(&user),
 		Token: token,
 	})
@@ -107,7 +107,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	})
 
 	setSessionCookie(c, token)
-	c.JSON(http.StatusOK, &authv1.LoginResponse{
+	protobufResponse(c, http.StatusOK, &authv1.LoginResponse{
 		User:  userToProto(user),
 		Token: token,
 	})
@@ -120,10 +120,23 @@ func (h *AuthHandler) Me(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 		return
 	}
-	c.JSON(http.StatusOK, &authv1.MeResponse{User: userToProto(user)})
+	protobufResponse(c, http.StatusOK, &authv1.MeResponse{User: userToProto(user)})
 }
 
 func (h *AuthHandler) Logout(c *gin.Context) {
 	c.SetCookie("session", "", -1, "/", "", false, true)
-	c.JSON(http.StatusOK, &authv1.LogoutResponse{Message: "logged out"})
+	protobufResponse(c, http.StatusOK, &authv1.LogoutResponse{Message: "logged out"})
+}
+
+func (h *AuthHandler) ListUsers(c *gin.Context) {
+	users, err := h.Repo.ListAll()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list users"})
+		return
+	}
+	pb := make([]*authv1.User, len(users))
+	for i := range users {
+		pb[i] = userToProto(&users[i])
+	}
+	c.JSON(http.StatusOK, gin.H{"users": pb})
 }

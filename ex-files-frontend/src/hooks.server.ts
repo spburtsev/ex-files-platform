@@ -3,7 +3,7 @@ import { redirect, type Handle } from '@sveltejs/kit';
 import { getTextDirection } from '$lib/paraglide/runtime';
 import { paraglideMiddleware } from '$lib/paraglide/server';
 
-const PUBLIC_PATHS = ['/login', '/signup', '/api/'];
+const PUBLIC_PATHS = ['/login', '/signup'];
 
 const handleAuth: Handle = ({ event, resolve }) => {
 	const { pathname } = event.url;
