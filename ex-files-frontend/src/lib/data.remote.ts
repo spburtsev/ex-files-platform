@@ -83,10 +83,9 @@ export const getWorkspaceDetail = query('unchecked', async (id: string) => {
 
 export const getSystemUsers = query(async () => {
 	const { fetch } = getRequestEvent();
-	const res = await fetch(`${BACKEND}/auth/users`);
-	if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-	const data = await res.json();
-	return (data.users ?? []) as Array<{ id: number; name: string; email: string; role: number }>;
+	const bytes = await fetchProto(`${BACKEND}/auth/users`, fetch);
+	const r = fromBinary(GetUsersResponseSchema, bytes);
+	return r.users;
 });
 
 // ---------------------------------------------------------------------------

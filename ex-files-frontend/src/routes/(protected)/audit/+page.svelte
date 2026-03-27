@@ -11,8 +11,19 @@
 	import { Separator } from '$lib/components/ui/separator/index.js';
 	import { Skeleton } from '$lib/components/ui/skeleton/index.js';
 	import { ChevronLeft, ChevronRight, Filter, X } from '@lucide/svelte';
-	import { protoTsToDate } from '$lib/proto-utils';
+	import { protoTsToDate, isManager } from '$lib/proto-utils';
+	import { getMe } from '$lib/data.remote';
+	import { localizeHref } from '$lib/paraglide/runtime';
 	import type { Timestamp } from '@bufbuild/protobuf/wkt';
+
+	// Redirect employees away from audit page
+	const meQuery = getMe();
+	const me = $derived(meQuery.current);
+	$effect(() => {
+		if (me && !isManager(me.role)) {
+			goto(localizeHref('/'));
+		}
+	});
 
 	// Read all filters from URL (reactive)
 	const currentPage = $derived(Number(page.url.searchParams.get('page') ?? '1'));

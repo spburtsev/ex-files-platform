@@ -58,6 +58,7 @@
 	},
 	"dependencies": {
 		"@bufbuild/protobuf": "^2.11.0",
-		"pdfjs-dist": "^5.5.207"
+		"pdfjs-dist": "^5.5.207",
+		"svelte-sonner": "^1.1.0"
 	}
 }

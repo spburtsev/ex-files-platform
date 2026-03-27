@@ -61,12 +61,16 @@
 			Icon: Users,
 			match: (p: string) => p.startsWith('/users')
 		},
-		{
-			href: localizeHref('/audit'),
-			label: m.nav_audit_log(),
-			Icon: ScrollText,
-			match: (p: string) => p.startsWith('/audit')
-		}
+		...(isManager(me?.role)
+			? [
+					{
+						href: localizeHref('/audit'),
+						label: m.nav_audit_log(),
+						Icon: ScrollText,
+						match: (p: string) => p.startsWith('/audit')
+					}
+				]
+			: [])
 	]);
 
 	const cleanPathname = $derived(deLocalizeHref(page.url.pathname));

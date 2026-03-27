@@ -2,12 +2,13 @@
 	import { page } from '$app/state';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { getWorkspaceDetail, getMe, getSystemUsers, getIssues } from '$lib/data.remote';
-	import { protoTsToDate, roleName } from '$lib/proto-utils';
+	import { protoTsToDate, roleName, isManager } from '$lib/proto-utils';
 	import {
 		updateWorkspace,
 		deleteWorkspace,
 		addWorkspaceMember,
-		removeWorkspaceMember
+		removeWorkspaceMember,
+		createIssue
 	} from '$lib/commands.remote';
 	import { m } from '$lib/paraglide/messages.js';
 	import { localizeHref } from '$lib/paraglide/runtime';
@@ -20,6 +21,7 @@
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
 	import { Skeleton } from '$lib/components/ui/skeleton/index.js';
+	import { Textarea } from '$lib/components/ui/textarea/index.js';
 	import {
 		Pencil,
 		Trash2,
@@ -28,7 +30,8 @@
 		Calendar,
 		Crown,
 		FileText,
-		ArrowRight
+		ArrowRight,
+		Plus
 	} from '@lucide/svelte';
 	import type { Timestamp } from '@bufbuild/protobuf/wkt';
 	import { extraBreadcrumbs } from '$lib/stores/breadcrumbs';
@@ -75,6 +78,15 @@
 	// Delete dialog
 	let deleteOpen = $state(false);
 	let deleting = $state(false);
+
+	// New issue dialog
+	let newIssueOpen = $state(false);
+	let newIssueTitle = $state('');
+	let newIssueDesc = $state('');
+	let newIssueAssignee = $state('');
+	let newIssueDeadline = $state('');
+	let creatingIssue = $state(false);
+	let newIssueError = $state('');
 
 	// Add member dialog
 	let addOpen = $state(false);
@@ -164,6 +176,35 @@
 		}
 	}
 
+	async function handleCreateIssue() {
+		if (!newIssueTitle.trim() || !newIssueAssignee) return;
+		creatingIssue = true;
+		newIssueError = '';
+		try {
+			const result = await createIssue({
+				workspaceId: wsId,
+				title: newIssueTitle.trim(),
+				description: newIssueDesc.trim() || undefined,
+				assigneeId: Number(newIssueAssignee),
+				deadline: newIssueDeadline || undefined
+			});
+			if (!result.ok) {
+				newIssueError = result.error ?? m.ws_issue_create_error();
+				return;
+			}
+			newIssueOpen = false;
+			newIssueTitle = '';
+			newIssueDesc = '';
+			newIssueAssignee = '';
+			newIssueDeadline = '';
+			await invalidateAll();
+		} catch {
+			newIssueError = m.error_network_retry();
+		} finally {
+			creatingIssue = false;
+		}
+	}
+
 	async function handleRemoveMember(userId: bigint) {
 		try {
 			const result = await removeWorkspaceMember({ workspaceId: wsId, userId });
@@ -236,6 +277,7 @@
 
 		<!-- Tabbed content: Issues / Members -->
 		<Tabs.Root value="issues">
+			<div class="flex items-center justify-between">
 			<Tabs.List>
 				<Tabs.Trigger value="issues">
 					<FileText class="mr-1.5 size-3.5" />
@@ -256,6 +298,13 @@
 					{/if}
 				</Tabs.Trigger>
 			</Tabs.List>
+			{#if isManager(me?.role)}
+			<Button size="sm" class="gap-1.5" onclick={() => (newIssueOpen = true)}>
+				<Plus class="size-4" />
+				{m.ws_new_issue()}
+			</Button>
+			{/if}
+			</div>
 
 			<!-- Issues tab -->
 			<Tabs.Content value="issues" class="mt-4 flex flex-col gap-4">
@@ -469,6 +518,65 @@
 			</Dialog.Close>
 			<Button onclick={handleEdit} disabled={editing || !editName.trim()}>
 				{editing ? m.common_saving() : m.common_save()}
+			</Button>
+		</Dialog.Footer>
+	</Dialog.Content>
+</Dialog.Root>
+
+<!-- New issue dialog -->
+<Dialog.Root bind:open={newIssueOpen}>
+	<Dialog.Content class="sm:max-w-md">
+		<Dialog.Header>
+			<Dialog.Title>{m.ws_new_issue_title()}</Dialog.Title>
+			<Dialog.Description>{m.ws_new_issue_description()}</Dialog.Description>
+		</Dialog.Header>
+		<div class="grid gap-4 py-4">
+			<div class="grid gap-2">
+				<Label for="issue-title">{m.ws_issue_title_label()}</Label>
+				<Input
+					id="issue-title"
+					placeholder={m.ws_issue_title_placeholder()}
+					bind:value={newIssueTitle}
+				/>
+			</div>
+			<div class="grid gap-2">
+				<Label for="issue-desc">{m.ws_issue_description_label()}</Label>
+				<Textarea
+					id="issue-desc"
+					placeholder={m.ws_issue_description_placeholder()}
+					bind:value={newIssueDesc}
+					rows={3}
+				/>
+			</div>
+			<div class="grid gap-2">
+				<Label for="issue-assignee">{m.ws_issue_assignee_label()}</Label>
+				<select
+					id="issue-assignee"
+					class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+					bind:value={newIssueAssignee}
+				>
+					<option value="" disabled>{m.ws_issue_assignee_select()}</option>
+					{#each members as member (member.id)}
+						<option value={String(member.id)}>{member.name}</option>
+					{/each}
+				</select>
+			</div>
+			<div class="grid gap-2">
+				<Label for="issue-deadline">{m.ws_issue_deadline_label()}</Label>
+				<Input id="issue-deadline" type="date" bind:value={newIssueDeadline} />
+			</div>
+			{#if newIssueError}
+				<p class="text-sm text-destructive">{newIssueError}</p>
+			{/if}
+		</div>
+		<Dialog.Footer>
+			<Dialog.Close>
+				{#snippet child({ props })}
+					<Button variant="outline" {...props}>{m.common_cancel()}</Button>
+				{/snippet}
+			</Dialog.Close>
+			<Button onclick={handleCreateIssue} disabled={creatingIssue || !newIssueTitle.trim() || !newIssueAssignee}>
+				{creatingIssue ? m.common_creating() : m.common_create()}
 			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
