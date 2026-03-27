@@ -116,6 +116,7 @@
 	"ws_no_members": "Brak członków.",
 	"ws_no_members_hint": " Użyj «Dodaj członka», aby kogoś zaprosić.",
 	"ws_remove_member": "Usuń członka",
+	"ws_remove_member_error": "Nie udało się usunąć członka",
 	"ws_new_issue": "Nowe zagadnienie",
 	"ws_new_issue_title": "Nowe zagadnienie",
 	"ws_new_issue_description": "Utwórz nowe zagadnienie w tej przestrzeni roboczej.",

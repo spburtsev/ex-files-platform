@@ -25,6 +25,7 @@
 		ScrollText,
 		Globe
 	} from '@lucide/svelte';
+	import { Toaster } from 'svelte-sonner';
 	import { extraBreadcrumbs } from '$lib/stores/breadcrumbs';
 
 	let { children } = $props();
@@ -284,3 +285,5 @@
 		{/each}
 	</div>
 </div>
+
+<Toaster richColors closeButton position="top-right" />

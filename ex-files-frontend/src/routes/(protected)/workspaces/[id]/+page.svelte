@@ -10,6 +10,7 @@
 		removeWorkspaceMember,
 		createIssue
 	} from '$lib/commands.remote';
+	import { toast } from 'svelte-sonner';
 	import { m } from '$lib/paraglide/messages.js';
 	import { localizeHref } from '$lib/paraglide/runtime';
 	import * as Card from '$lib/components/ui/card/index.js';
@@ -208,10 +209,13 @@
 	async function handleRemoveMember(userId: bigint) {
 		try {
 			const result = await removeWorkspaceMember({ workspaceId: wsId, userId });
-			if (!result.ok) return;
+			if (!result.ok) {
+				toast.error(m.ws_remove_member_error());
+				return;
+			}
 			await invalidateAll();
 		} catch {
-			// ignore
+			toast.error(m.ws_remove_member_error());
 		}
 	}
 </script>

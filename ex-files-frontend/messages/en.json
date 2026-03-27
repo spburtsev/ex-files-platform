@@ -116,6 +116,7 @@
 	"ws_no_members": "No members yet.",
 	"ws_no_members_hint": " Use \"Add Member\" to invite someone.",
 	"ws_remove_member": "Remove member",
+	"ws_remove_member_error": "Failed to remove member",
 	"ws_new_issue": "New Issue",
 	"ws_new_issue_title": "New Issue",
 	"ws_new_issue_description": "Create a new issue in this workspace.",
