@@ -1,12 +1,12 @@
 import { sequence } from '@sveltejs/kit/hooks';
 import { redirect, type Handle } from '@sveltejs/kit';
-import { getTextDirection } from '$lib/paraglide/runtime';
+import { cookieName, cookieMaxAge, deLocalizeUrl, getTextDirection } from '$lib/paraglide/runtime';
 import { paraglideMiddleware } from '$lib/paraglide/server';
 
 const PUBLIC_PATHS = ['/login', '/signup'];
 
 const handleAuth: Handle = ({ event, resolve }) => {
-	const { pathname } = event.url;
+	const pathname = deLocalizeUrl(event.url).pathname;
 	const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
 	if (!isPublic && !event.cookies.get('session')) {
 		redirect(303, '/login');
@@ -14,9 +14,11 @@ const handleAuth: Handle = ({ event, resolve }) => {
 	return resolve(event);
 };
 
-const handleParaglide: Handle = ({ event, resolve }) =>
-	paraglideMiddleware(event.request, ({ request, locale }) => {
+const handleParaglide: Handle = async ({ event, resolve }) => {
+	let detectedLocale: string | undefined;
+	const response = await paraglideMiddleware(event.request, ({ request, locale }) => {
 		event.request = request;
+		detectedLocale = locale;
 
 		return resolve(event, {
 			transformPageChunk: ({ html }) =>
@@ -25,5 +27,12 @@ const handleParaglide: Handle = ({ event, resolve }) =>
 					.replace('%paraglide.dir%', getTextDirection(locale))
 		});
 	});
+	if (detectedLocale) {
+		response.headers.append('set-cookie',
+			`${cookieName}=${detectedLocale}; Path=/; Max-Age=${cookieMaxAge}; SameSite=Lax`
+		);
+	}
+	return response;
+};
 
 export const handle: Handle = sequence(handleAuth, handleParaglide);

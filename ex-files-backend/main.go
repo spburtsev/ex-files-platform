@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"net/http"
 	"os"
 
 	"github.com/gin-contrib/cors"
@@ -33,7 +34,7 @@ func main() {
 		log.Fatal("failed to connect to database:", err)
 	}
 
-	if err := db.AutoMigrate(&models.User{}, &models.Workspace{}, &models.WorkspaceMember{}, &models.AuditEntry{}, &models.Document{}, &models.DocumentVersion{}, &models.Assignment{}); err != nil {
+	if err := db.AutoMigrate(&models.User{}, &models.Workspace{}, &models.WorkspaceMember{}, &models.AuditEntry{}, &models.Issue{}, &models.Document{}, &models.DocumentVersion{}); err != nil {
 		log.Fatal("auto-migrate failed:", err)
 	}
 
@@ -84,11 +85,8 @@ func main() {
 		AllowCredentials: true,
 	}))
 
-	assignmentRepo := &services.GormAssignmentRepository{DB: db}
-	assignments := &handlers.AssignmentsHandler{Repo: assignmentRepo, UserRepo: repo}
-	router.GET("/users", assignments.GetUsers)
-	router.GET("/assignments", assignments.GetAssignments)
-	router.GET("/assignments/:id", assignments.GetAssignment)
+	issueRepo := &services.GormIssueRepository{DB: db}
+	issues := &handlers.IssuesHandler{Repo: issueRepo, UserRepo: repo, Audit: auditRepo}
 
 	authRoutes := router.Group("/auth")
 	{
@@ -108,8 +106,15 @@ func main() {
 		workspaceRoutes.DELETE("/:id", ws.Delete)
 		workspaceRoutes.POST("/:id/members", ws.AddMember)
 		workspaceRoutes.DELETE("/:id/members/:userId", ws.RemoveMember)
-		workspaceRoutes.POST("/:id/documents", docs.Upload)
-		workspaceRoutes.GET("/:id/documents", docs.List)
+		workspaceRoutes.GET("/:id/issues", issues.ListByWorkspace)
+		workspaceRoutes.POST("/:id/issues", issues.Create)
+	}
+
+	issueRoutes := router.Group("/issues", middleware.AuthMiddleware(ts))
+	{
+		issueRoutes.GET("/:id", issues.Get)
+		issueRoutes.POST("/:id/documents", docs.Upload)
+		issueRoutes.GET("/:id/documents", docs.List)
 	}
 
 	documentRoutes := router.Group("/documents", middleware.AuthMiddleware(ts))
@@ -130,6 +135,9 @@ func main() {
 	{
 		auditRoutes.GET("", audit.List)
 	}
+	router.GET("/healthz", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
 
 	router.Run()
 }

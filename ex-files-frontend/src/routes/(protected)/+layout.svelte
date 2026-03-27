@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { locales, localizeHref } from '$lib/paraglide/runtime';
+	import { locales, localizeHref, deLocalizeHref, getLocaleForUrl } from '$lib/paraglide/runtime';
+	import { m } from '$lib/paraglide/messages.js';
 	import '../layout.css';
 	import favicon from '$lib/assets/favicon.svg';
 	import { getMe } from '$lib/data.remote';
@@ -21,16 +22,17 @@
 		LogOut,
 		User,
 		FileCheck2,
-		ScrollText
+		ScrollText,
+		Globe
 	} from '@lucide/svelte';
 	import { extraBreadcrumbs } from '$lib/stores/breadcrumbs';
 
 	let { children } = $props();
 
 	const meQuery = getMe();
-	const meLoading = $derived(meQuery.current === undefined);
-	const me = $derived(meQuery.current?.user);
-	const meError = $derived(meQuery.current?.error);
+	const meLoading = $derived(!meQuery.ready);
+	const me = $derived(meQuery.current);
+	const meError = $derived(meQuery.error);
 
 	const initials = $derived(
 		me?.name
@@ -40,34 +42,36 @@
 			.toUpperCase() ?? ''
 	);
 
-	const navLinks = [
+	const navLinks = $derived([
 		{
-			href: '/',
-			label: 'Dashboard',
+			href: localizeHref('/'),
+			label: m.nav_dashboard(),
 			Icon: LayoutDashboard,
 			match: (p: string) => p === '/'
 		},
 		{
-			href: '/workspaces',
-			label: 'Workspaces',
+			href: localizeHref('/workspaces'),
+			label: m.nav_workspaces(),
 			Icon: FolderOpen,
 			match: (p: string) => p.startsWith('/workspaces')
 		},
 		{
-			href: '/users',
-			label: 'Users',
+			href: localizeHref('/users'),
+			label: m.nav_users(),
 			Icon: Users,
 			match: (p: string) => p.startsWith('/users')
 		},
 		{
-			href: '/audit',
-			label: 'Audit Log',
+			href: localizeHref('/audit'),
+			label: m.nav_audit_log(),
 			Icon: ScrollText,
 			match: (p: string) => p.startsWith('/audit')
 		}
-	];
+	]);
 
-	const pageLabel = $derived(navLinks.find((l) => l.match(page.url.pathname))?.label ?? 'ex-files');
+	const cleanPathname = $derived(deLocalizeHref(page.url.pathname));
+	const pageLabel = $derived(navLinks.find((l) => l.match(cleanPathname))?.label ?? 'ex-files');
+	const currentLocale = $derived((() => { try { return getLocaleForUrl(page.url.href); } catch { return 'en'; } })());
 </script>
 
 <svelte:head><link rel="icon" href={favicon} /></svelte:head>
@@ -76,7 +80,7 @@
 	<Sidebar.Root collapsible="icon">
 		<!-- Header: brand -->
 		<Sidebar.Header>
-			<a href="/" class="flex items-center gap-2 overflow-hidden px-2 py-1">
+			<a href={localizeHref('/')} class="flex items-center gap-2 overflow-hidden px-2 py-1">
 				<FileCheck2 class="size-5 shrink-0 text-primary" />
 				<span
 					class="truncate text-sm font-semibold tracking-wide group-data-[collapsible=icon]:hidden"
@@ -89,12 +93,12 @@
 		<!-- Nav links -->
 		<Sidebar.Content>
 			<Sidebar.Group>
-				<Sidebar.GroupLabel>Platform</Sidebar.GroupLabel>
+				<Sidebar.GroupLabel>{m.nav_platform()}</Sidebar.GroupLabel>
 				<Sidebar.Menu>
 					{#each navLinks as link (link.href)}
 						<Sidebar.MenuItem>
 							<Sidebar.MenuButton
-								isActive={link.match(page.url.pathname)}
+								isActive={link.match(cleanPathname)}
 								tooltipContent={link.label}
 							>
 								{#snippet child({ props })}
@@ -129,7 +133,7 @@
 							>
 								!
 							</div>
-							<span class="truncate text-xs group-data-[collapsible=icon]:hidden">Offline</span>
+							<span class="truncate text-xs group-data-[collapsible=icon]:hidden">{m.nav_offline()}</span>
 						</div>
 					{:else}
 						<DropdownMenu.Root>
@@ -146,7 +150,7 @@
 										<div class="grid flex-1 text-left text-xs leading-tight">
 											<span class="truncate font-semibold">{me?.name ?? ''}</span>
 											{#if isManager(me?.role)}
-												<span class="text-muted-foreground">Manager</span>
+												<span class="text-muted-foreground">{m.role_manager()}</span>
 											{:else}
 												<span class="truncate text-muted-foreground">{me?.email ?? ''}</span>
 											{/if}
@@ -175,7 +179,7 @@
 												<span class="truncate font-semibold">{me?.name}</span>
 												{#if isManager(me?.role)}
 													<Badge variant="secondary" class="h-4 px-1 text-[10px] text-violet-700"
-														>Manager</Badge
+														>{m.role_manager()}</Badge
 													>
 												{/if}
 											</div>
@@ -186,9 +190,9 @@
 								<DropdownMenu.Separator />
 								<DropdownMenu.Item>
 									{#snippet child({ props })}
-										<a href="/profile" {...props}>
+										<a href={localizeHref('/profile')} {...props}>
 											<User class="size-4" />
-											Profile
+											{m.nav_profile()}
 										</a>
 									{/snippet}
 								</DropdownMenu.Item>
@@ -196,11 +200,11 @@
 									class="text-destructive focus:text-destructive"
 									onclick={async () => {
 										await logout();
-										window.location.href = '/login';
+										window.location.href = localizeHref('/login');
 									}}
 								>
 									<LogOut class="size-4" />
-									Log out
+									{m.nav_logout()}
 								</DropdownMenu.Item>
 							</DropdownMenu.Content>
 						</DropdownMenu.Root>
@@ -221,7 +225,7 @@
 				<Breadcrumb.List>
 					{#if $extraBreadcrumbs.length > 0}
 						<Breadcrumb.Item>
-							<Breadcrumb.Link href={navLinks.find((l) => l.match(page.url.pathname))?.href ?? '/'}>
+							<Breadcrumb.Link href={navLinks.find((l) => l.match(cleanPathname))?.href ?? localizeHref('/')}>
 								{pageLabel}
 							</Breadcrumb.Link>
 						</Breadcrumb.Item>
@@ -244,12 +248,35 @@
 			</Breadcrumb.Root>
 		</header>
 
-		{@render children()}
+		<svelte:boundary>
+			{@render children()}
+			{#snippet failed(error)}
+				<div class="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
+					<p class="text-4xl font-bold text-muted-foreground">!</p>
+					<p class="text-sm text-destructive">{(error as Error).message ?? m.error_action_failed()}</p>
+				</div>
+			{/snippet}
+		</svelte:boundary>
 	</Sidebar.Inset>
 </Sidebar.Provider>
 
-<div style="display:none">
-	{#each locales as locale (locale)}
-		<a href={localizeHref(page.url.pathname, { locale })}>{locale}</a>
-	{/each}
+<div class="fixed bottom-4 right-4 z-50">
+	<div class="flex items-center gap-1 rounded-full border bg-card px-2 py-1 shadow-md">
+		<Globe class="size-3.5 text-muted-foreground" />
+		{#each locales as locale (locale)}
+			{#if currentLocale === locale}
+				<span class="rounded-md px-2 py-0.5 text-xs font-medium bg-primary text-primary-foreground">
+					{locale.toUpperCase()}
+				</span>
+			{:else}
+				<a
+					href={localizeHref(page.url.pathname, { locale })}
+					data-sveltekit-reload
+					class="rounded-md px-2 py-0.5 text-xs font-medium transition-colors text-muted-foreground hover:bg-muted"
+				>
+					{locale.toUpperCase()}
+				</a>
+			{/if}
+		{/each}
+	</div>
 </div>

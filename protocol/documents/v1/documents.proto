@@ -19,7 +19,7 @@ message Document {
   string                    status        = 6;
   uint64                    uploader_id   = 7;
   string                    uploader_name = 8;
-  uint64                    workspace_id  = 9;
+  uint64                    issue_id      = 9;
   google.protobuf.Timestamp created_at    = 10;
   google.protobuf.Timestamp updated_at    = 11;
   uint64                    reviewer_id   = 12;
@@ -45,7 +45,7 @@ message DocumentDetail {
 }
 
 // ---------------------------------------------------------------------------
-// UploadDocument  POST /workspaces/:id/documents
+// UploadDocument  POST /issues/:id/documents
 // ---------------------------------------------------------------------------
 
 message UploadDocumentResponse {
@@ -54,7 +54,7 @@ message UploadDocumentResponse {
 }
 
 // ---------------------------------------------------------------------------
-// ListDocuments  GET /workspaces/:id/documents
+// ListDocuments  GET /issues/:id/documents
 // ---------------------------------------------------------------------------
 
 message ListDocumentsResponse {

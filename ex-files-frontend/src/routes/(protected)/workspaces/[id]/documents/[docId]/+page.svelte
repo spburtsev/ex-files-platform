@@ -14,6 +14,8 @@
 		uploadDocumentVersion,
 		deleteDocument
 	} from '$lib/commands.remote';
+	import { m } from '$lib/paraglide/messages.js';
+	import { localizeHref } from '$lib/paraglide/runtime';
 	import * as Card from '$lib/components/ui/card/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
@@ -49,7 +51,7 @@
 	const versions = $derived(detail?.versions ?? []);
 
 	const meQuery = getMe();
-	const me = $derived(meQuery.current?.user);
+	const me = $derived(meQuery.current);
 
 	const wsQuery = getWorkspaceDetail(wsId);
 	const wsDetail = $derived(wsQuery.current);
@@ -136,10 +138,16 @@
 
 	function statusLabel(status: string): string {
 		switch (status) {
+			case 'pending':
+				return m.status_pending();
 			case 'in_review':
-				return 'In Review';
+				return m.status_in_review();
 			case 'changes_requested':
-				return 'Changes Requested';
+				return m.status_changes_requested();
+			case 'approved':
+				return m.status_approved();
+			case 'rejected':
+				return m.status_rejected();
 			default:
 				return status.charAt(0).toUpperCase() + status.slice(1);
 		}
@@ -149,7 +157,7 @@
 		actionError = '';
 		const result = await submitDocument(docId);
 		if (!result.ok) {
-			actionError = result.error ?? 'Action failed';
+			actionError = result.error ?? m.error_action_failed();
 			return;
 		}
 		await invalidateAll();
@@ -159,7 +167,7 @@
 		actionError = '';
 		const result = await resubmitDocument(docId);
 		if (!result.ok) {
-			actionError = result.error ?? 'Action failed';
+			actionError = result.error ?? m.error_action_failed();
 			return;
 		}
 		await invalidateAll();
@@ -169,7 +177,7 @@
 		actionError = '';
 		const result = await approveDocument(docId);
 		if (!result.ok) {
-			actionError = result.error ?? 'Action failed';
+			actionError = result.error ?? m.error_action_failed();
 			return;
 		}
 		await invalidateAll();
@@ -181,7 +189,7 @@
 		try {
 			const result = await rejectDocument({ id: docId, note: rejectNote });
 			if (!result.ok) {
-				actionError = result.error ?? 'Action failed';
+				actionError = result.error ?? m.error_action_failed();
 				return;
 			}
 			rejectOpen = false;
@@ -198,7 +206,7 @@
 		try {
 			const result = await requestDocumentChanges({ id: docId, note: changesNote });
 			if (!result.ok) {
-				actionError = result.error ?? 'Action failed';
+				actionError = result.error ?? m.error_action_failed();
 				return;
 			}
 			changesOpen = false;
@@ -219,7 +227,7 @@
 				reviewerId: Number(selectedReviewerId)
 			});
 			if (!result.ok) {
-				assignReviewerError = result.error ?? 'Failed to assign reviewer';
+				assignReviewerError = result.error ?? m.doc_assign_error();
 				return;
 			}
 			assignReviewerOpen = false;
@@ -249,12 +257,12 @@
 		try {
 			const result = await uploadDocumentVersion({ docId, file });
 			if (!result.ok) {
-				uploadVersionError = result.error ?? 'Upload failed';
+				uploadVersionError = result.error ?? m.error_upload_failed();
 				return;
 			}
 			await invalidateAll();
 		} catch {
-			uploadVersionError = 'Network error, please try again';
+			uploadVersionError = m.error_network_retry();
 		} finally {
 			uploadingVersion = false;
 		}
@@ -265,7 +273,7 @@
 		try {
 			const result = await deleteDocument(docId);
 			if (!result.ok) return;
-			goto(`/workspaces/${wsId}`);
+			goto(localizeHref(`/workspaces/${wsId}`));
 		} catch {
 			// ignore
 		} finally {
@@ -276,14 +284,14 @@
 </script>
 
 <svelte:head>
-	<title>{doc?.name ?? 'Document'} — ex-files</title>
+	<title>{m.doc_page_title({ name: doc?.name ?? 'Document' })}</title>
 </svelte:head>
 
 <div class="flex flex-1 flex-col gap-6 p-6">
 	{#if !detail}
 		<Card.Root class="flex items-center justify-center py-16">
 			<Card.Content>
-				<p class="text-sm text-muted-foreground">Loading document…</p>
+				<p class="text-sm text-muted-foreground">{m.doc_loading()}</p>
 			</Card.Content>
 		</Card.Root>
 	{:else}
@@ -312,7 +320,7 @@
 							{#if doc?.reviewerName}
 								<span class="flex items-center gap-1">
 									<UserCheck class="size-3.5" />
-									Reviewer: {doc.reviewerName}
+									{m.doc_reviewer_label({ name: doc.reviewerName })}
 								</span>
 							{/if}
 						</div>
@@ -328,7 +336,7 @@
 							onclick={() => (deleteOpen = true)}
 						>
 							<Trash2 class="size-3.5" />
-							Delete
+							{m.common_delete()}
 						</Button>
 					</div>
 				</div>
@@ -343,7 +351,7 @@
 							: 'border-amber-200 bg-amber-50 text-amber-800'}"
 					>
 						<p class="mb-1 font-medium">
-							{doc.status === 'rejected' ? 'Rejection reason' : 'Changes requested'}
+							{doc.status === 'rejected' ? m.doc_rejection_reason() : m.doc_changes_requested_label()}
 						</p>
 						<p class="text-xs leading-relaxed">{doc.reviewerNote}</p>
 					</div>
@@ -354,7 +362,7 @@
 				<div class="flex items-start gap-2 text-xs">
 					<Hash class="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
 					<div class="min-w-0">
-						<p class="font-medium text-muted-foreground">SHA-256</p>
+						<p class="font-medium text-muted-foreground">{m.doc_sha256()}</p>
 						<p class="mt-0.5 font-mono text-[11px] break-all">{doc?.hash}</p>
 					</div>
 				</div>
@@ -365,20 +373,20 @@
 		{#if showSubmit || showResubmit || showReviewActions || showAssignReviewer}
 			<Card.Root>
 				<Card.Header class="pb-3">
-					<Card.Title class="text-sm">Review Workflow</Card.Title>
+					<Card.Title class="text-sm">{m.doc_review_workflow()}</Card.Title>
 				</Card.Header>
 				<Card.Content class="flex flex-wrap gap-2">
 					{#if showSubmit}
 						<Button size="sm" class="gap-1.5" onclick={handleSubmit}>
 							<Send class="size-3.5" />
-							Submit for Review
+							{m.doc_submit_for_review()}
 						</Button>
 					{/if}
 
 					{#if showResubmit}
 						<Button size="sm" class="gap-1.5" onclick={handleResubmit}>
 							<RotateCcw class="size-3.5" />
-							Resubmit
+							{m.doc_resubmit()}
 						</Button>
 					{/if}
 
@@ -389,7 +397,7 @@
 							onclick={handleApprove}
 						>
 							<CheckCircle class="size-3.5" />
-							Approve
+							{m.doc_approve()}
 						</Button>
 						<Button
 							variant="outline"
@@ -398,7 +406,7 @@
 							onclick={() => (changesOpen = true)}
 						>
 							<MessageSquare class="size-3.5" />
-							Request Changes
+							{m.doc_request_changes()}
 						</Button>
 						<Button
 							variant="outline"
@@ -407,7 +415,7 @@
 							onclick={() => (rejectOpen = true)}
 						>
 							<XCircle class="size-3.5" />
-							Reject
+							{m.doc_reject()}
 						</Button>
 					{/if}
 
@@ -419,7 +427,7 @@
 							onclick={() => (assignReviewerOpen = true)}
 						>
 							<UserCheck class="size-3.5" />
-							{doc?.reviewerName ? `Reviewer: ${doc.reviewerName}` : 'Assign Reviewer'}
+							{doc?.reviewerName ? m.doc_reviewer_label({ name: doc.reviewerName }) : m.doc_assign_reviewer()}
 						</Button>
 					{/if}
 
@@ -433,14 +441,14 @@
 		<!-- Version history -->
 		<Card.Root>
 			<Card.Header>
-				<Card.Title class="text-sm">Version History</Card.Title>
+				<Card.Title class="text-sm">{m.doc_version_history()}</Card.Title>
 				<Card.Description class="text-xs">
-					{versions.length} version{versions.length !== 1 ? 's' : ''}
+					{versions.length === 1 ? m.doc_version_count({ count: String(versions.length) }) : m.doc_versions_count({ count: String(versions.length) })}
 				</Card.Description>
 			</Card.Header>
 			<Card.Content>
 				{#if versions.length === 0}
-					<p class="py-2 text-sm text-muted-foreground">No versions found.</p>
+					<p class="py-2 text-sm text-muted-foreground">{m.doc_no_versions()}</p>
 				{:else}
 					<ol class="relative border-l border-border">
 						{#each [...versions].sort((a, b) => b.version - a.version) as v (v.id)}
@@ -450,7 +458,7 @@
 								></div>
 								<div class="flex items-start justify-between gap-3">
 									<div class="min-w-0">
-										<p class="text-sm font-semibold">Version {v.version}</p>
+										<p class="text-sm font-semibold">{m.doc_version_label({ version: String(v.version) })}</p>
 										<div
 											class="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
 										>
@@ -476,7 +484,7 @@
 										onclick={() => handleDownload(v.id)}
 									>
 										<Download class="size-3.5" />
-										{downloadingId === v.id ? 'Getting link…' : 'Download'}
+										{downloadingId === v.id ? m.doc_getting_link() : m.doc_download()}
 									</Button>
 								</div>
 							</li>
@@ -489,16 +497,16 @@
 		<!-- Upload new version -->
 		<Card.Root>
 			<Card.Header class="pb-3">
-				<Card.Title class="text-sm">Upload New Version</Card.Title>
+				<Card.Title class="text-sm">{m.doc_upload_new_version()}</Card.Title>
 				<Card.Description class="text-xs">
-					Replace with a revised document while preserving all previous versions.
+					{m.doc_upload_description()}
 				</Card.Description>
 			</Card.Header>
 			<Card.Content>
 				{#if uploadingVersion}
 					<div class="flex items-center justify-center py-8">
 						<Upload class="mr-2 size-5 animate-pulse text-primary" />
-						<span class="text-sm text-muted-foreground">Uploading…</span>
+						<span class="text-sm text-muted-foreground">{m.common_uploading()}</span>
 					</div>
 				{:else}
 					<UploadZone onupload={handleUploadVersion} />
@@ -515,20 +523,19 @@
 <Dialog.Root bind:open={deleteOpen}>
 	<Dialog.Content class="sm:max-w-sm">
 		<Dialog.Header>
-			<Dialog.Title>Delete Document</Dialog.Title>
+			<Dialog.Title>{m.doc_delete_title()}</Dialog.Title>
 			<Dialog.Description>
-				Are you sure you want to delete <strong>{doc?.name}</strong>? All versions will be removed.
-				This action cannot be undone.
+				{m.doc_delete_confirm({ name: doc?.name ?? '' })}
 			</Dialog.Description>
 		</Dialog.Header>
 		<Dialog.Footer>
 			<Dialog.Close>
 				{#snippet child({ props })}
-					<Button variant="outline" {...props}>Cancel</Button>
+					<Button variant="outline" {...props}>{m.common_cancel()}</Button>
 				{/snippet}
 			</Dialog.Close>
 			<Button variant="destructive" onclick={handleDelete} disabled={deleting}>
-				{deleting ? 'Deleting…' : 'Delete'}
+				{deleting ? m.common_deleting() : m.common_delete()}
 			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
@@ -538,27 +545,27 @@
 <Dialog.Root bind:open={rejectOpen}>
 	<Dialog.Content class="sm:max-w-sm">
 		<Dialog.Header>
-			<Dialog.Title>Reject Document</Dialog.Title>
+			<Dialog.Title>{m.doc_reject_title()}</Dialog.Title>
 			<Dialog.Description>
-				Provide a reason so the submitter knows what to address.
+				{m.doc_reject_description()}
 			</Dialog.Description>
 		</Dialog.Header>
 		<div class="grid gap-2 px-6">
-			<Label class="text-xs">Reason (optional)</Label>
+			<Label class="text-xs">{m.doc_reject_reason_label()}</Label>
 			<Textarea
 				bind:value={rejectNote}
-				placeholder="Describe why the document is being rejected…"
+				placeholder={m.doc_reject_placeholder()}
 				rows={4}
 			/>
 		</div>
 		<Dialog.Footer>
 			<Dialog.Close>
 				{#snippet child({ props })}
-					<Button variant="outline" {...props}>Cancel</Button>
+					<Button variant="outline" {...props}>{m.common_cancel()}</Button>
 				{/snippet}
 			</Dialog.Close>
 			<Button variant="destructive" onclick={handleReject} disabled={rejecting}>
-				{rejecting ? 'Rejecting…' : 'Reject'}
+				{rejecting ? m.doc_rejecting() : m.doc_reject()}
 			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
@@ -568,19 +575,19 @@
 <Dialog.Root bind:open={changesOpen}>
 	<Dialog.Content class="sm:max-w-sm">
 		<Dialog.Header>
-			<Dialog.Title>Request Changes</Dialog.Title>
+			<Dialog.Title>{m.doc_changes_title()}</Dialog.Title>
 			<Dialog.Description>
-				Describe what changes are needed before this document can be approved.
+				{m.doc_changes_description()}
 			</Dialog.Description>
 		</Dialog.Header>
 		<div class="grid gap-2 px-6">
-			<Label class="text-xs">Notes (optional)</Label>
-			<Textarea bind:value={changesNote} placeholder="Describe the changes required…" rows={4} />
+			<Label class="text-xs">{m.doc_changes_notes_label()}</Label>
+			<Textarea bind:value={changesNote} placeholder={m.doc_changes_placeholder()} rows={4} />
 		</div>
 		<Dialog.Footer>
 			<Dialog.Close>
 				{#snippet child({ props })}
-					<Button variant="outline" {...props}>Cancel</Button>
+					<Button variant="outline" {...props}>{m.common_cancel()}</Button>
 				{/snippet}
 			</Dialog.Close>
 			<Button
@@ -588,7 +595,7 @@
 				onclick={handleRequestChanges}
 				disabled={requestingChanges}
 			>
-				{requestingChanges ? 'Sending…' : 'Request Changes'}
+				{requestingChanges ? m.doc_changes_sending() : m.doc_request_changes()}
 			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
@@ -598,18 +605,18 @@
 <Dialog.Root bind:open={assignReviewerOpen}>
 	<Dialog.Content class="sm:max-w-sm">
 		<Dialog.Header>
-			<Dialog.Title>Assign Reviewer</Dialog.Title>
-			<Dialog.Description>Choose a workspace member to review this document.</Dialog.Description>
+			<Dialog.Title>{m.doc_assign_title()}</Dialog.Title>
+			<Dialog.Description>{m.doc_assign_description()}</Dialog.Description>
 		</Dialog.Header>
 		<div class="grid gap-2 px-6">
-			<Label class="text-xs">Reviewer</Label>
+			<Label class="text-xs">{m.doc_assign_reviewer_label()}</Label>
 			<select
 				class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none"
 				bind:value={selectedReviewerId}
 			>
-				<option value={null}>Select a member…</option>
-				{#each members as m (m.id)}
-					<option value={m.id}>{m.name}</option>
+				<option value={null}>{m.doc_assign_select()}</option>
+				{#each members as mbr (mbr.id)}
+					<option value={mbr.id}>{mbr.name}</option>
 				{/each}
 			</select>
 			{#if assignReviewerError}
@@ -619,11 +626,11 @@
 		<Dialog.Footer>
 			<Dialog.Close>
 				{#snippet child({ props })}
-					<Button variant="outline" {...props}>Cancel</Button>
+					<Button variant="outline" {...props}>{m.common_cancel()}</Button>
 				{/snippet}
 			</Dialog.Close>
 			<Button onclick={handleAssignReviewer} disabled={assigningReviewer || !selectedReviewerId}>
-				{assigningReviewer ? 'Assigning…' : 'Assign'}
+				{assigningReviewer ? m.doc_assigning() : m.doc_assign()}
 			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>

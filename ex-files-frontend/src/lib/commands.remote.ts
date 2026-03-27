@@ -160,16 +160,49 @@ export const removeWorkspaceMember = command(
 
 export const uploadDocument = command(
 	'unchecked',
-	async ({ workspaceId, file }: { workspaceId: string; file: File }) => {
+	async ({ issueId, file }: { issueId: string; file: File }) => {
 		const form = new FormData();
 		form.append('file', file);
-		const res = await safeFetch(`${BACKEND}/workspaces/${workspaceId}/documents`, {
+		const res = await safeFetch(`${BACKEND}/issues/${issueId}/documents`, {
 			method: 'POST',
 			body: form
 		});
 		if (!res) return { ok: false as const, error: NETWORK_ERROR };
 		if (!res.ok) {
 			return { ok: false as const, error: await parseJsonError(res, 'Upload failed') };
+		}
+		return { ok: true as const };
+	}
+);
+
+export const createIssue = command(
+	'unchecked',
+	async ({
+		workspaceId,
+		title,
+		description,
+		assigneeId,
+		deadline
+	}: {
+		workspaceId: string;
+		title: string;
+		description?: string;
+		assigneeId: number;
+		deadline?: string;
+	}) => {
+		const res = await safeFetch(`${BACKEND}/workspaces/${workspaceId}/issues`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				title,
+				description: description ?? '',
+				assignee_id: assigneeId,
+				deadline: deadline ?? ''
+			})
+		});
+		if (!res) return { ok: false as const, error: NETWORK_ERROR };
+		if (!res.ok) {
+			return { ok: false as const, error: await parseJsonError(res, 'Failed to create issue') };
 		}
 		return { ok: true as const };
 	}

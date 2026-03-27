@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package issues.v1;
+
+option go_package = "github.com/spburtsev/ex-files-backend/gen/issues/v1;issuesv1";
+
+import "google/protobuf/timestamp.proto";
+
+enum Role {
+  ROLE_UNSPECIFIED = 0;
+  ROLE_MANAGER     = 1;
+  ROLE_EMPLOYEE    = 2;
+}
+
+message User {
+  string id    = 1;
+  string name  = 2;
+  string email = 3;
+  Role   role  = 4;
+}
+
+message Issue {
+  string                    id             = 1;
+  string                    workspace_id   = 2;
+  string                    creator_id     = 3;
+  string                    assignee_id    = 4;
+  string                    title          = 5;
+  string                    description    = 6;
+  google.protobuf.Timestamp deadline       = 7;
+  bool                      resolved       = 8;
+  int32                     comments_count = 9;
+  int32                     versions_count = 10;
+}
+
+message GetIssuesResponse {
+  repeated Issue issues = 1;
+}
+
+message GetUsersResponse {
+  repeated User users = 1;
+}
+
+message GetIssueResponse {
+  Issue issue = 1;
+  User  user  = 2;
+}
+
+message CreateIssueResponse {
+  Issue issue = 1;
+}
