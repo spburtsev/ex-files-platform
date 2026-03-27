@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { goto, invalidateAll } from '$app/navigation';
-	import { getWorkspaceDetail, getMe, getSystemUsers, getIssues } from '$lib/data.remote';
-	import { protoTsToDate, roleName, isManager } from '$lib/proto-utils';
+	import { getWorkspaceDetail, getMe, getUsers, getIssues } from '$lib/data.remote';
+	import { formatTimestamp, roleName, isManager, initials } from '$lib/proto-utils';
 	import {
 		updateWorkspace,
 		deleteWorkspace,
@@ -34,7 +34,6 @@
 		ArrowRight,
 		Plus
 	} from '@lucide/svelte';
-	import type { Timestamp } from '@bufbuild/protobuf/wkt';
 	import { extraBreadcrumbs } from '$lib/stores/breadcrumbs';
 	import { onDestroy } from 'svelte';
 
@@ -63,7 +62,7 @@
 	const issuesList = $derived(issuesQuery.current ?? []);
 
 	// Users (for add-member picker)
-	const usersQuery = getSystemUsers();
+	const usersQuery = getUsers();
 	const allUsers = $derived(usersQuery.current ?? []);
 	const memberIds = $derived(new Set(members.map((mb) => String(mb.id))));
 	const nonMembers = $derived(allUsers.filter((u) => !memberIds.has(String(u.id))));
@@ -104,22 +103,6 @@
 		)
 	);
 
-
-	function formatDate(ts?: Timestamp): string {
-		const d = protoTsToDate(ts);
-		if (!d) return '—';
-		return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-	}
-
-	function initials(name: string): string {
-		return name
-			.split(' ')
-			.map((p) => p[0])
-			.join('')
-			.toUpperCase()
-			.slice(0, 2);
-	}
-
 	function openEdit() {
 		editName = ws?.name ?? '';
 		editError = '';
@@ -149,10 +132,13 @@
 		deleting = true;
 		try {
 			const result = await deleteWorkspace(wsId);
-			if (!result.ok) return;
+			if (!result.ok) {
+				toast.error(m.error_delete_workspace());
+				return;
+			}
 			goto(localizeHref('/workspaces'));
 		} catch {
-			// ignore
+			toast.error(m.error_delete_workspace());
 		} finally {
 			deleting = false;
 			deleteOpen = false;
@@ -254,7 +240,7 @@
 							</span>
 							<span class="flex items-center gap-1">
 								<Calendar class="size-3.5" />
-								{m.ws_created_date({ date: formatDate(ws?.createdAt) })}
+								{m.ws_created_date({ date: formatTimestamp(ws?.createdAt) })}
 							</span>
 						</Card.Description>
 					</div>
@@ -282,32 +268,32 @@
 		<!-- Tabbed content: Issues / Members -->
 		<Tabs.Root value="issues">
 			<div class="flex items-center justify-between">
-			<Tabs.List>
-				<Tabs.Trigger value="issues">
-					<FileText class="mr-1.5 size-3.5" />
-					{m.ws_issues_tab()}
-					{#if issuesList.length > 0}
-						<span class="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold">
-							{issuesList.length}
-						</span>
-					{/if}
-				</Tabs.Trigger>
-				<Tabs.Trigger value="members">
-					<UserPlus class="mr-1.5 size-3.5" />
-					{m.ws_members_tab()}
-					{#if members.length > 0}
-						<span class="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold">
-							{members.length}
-						</span>
-					{/if}
-				</Tabs.Trigger>
-			</Tabs.List>
-			{#if isManager(me?.role)}
-			<Button size="sm" class="gap-1.5" onclick={() => (newIssueOpen = true)}>
-				<Plus class="size-4" />
-				{m.ws_new_issue()}
-			</Button>
-			{/if}
+				<Tabs.List>
+					<Tabs.Trigger value="issues">
+						<FileText class="mr-1.5 size-3.5" />
+						{m.ws_issues_tab()}
+						{#if issuesList.length > 0}
+							<span class="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold">
+								{issuesList.length}
+							</span>
+						{/if}
+					</Tabs.Trigger>
+					<Tabs.Trigger value="members">
+						<UserPlus class="mr-1.5 size-3.5" />
+						{m.ws_members_tab()}
+						{#if members.length > 0}
+							<span class="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold">
+								{members.length}
+							</span>
+						{/if}
+					</Tabs.Trigger>
+				</Tabs.List>
+				{#if isManager(me?.role)}
+					<Button size="sm" class="gap-1.5" onclick={() => (newIssueOpen = true)}>
+						<Plus class="size-4" />
+						{m.ws_new_issue()}
+					</Button>
+				{/if}
 			</div>
 
 			<!-- Issues tab -->
@@ -366,7 +352,9 @@
 							<div>
 								<Card.Title class="text-sm">{m.ws_members_heading()}</Card.Title>
 								<Card.Description class="text-xs">
-									{members.length === 1 ? m.ws_member_count({ count: String(members.length) }) : m.ws_members_count({ count: String(members.length) })}
+									{members.length === 1
+										? m.ws_member_count({ count: String(members.length) })
+										: m.ws_members_count({ count: String(members.length) })}
 								</Card.Description>
 							</div>
 							{#if isOwner}
@@ -401,9 +389,7 @@
 											<div class="max-h-60 overflow-y-auto rounded-md border">
 												{#if filteredNonMembers.length === 0}
 													<p class="p-4 text-center text-xs text-muted-foreground">
-														{nonMembers.length === 0
-															? m.ws_all_members()
-															: m.ws_no_matches()}
+														{nonMembers.length === 0 ? m.ws_all_members() : m.ws_no_matches()}
 													</p>
 												{:else}
 													{#each filteredNonMembers as u (u.id)}
@@ -556,7 +542,7 @@
 				<Label for="issue-assignee">{m.ws_issue_assignee_label()}</Label>
 				<select
 					id="issue-assignee"
-					class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+					class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none"
 					bind:value={newIssueAssignee}
 				>
 					<option value="" disabled>{m.ws_issue_assignee_select()}</option>
@@ -579,7 +565,10 @@
 					<Button variant="outline" {...props}>{m.common_cancel()}</Button>
 				{/snippet}
 			</Dialog.Close>
-			<Button onclick={handleCreateIssue} disabled={creatingIssue || !newIssueTitle.trim() || !newIssueAssignee}>
+			<Button
+				onclick={handleCreateIssue}
+				disabled={creatingIssue || !newIssueTitle.trim() || !newIssueAssignee}
+			>
 				{creatingIssue ? m.common_creating() : m.common_create()}
 			</Button>
 		</Dialog.Footer>

@@ -27,6 +27,9 @@
 	"error_network_retry": "Network error, please try again",
 	"error_action_failed": "Action failed",
 	"error_upload_failed": "Upload failed",
+	"error_delete_workspace": "Failed to delete workspace",
+	"error_delete_document": "Failed to delete document",
+	"error_download_failed": "Failed to download file",
 
 	"status_pending": "Pending",
 	"status_in_review": "In Review",

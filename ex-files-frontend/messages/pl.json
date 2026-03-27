@@ -27,6 +27,9 @@
 	"error_network_retry": "Błąd sieci, spróbuj ponownie",
 	"error_action_failed": "Operacja nie powiodła się",
 	"error_upload_failed": "Przesyłanie nie powiodło się",
+	"error_delete_workspace": "Nie udało się usunąć przestrzeni roboczej",
+	"error_delete_document": "Nie udało się usunąć dokumentu",
+	"error_download_failed": "Nie udało się pobrać pliku",
 
 	"status_pending": "Oczekujący",
 	"status_in_review": "W recenzji",

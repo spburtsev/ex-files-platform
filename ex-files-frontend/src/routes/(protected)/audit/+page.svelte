@@ -11,11 +11,9 @@
 	import { Separator } from '$lib/components/ui/separator/index.js';
 	import { Skeleton } from '$lib/components/ui/skeleton/index.js';
 	import { ChevronLeft, ChevronRight, Filter, X } from '@lucide/svelte';
-	import { protoTsToDate, isManager } from '$lib/proto-utils';
+	import { isManager, formatTimestamp } from '$lib/proto-utils';
 	import { getMe } from '$lib/data.remote';
 	import { localizeHref } from '$lib/paraglide/runtime';
-	import type { Timestamp } from '@bufbuild/protobuf/wkt';
-
 	// Redirect employees away from audit page
 	const meQuery = getMe();
 	const me = $derived(meQuery.current);
@@ -98,18 +96,6 @@
 		}
 	}
 
-	function formatDate(ts?: Timestamp): string {
-		const d = protoTsToDate(ts);
-		if (!d) return '—';
-		return d.toLocaleString('en-US', {
-			month: 'short',
-			day: 'numeric',
-			year: 'numeric',
-			hour: '2-digit',
-			minute: '2-digit'
-		});
-	}
-
 	function applyFilters() {
 		const url = new URL(page.url);
 		url.searchParams.set('page', '1');
@@ -156,7 +142,9 @@
 			<p class="text-sm text-muted-foreground">
 				{m.audit_description()}
 				{#if total > 0}
-					<span class="font-medium text-foreground">{m.audit_entries_count({ count: total.toLocaleString() })}</span>.
+					<span class="font-medium text-foreground"
+						>{m.audit_entries_count({ count: total.toLocaleString() })}</span
+					>.
 				{/if}
 			</p>
 		</div>
@@ -269,7 +257,7 @@
 						<div class="flex items-start gap-3 px-4 py-3">
 							<!-- Timestamp -->
 							<div class="w-36 shrink-0 text-xs text-muted-foreground">
-								{formatDate(entry.createdAt)}
+								{formatTimestamp(entry.createdAt, { withTime: true })}
 							</div>
 
 							<Separator orientation="vertical" class="h-auto self-stretch" />
@@ -324,7 +312,9 @@
 					<ChevronLeft class="size-4" />
 					{m.common_prev()}
 				</Button>
-				<span class="text-sm text-muted-foreground">{m.common_page_of({ current: String(currentPage), total: String(totalPages) })}</span>
+				<span class="text-sm text-muted-foreground"
+					>{m.common_page_of({ current: String(currentPage), total: String(totalPages) })}</span
+				>
 				<Button
 					variant="outline"
 					size="sm"

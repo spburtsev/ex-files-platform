@@ -7,26 +7,34 @@
 
 	let { children } = $props();
 
-	const currentLocale = $derived((() => { try { return getLocaleForUrl(page.url.href); } catch { return 'en'; } })());
+	const currentLocale = $derived(
+		(() => {
+			try {
+				return getLocaleForUrl(page.url.href);
+			} catch {
+				return 'en';
+			}
+		})()
+	);
 </script>
 
 <svelte:head><link rel="icon" href={favicon} /></svelte:head>
 
 {@render children()}
 
-<div class="fixed bottom-4 right-4 z-50">
+<div class="fixed right-4 bottom-4 z-50">
 	<div class="flex items-center gap-1 rounded-full border bg-card px-2 py-1 shadow-md">
 		<Globe class="size-3.5 text-muted-foreground" />
 		{#each locales as locale (locale)}
 			{#if currentLocale === locale}
-				<span class="rounded-md px-2 py-0.5 text-xs font-medium bg-primary text-primary-foreground">
+				<span class="rounded-md bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground">
 					{locale.toUpperCase()}
 				</span>
 			{:else}
 				<a
 					href={localizeHref(page.url.pathname, { locale })}
 					data-sveltekit-reload
-					class="rounded-md px-2 py-0.5 text-xs font-medium transition-colors text-muted-foreground hover:bg-muted"
+					class="rounded-md px-2 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted"
 				>
 					{locale.toUpperCase()}
 				</a>

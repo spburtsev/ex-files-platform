@@ -95,7 +95,10 @@
 				</Card.Content>
 				<Card.Footer class="justify-center text-sm text-muted-foreground">
 					{m.login_no_account()}&nbsp;
-					<a href={localizeHref('/signup')} class="text-foreground underline-offset-4 hover:underline">{m.login_signup_link()}</a>
+					<a
+						href={localizeHref('/signup')}
+						class="text-foreground underline-offset-4 hover:underline">{m.login_signup_link()}</a
+					>
 				</Card.Footer>
 			</Card.Root>
 		</div>

@@ -6,7 +6,7 @@
 	import favicon from '$lib/assets/favicon.svg';
 	import { getMe } from '$lib/data.remote';
 	import { logout } from '$lib/commands.remote';
-	import { isManager } from '$lib/proto-utils';
+	import { isManager, initials as getInitials } from '$lib/proto-utils';
 	import { Skeleton } from '$lib/components/ui/skeleton/index.js';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import * as Avatar from '$lib/components/ui/avatar/index.js';
@@ -35,13 +35,7 @@
 	const me = $derived(meQuery.current);
 	const meError = $derived(meQuery.error);
 
-	const initials = $derived(
-		me?.name
-			.split(' ')
-			.map((p) => p[0])
-			.join('')
-			.toUpperCase() ?? ''
-	);
+	const userInitials = $derived(me?.name ? getInitials(me.name) : '');
 
 	const navLinks = $derived([
 		{
@@ -76,7 +70,15 @@
 
 	const cleanPathname = $derived(deLocalizeHref(page.url.pathname));
 	const pageLabel = $derived(navLinks.find((l) => l.match(cleanPathname))?.label ?? 'ex-files');
-	const currentLocale = $derived((() => { try { return getLocaleForUrl(page.url.href); } catch { return 'en'; } })());
+	const currentLocale = $derived(
+		(() => {
+			try {
+				return getLocaleForUrl(page.url.href);
+			} catch {
+				return 'en';
+			}
+		})()
+	);
 </script>
 
 <svelte:head><link rel="icon" href={favicon} /></svelte:head>
@@ -102,10 +104,7 @@
 				<Sidebar.Menu>
 					{#each navLinks as link (link.href)}
 						<Sidebar.MenuItem>
-							<Sidebar.MenuButton
-								isActive={link.match(cleanPathname)}
-								tooltipContent={link.label}
-							>
+							<Sidebar.MenuButton isActive={link.match(cleanPathname)} tooltipContent={link.label}>
 								{#snippet child({ props })}
 									<a href={link.href} {...props}>
 										<link.Icon />
@@ -138,7 +137,9 @@
 							>
 								!
 							</div>
-							<span class="truncate text-xs group-data-[collapsible=icon]:hidden">{m.nav_offline()}</span>
+							<span class="truncate text-xs group-data-[collapsible=icon]:hidden"
+								>{m.nav_offline()}</span
+							>
 						</div>
 					{:else}
 						<DropdownMenu.Root>
@@ -149,7 +150,7 @@
 											<Avatar.Fallback
 												class="rounded-lg bg-primary text-xs font-semibold text-primary-foreground"
 											>
-												{initials}
+												{userInitials}
 											</Avatar.Fallback>
 										</Avatar.Root>
 										<div class="grid flex-1 text-left text-xs leading-tight">
@@ -176,7 +177,7 @@
 											<Avatar.Fallback
 												class="rounded-lg bg-primary text-xs font-semibold text-primary-foreground"
 											>
-												{initials}
+												{userInitials}
 											</Avatar.Fallback>
 										</Avatar.Root>
 										<div class="grid flex-1 text-left leading-tight">
@@ -230,7 +231,9 @@
 				<Breadcrumb.List>
 					{#if $extraBreadcrumbs.length > 0}
 						<Breadcrumb.Item>
-							<Breadcrumb.Link href={navLinks.find((l) => l.match(cleanPathname))?.href ?? localizeHref('/')}>
+							<Breadcrumb.Link
+								href={navLinks.find((l) => l.match(cleanPathname))?.href ?? localizeHref('/')}
+							>
 								{pageLabel}
 							</Breadcrumb.Link>
 						</Breadcrumb.Item>
@@ -258,26 +261,28 @@
 			{#snippet failed(error)}
 				<div class="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
 					<p class="text-4xl font-bold text-muted-foreground">!</p>
-					<p class="text-sm text-destructive">{(error as Error).message ?? m.error_action_failed()}</p>
+					<p class="text-sm text-destructive">
+						{(error as Error).message ?? m.error_action_failed()}
+					</p>
 				</div>
 			{/snippet}
 		</svelte:boundary>
 	</Sidebar.Inset>
 </Sidebar.Provider>
 
-<div class="fixed bottom-4 right-4 z-50">
+<div class="fixed right-4 bottom-4 z-50">
 	<div class="flex items-center gap-1 rounded-full border bg-card px-2 py-1 shadow-md">
 		<Globe class="size-3.5 text-muted-foreground" />
 		{#each locales as locale (locale)}
 			{#if currentLocale === locale}
-				<span class="rounded-md px-2 py-0.5 text-xs font-medium bg-primary text-primary-foreground">
+				<span class="rounded-md bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground">
 					{locale.toUpperCase()}
 				</span>
 			{:else}
 				<a
 					href={localizeHref(page.url.pathname, { locale })}
 					data-sveltekit-reload
-					class="rounded-md px-2 py-0.5 text-xs font-medium transition-colors text-muted-foreground hover:bg-muted"
+					class="rounded-md px-2 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted"
 				>
 					{locale.toUpperCase()}
 				</a>

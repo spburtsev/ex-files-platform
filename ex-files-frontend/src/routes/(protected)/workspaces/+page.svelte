@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { getWorkspaces, getMe } from '$lib/data.remote';
 	import { createWorkspace } from '$lib/commands.remote';
-	import { protoTsToDate, isManager } from '$lib/proto-utils';
+	import { formatTimestamp, isManager } from '$lib/proto-utils';
 	import { m } from '$lib/paraglide/messages.js';
 	import { localizeHref } from '$lib/paraglide/runtime';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
@@ -18,8 +18,8 @@
 	const meQuery = getMe();
 	const me = $derived(meQuery.current);
 
-	const currentPage = Number(page.url.searchParams.get('page') ?? '1');
-	const workspacesQuery = getWorkspaces(currentPage);
+	const currentPage = $derived(Number(page.url.searchParams.get('page') ?? '1'));
+	const workspacesQuery = $derived(getWorkspaces(currentPage));
 	const data = $derived(workspacesQuery.current);
 	const loading = $derived(workspacesQuery.current === undefined);
 	const workspaces = $derived(data?.workspaces ?? []);
@@ -29,12 +29,6 @@
 	let createName = $state('');
 	let creating = $state(false);
 	let createError = $state('');
-
-	function formatDate(ts?: import('@bufbuild/protobuf/wkt').Timestamp): string {
-		const d = protoTsToDate(ts);
-		if (!d) return '—';
-		return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-	}
 
 	function navigatePage(p: number) {
 		const url = new URL(page.url);
@@ -145,9 +139,7 @@
 				<FolderOpen class="mx-auto mb-3 size-10 text-muted-foreground/40" />
 				<p class="text-sm font-medium">{m.ws_no_workspaces()}</p>
 				<p class="mt-1 text-xs text-muted-foreground">
-					{isManager(me?.role)
-						? m.ws_no_workspaces_manager()
-						: m.ws_no_workspaces_employee()}
+					{isManager(me?.role) ? m.ws_no_workspaces_manager() : m.ws_no_workspaces_employee()}
 				</p>
 			</Card.Content>
 		</Card.Root>
@@ -166,7 +158,9 @@
 							<Users class="size-3.5" />
 							<span>{m.ws_manager_id({ id: ws.managerId })}</span>
 						</div>
-						<p class="mt-1 text-xs text-muted-foreground">{m.ws_created_date({ date: formatDate(ws.createdAt) })}</p>
+						<p class="mt-1 text-xs text-muted-foreground">
+							{m.ws_created_date({ date: formatTimestamp(ws.createdAt) })}
+						</p>
 					</Card.Content>
 					<Card.Footer class="mt-auto border-t pt-3">
 						<Button size="sm" class="w-full gap-1.5" href={localizeHref(`/workspaces/${ws.id}`)}>
@@ -190,7 +184,9 @@
 					<ChevronLeft class="size-4" />
 					{m.common_prev()}
 				</Button>
-				<span class="text-sm text-muted-foreground">{m.common_page_of({ current: String(currentPage), total: String(totalPages) })}</span>
+				<span class="text-sm text-muted-foreground"
+					>{m.common_page_of({ current: String(currentPage), total: String(totalPages) })}</span
+				>
 				<Button
 					variant="outline"
 					size="sm"

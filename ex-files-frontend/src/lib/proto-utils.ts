@@ -34,3 +34,29 @@ export function roleName(role?: Role): string {
 			return 'unknown';
 	}
 }
+
+/** Format a protobuf Timestamp for display */
+export function formatTimestamp(ts?: Timestamp, opts?: { withTime?: boolean }): string {
+	const d = protoTsToDate(ts);
+	if (!d) return '—';
+	if (opts?.withTime) {
+		return d.toLocaleString(undefined, {
+			month: 'short',
+			day: 'numeric',
+			year: 'numeric',
+			hour: '2-digit',
+			minute: '2-digit'
+		});
+	}
+	return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+/** Extract initials from a full name */
+export function initials(name: string): string {
+	return name
+		.split(' ')
+		.map((p) => p[0])
+		.join('')
+		.toUpperCase()
+		.slice(0, 2);
+}

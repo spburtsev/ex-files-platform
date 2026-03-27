@@ -81,13 +81,6 @@ export const getWorkspaceDetail = query('unchecked', async (id: string) => {
 	return r.workspace ?? null;
 });
 
-export const getSystemUsers = query(async () => {
-	const { fetch } = getRequestEvent();
-	const bytes = await fetchProto(`${BACKEND}/auth/users`, fetch);
-	const r = fromBinary(GetUsersResponseSchema, bytes);
-	return r.users;
-});
-
 // ---------------------------------------------------------------------------
 // Document queries
 // ---------------------------------------------------------------------------

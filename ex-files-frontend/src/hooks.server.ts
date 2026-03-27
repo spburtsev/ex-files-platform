@@ -1,6 +1,12 @@
 import { sequence } from '@sveltejs/kit/hooks';
 import { redirect, type Handle } from '@sveltejs/kit';
-import { cookieName, cookieMaxAge, deLocalizeUrl, getTextDirection } from '$lib/paraglide/runtime';
+import {
+	cookieName,
+	cookieMaxAge,
+	deLocalizeUrl,
+	getTextDirection,
+	localizeHref
+} from '$lib/paraglide/runtime';
 import { paraglideMiddleware } from '$lib/paraglide/server';
 
 const PUBLIC_PATHS = ['/login', '/signup'];
@@ -9,7 +15,7 @@ const handleAuth: Handle = ({ event, resolve }) => {
 	const pathname = deLocalizeUrl(event.url).pathname;
 	const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
 	if (!isPublic && !event.cookies.get('session')) {
-		redirect(303, '/login');
+		redirect(303, localizeHref('/login'));
 	}
 	return resolve(event);
 };
@@ -28,7 +34,8 @@ const handleParaglide: Handle = async ({ event, resolve }) => {
 		});
 	});
 	if (detectedLocale) {
-		response.headers.append('set-cookie',
+		response.headers.append(
+			'set-cookie',
 			`${cookieName}=${detectedLocale}; Path=/; Max-Age=${cookieMaxAge}; SameSite=Lax`
 		);
 	}

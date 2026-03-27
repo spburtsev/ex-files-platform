@@ -79,12 +79,19 @@
 
 	function deadlineChip(d: Date) {
 		const h = (d.getTime() - Date.now()) / 3_600_000;
-		if (h < 0) return { label: m.workbench_overdue(), cls: 'border-red-200 bg-red-50 text-red-600' };
+		if (h < 0)
+			return { label: m.workbench_overdue(), cls: 'border-red-200 bg-red-50 text-red-600' };
 		if (h < 24)
-			return { label: m.workbench_hours_left({ hours: String(Math.round(h)) }), cls: 'border-red-200 bg-red-50 text-red-600' };
+			return {
+				label: m.workbench_hours_left({ hours: String(Math.round(h)) }),
+				cls: 'border-red-200 bg-red-50 text-red-600'
+			};
 		if (h < 72)
 			return {
-				label: m.workbench_days_hours_left({ days: String(Math.floor(h / 24)), hours: String(Math.round(h % 24)) }),
+				label: m.workbench_days_hours_left({
+					days: String(Math.floor(h / 24)),
+					hours: String(Math.round(h % 24))
+				}),
 				cls: 'border-amber-200 bg-amber-50 text-amber-700'
 			};
 		return {
@@ -394,7 +401,9 @@
 
 			<div class="space-y-4 py-2">
 				<section>
-					<h3 class="mb-2 text-xs font-semibold text-muted-foreground">{m.workbench_instructions()}</h3>
+					<h3 class="mb-2 text-xs font-semibold text-muted-foreground">
+						{m.workbench_instructions()}
+					</h3>
 					<p class="text-sm leading-relaxed">{issue.description}</p>
 					<p class="mt-2 text-sm leading-relaxed text-muted-foreground">
 						{m.workbench_instructions_text()}

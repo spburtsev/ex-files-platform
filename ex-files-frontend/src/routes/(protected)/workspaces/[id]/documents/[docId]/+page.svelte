@@ -2,7 +2,7 @@
 	import { page } from '$app/state';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { getDocumentDetail, getMe, getWorkspaceDetail } from '$lib/data.remote';
-	import { protoTsToDate, isManager, bid } from '$lib/proto-utils';
+	import { isManager, bid, formatTimestamp } from '$lib/proto-utils';
 	import {
 		submitDocument,
 		resubmitDocument,
@@ -14,6 +14,7 @@
 		uploadDocumentVersion,
 		deleteDocument
 	} from '$lib/commands.remote';
+	import { toast } from 'svelte-sonner';
 	import { m } from '$lib/paraglide/messages.js';
 	import { localizeHref } from '$lib/paraglide/runtime';
 	import * as Card from '$lib/components/ui/card/index.js';
@@ -101,18 +102,6 @@
 	let assignReviewerError = $state('');
 
 	let actionError = $state('');
-
-	function formatDate(ts?: import('@bufbuild/protobuf/wkt').Timestamp): string {
-		const d = protoTsToDate(ts);
-		if (!d) return '—';
-		return d.toLocaleString('en-US', {
-			month: 'short',
-			day: 'numeric',
-			year: 'numeric',
-			hour: '2-digit',
-			minute: '2-digit'
-		});
-	}
 
 	function formatSize(bytes: number | bigint): string {
 		const b = Number(bytes);
@@ -242,10 +231,13 @@
 		downloadingId = versionId;
 		try {
 			const { url } = await getDocumentDownloadUrl({ docId, versionId: Number(versionId) });
-			if (!url) return;
+			if (!url) {
+				toast.error(m.error_download_failed());
+				return;
+			}
 			window.open(url, '_blank');
 		} catch {
-			// ignore
+			toast.error(m.error_download_failed());
 		} finally {
 			downloadingId = null;
 		}
@@ -272,10 +264,13 @@
 		deleting = true;
 		try {
 			const result = await deleteDocument(docId);
-			if (!result.ok) return;
+			if (!result.ok) {
+				toast.error(m.error_delete_document());
+				return;
+			}
 			goto(localizeHref(`/workspaces/${wsId}`));
 		} catch {
-			// ignore
+			toast.error(m.error_delete_document());
 		} finally {
 			deleting = false;
 			deleteOpen = false;
@@ -311,7 +306,7 @@
 							</span>
 							<span class="flex items-center gap-1">
 								<Calendar class="size-3.5" />
-								{formatDate(doc?.createdAt)}
+								{formatTimestamp(doc?.createdAt, { withTime: true })}
 							</span>
 							<span class="flex items-center gap-1">
 								<FileText class="size-3.5" />
@@ -351,7 +346,9 @@
 							: 'border-amber-200 bg-amber-50 text-amber-800'}"
 					>
 						<p class="mb-1 font-medium">
-							{doc.status === 'rejected' ? m.doc_rejection_reason() : m.doc_changes_requested_label()}
+							{doc.status === 'rejected'
+								? m.doc_rejection_reason()
+								: m.doc_changes_requested_label()}
 						</p>
 						<p class="text-xs leading-relaxed">{doc.reviewerNote}</p>
 					</div>
@@ -427,7 +424,9 @@
 							onclick={() => (assignReviewerOpen = true)}
 						>
 							<UserCheck class="size-3.5" />
-							{doc?.reviewerName ? m.doc_reviewer_label({ name: doc.reviewerName }) : m.doc_assign_reviewer()}
+							{doc?.reviewerName
+								? m.doc_reviewer_label({ name: doc.reviewerName })
+								: m.doc_assign_reviewer()}
 						</Button>
 					{/if}
 
@@ -443,7 +442,9 @@
 			<Card.Header>
 				<Card.Title class="text-sm">{m.doc_version_history()}</Card.Title>
 				<Card.Description class="text-xs">
-					{versions.length === 1 ? m.doc_version_count({ count: String(versions.length) }) : m.doc_versions_count({ count: String(versions.length) })}
+					{versions.length === 1
+						? m.doc_version_count({ count: String(versions.length) })
+						: m.doc_versions_count({ count: String(versions.length) })}
 				</Card.Description>
 			</Card.Header>
 			<Card.Content>
@@ -458,7 +459,9 @@
 								></div>
 								<div class="flex items-start justify-between gap-3">
 									<div class="min-w-0">
-										<p class="text-sm font-semibold">{m.doc_version_label({ version: String(v.version) })}</p>
+										<p class="text-sm font-semibold">
+											{m.doc_version_label({ version: String(v.version) })}
+										</p>
 										<div
 											class="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
 										>
@@ -468,7 +471,7 @@
 											</span>
 											<span class="flex items-center gap-1">
 												<Clock class="size-3" />
-												{formatDate(v.createdAt)}
+												{formatTimestamp(v.createdAt, { withTime: true })}
 											</span>
 											<span>{formatSize(v.size)}</span>
 										</div>
@@ -552,11 +555,7 @@
 		</Dialog.Header>
 		<div class="grid gap-2 px-6">
 			<Label class="text-xs">{m.doc_reject_reason_label()}</Label>
-			<Textarea
-				bind:value={rejectNote}
-				placeholder={m.doc_reject_placeholder()}
-				rows={4}
-			/>
+			<Textarea bind:value={rejectNote} placeholder={m.doc_reject_placeholder()} rows={4} />
 		</div>
 		<Dialog.Footer>
 			<Dialog.Close>

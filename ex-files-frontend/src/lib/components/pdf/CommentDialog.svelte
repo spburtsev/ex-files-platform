@@ -48,7 +48,11 @@
 	>
 		<h4 class="mb-1 text-sm font-semibold">{m.pdf_add_comment()}</h4>
 		<p class="mb-3 text-xs text-muted-foreground">
-			{m.pdf_comment_position({ page: String(page + 1), x: String(Math.round(x)), y: String(Math.round(y)) })}
+			{m.pdf_comment_position({
+				page: String(page + 1),
+				x: String(Math.round(x)),
+				y: String(Math.round(y))
+			})}
 		</p>
 
 		<form onsubmit={handleSubmit} class="flex flex-col gap-3">
@@ -60,7 +64,9 @@
 				class="resize-none text-sm"
 			/>
 			<div class="flex justify-end gap-2">
-				<Button type="button" variant="ghost" size="sm" onclick={oncancel}>{m.common_cancel()}</Button>
+				<Button type="button" variant="ghost" size="sm" onclick={oncancel}
+					>{m.common_cancel()}</Button
+				>
 				<Button type="submit" size="sm" disabled={!text.trim()}>{m.pdf_add_comment()}</Button>
 			</div>
 		</form>
