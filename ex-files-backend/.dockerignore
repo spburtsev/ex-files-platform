@@ -1,0 +1,6 @@
+tmp/
+.env
+.env.*
+!.env.example
+coverage.out
+cover.out

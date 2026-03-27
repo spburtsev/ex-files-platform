@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -26,7 +27,7 @@ func main() {
 
 	dsn := os.Getenv("DB_DSN")
 	if dsn == "" {
-		dsn = "host=localhost user=admin password=admin dbname=exfiles port=5432 sslmode=disable TimeZone=UTC"
+		dsn = "host=localhost user=admin password=admin dbname=exfiles port=5433 sslmode=disable TimeZone=UTC"
 	}
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
@@ -46,7 +47,7 @@ func main() {
 
 	minioEndpoint := os.Getenv("MINIO_ENDPOINT")
 	if minioEndpoint == "" {
-		minioEndpoint = "localhost:9000"
+		minioEndpoint = "localhost:9002"
 	}
 	minioAccessKey := os.Getenv("MINIO_ACCESS_KEY")
 	if minioAccessKey == "" {
@@ -77,8 +78,12 @@ func main() {
 
 	router := gin.Default()
 
+	corsOrigins := os.Getenv("CORS_ORIGINS")
+	if corsOrigins == "" {
+		corsOrigins = "http://localhost:5173,http://localhost:4173"
+	}
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:5173", "http://localhost:4173"},
+		AllowOrigins:     strings.Split(corsOrigins, ","),
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Content-Type", "Authorization"},
 		ExposeHeaders:    []string{"X-Total-Count", "X-Page", "X-Per-Page", "X-Total-Pages"},
@@ -139,5 +144,9 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	router.Run()
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	router.Run(":" + port)
 }
