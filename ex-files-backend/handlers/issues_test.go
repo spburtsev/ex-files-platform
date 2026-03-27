@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"bytes"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -176,5 +177,82 @@ func TestGetIssue(t *testing.T) {
 		h := newIssuesHandler(iRepo, &mockRepo{})
 		w := serveIssue(h.Get, http.MethodGet, "/issues/999", "/issues/:id")
 		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+}
+
+// --- TestCreateIssue ---
+
+func issueRequest(handler gin.HandlerFunc, method, path, routePattern string, body *bytes.Buffer, userID uint, role string) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	_, r := gin.CreateTestContext(w)
+	r.Handle(method, routePattern, func(c *gin.Context) {
+		c.Set("user_id", userID)
+		c.Set("role", role)
+		handler(c)
+	})
+	var req *http.Request
+	if body != nil {
+		req = httptest.NewRequest(method, path, body)
+		req.Header.Set("Content-Type", "application/json")
+	} else {
+		req = httptest.NewRequest(method, path, nil)
+	}
+	r.ServeHTTP(w, req)
+	return w
+}
+
+func TestCreateIssue(t *testing.T) {
+	t.Run("employee_forbidden", func(t *testing.T) {
+		h := newIssuesHandler(&mockIssueRepo{}, &mockRepo{})
+		body := bytes.NewBufferString(`{"title":"Test","assignee_id":2}`)
+		w := issueRequest(h.Create, http.MethodPost, "/workspaces/1/issues", "/workspaces/:id/issues", body, 5, "employee")
+
+		assert.Equal(t, http.StatusForbidden, w.Code)
+	})
+
+	t.Run("manager_success", func(t *testing.T) {
+		iRepo := &mockIssueRepo{}
+		iRepo.On("Create", mock.AnythingOfType("*models.Issue")).Run(func(args mock.Arguments) {
+			issue := args.Get(0).(*models.Issue)
+			issue.ID = 10
+		}).Return(nil)
+
+		h := newIssuesHandler(iRepo, &mockRepo{})
+		body := bytes.NewBufferString(`{"title":"Report Q1","description":"Quarterly report","assignee_id":2}`)
+		w := issueRequest(h.Create, http.MethodPost, "/workspaces/1/issues", "/workspaces/:id/issues", body, 5, "manager")
+
+		assert.Equal(t, http.StatusCreated, w.Code)
+		assert.Equal(t, "application/x-protobuf", w.Header().Get("Content-Type"))
+
+		var resp issuesv1.CreateIssueResponse
+		require.NoError(t, proto.Unmarshal(w.Body.Bytes(), &resp))
+		require.NotNil(t, resp.Issue)
+		assert.Equal(t, "Report Q1", resp.Issue.Title)
+		assert.Equal(t, "Quarterly report", resp.Issue.Description)
+		assert.Equal(t, "1", resp.Issue.WorkspaceId)
+		assert.Equal(t, "5", resp.Issue.CreatorId)
+		assert.Equal(t, "2", resp.Issue.AssigneeId)
+
+		iRepo.AssertExpectations(t)
+	})
+
+	t.Run("missing_title", func(t *testing.T) {
+		h := newIssuesHandler(&mockIssueRepo{}, &mockRepo{})
+		body := bytes.NewBufferString(`{"description":"no title here","assignee_id":2}`)
+		w := issueRequest(h.Create, http.MethodPost, "/workspaces/1/issues", "/workspaces/:id/issues", body, 5, "manager")
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("repo_error", func(t *testing.T) {
+		iRepo := &mockIssueRepo{}
+		iRepo.On("Create", mock.AnythingOfType("*models.Issue")).Return(errors.New("db error"))
+
+		h := newIssuesHandler(iRepo, &mockRepo{})
+		body := bytes.NewBufferString(`{"title":"Report Q1","assignee_id":2}`)
+		w := issueRequest(h.Create, http.MethodPost, "/workspaces/1/issues", "/workspaces/:id/issues", body, 5, "manager")
+
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		iRepo.AssertExpectations(t)
 	})
 }

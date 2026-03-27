@@ -562,4 +562,57 @@ func TestDocumentUploadVersion(t *testing.T) {
 		storage.AssertExpectations(t)
 		auditRepo.AssertExpectations(t)
 	})
+
+	t.Run("missing_file", func(t *testing.T) {
+		docRepo := &mockDocRepo{}
+		doc := &models.Document{Name: "test.pdf", IssueID: 1, Uploader: models.User{Name: "Alice"}}
+		doc.ID = 1
+		docRepo.On("FindByID", uint(1)).Return(doc, nil)
+
+		h := newDocHandler(docRepo, &mockStorage{}, nil)
+		// Send request with no multipart body
+		w := docRequest(h.UploadVersion, http.MethodPost, "/documents/1/versions", "/documents/:id/versions", nil, "", 1, "manager")
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		docRepo.AssertExpectations(t)
+	})
+
+	t.Run("storage_upload_failure", func(t *testing.T) {
+		docRepo := &mockDocRepo{}
+		storage := &mockStorage{}
+
+		doc := &models.Document{Name: "test.pdf", IssueID: 1, Uploader: models.User{Name: "Alice"}}
+		doc.ID = 1
+		docRepo.On("FindByID", uint(1)).Return(doc, nil)
+		docRepo.On("LatestVersionNumber", uint(1)).Return(1, nil)
+		storage.On("Upload", mock.Anything, mock.AnythingOfType("string"), mock.Anything, mock.AnythingOfType("int64"), mock.AnythingOfType("string")).Return(errors.New("storage error"))
+
+		h := newDocHandler(docRepo, storage, nil)
+		body, contentType := createMultipartFile(t, "file", "test_v2.pdf", "updated content")
+		w := docRequest(h.UploadVersion, http.MethodPost, "/documents/1/versions", "/documents/:id/versions", body, contentType, 1, "manager")
+
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		docRepo.AssertExpectations(t)
+		storage.AssertExpectations(t)
+	})
+
+	t.Run("create_version_failure", func(t *testing.T) {
+		docRepo := &mockDocRepo{}
+		storage := &mockStorage{}
+
+		doc := &models.Document{Name: "test.pdf", IssueID: 1, Uploader: models.User{Name: "Alice"}}
+		doc.ID = 1
+		docRepo.On("FindByID", uint(1)).Return(doc, nil)
+		docRepo.On("LatestVersionNumber", uint(1)).Return(1, nil)
+		storage.On("Upload", mock.Anything, mock.AnythingOfType("string"), mock.Anything, mock.AnythingOfType("int64"), mock.AnythingOfType("string")).Return(nil)
+		docRepo.On("CreateVersion", mock.AnythingOfType("*models.DocumentVersion")).Return(errors.New("db error"))
+
+		h := newDocHandler(docRepo, storage, nil)
+		body, contentType := createMultipartFile(t, "file", "test_v2.pdf", "updated content")
+		w := docRequest(h.UploadVersion, http.MethodPost, "/documents/1/versions", "/documents/:id/versions", body, contentType, 1, "manager")
+
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		docRepo.AssertExpectations(t)
+		storage.AssertExpectations(t)
+	})
 }

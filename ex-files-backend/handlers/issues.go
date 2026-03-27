@@ -99,10 +99,16 @@ func (h *IssuesHandler) Get(c *gin.Context) {
 }
 
 func (h *IssuesHandler) Create(c *gin.Context) {
-	userID, _ := c.Get("user_id")
-	role, _ := c.Get("role")
+	userID, ok := mustGetUserID(c)
+	if !ok {
+		return
+	}
+	role, ok := mustGetRole(c)
+	if !ok {
+		return
+	}
 
-	if role.(string) != string(models.RoleManager) && role.(string) != string(models.RoleRoot) {
+	if !role.CanManageWorkspaces() {
 		c.JSON(http.StatusForbidden, gin.H{"error": "only managers may create issues"})
 		return
 	}
@@ -126,7 +132,7 @@ func (h *IssuesHandler) Create(c *gin.Context) {
 
 	issue := models.Issue{
 		WorkspaceID: uint(wsID),
-		CreatorID:   userID.(uint),
+		CreatorID:   userID,
 		AssigneeID:  body.AssigneeID,
 		Title:       body.Title,
 		Description: body.Description,

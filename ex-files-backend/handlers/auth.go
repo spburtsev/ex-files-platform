@@ -117,8 +117,11 @@ func (h *AuthHandler) Login(c *gin.Context) {
 }
 
 func (h *AuthHandler) Me(c *gin.Context) {
-	userID, _ := c.Get("user_id")
-	user, err := h.Repo.FindByID(userID.(uint))
+	userID, ok := mustGetUserID(c)
+	if !ok {
+		return
+	}
+	user, err := h.Repo.FindByID(userID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 		return
