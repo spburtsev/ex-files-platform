@@ -8,7 +8,6 @@
 	import { Skeleton } from '$lib/components/ui/skeleton/index.js';
 
 	const usersQuery = getUsers();
-	const loading = $derived(usersQuery.current === undefined);
 	const users = $derived(usersQuery.current ?? []);
 
 	function initials(name: string) {
@@ -44,7 +43,7 @@
 		<p class="text-sm text-muted-foreground">{m.users_description()}</p>
 	</div>
 
-	{#if loading}
+	{#if !usersQuery.ready}
 		<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
 			{#each { length: 8 } as _, i (i)}
 				<Card.Root>
@@ -63,28 +62,34 @@
 		</div>
 	{:else}
 		<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-			{#each users as user (user.id)}
-				<Card.Root>
-					<Card.Header class="flex flex-row items-center gap-3 pb-2">
-						<Avatar.Root class="h-10 w-10">
-							<Avatar.Fallback class="text-sm font-semibold text-white {avatarColorClass(user.id)}">
-								{initials(user.name)}
-							</Avatar.Fallback>
-						</Avatar.Root>
-						<div class="min-w-0">
-							<Card.Title class="truncate text-sm">{user.name}</Card.Title>
-							<Card.Description class="truncate text-xs">{user.email}</Card.Description>
-						</div>
-					</Card.Header>
-					<Card.Content>
-						{#if user.role === Role.MANAGER}
-							<Badge variant="secondary" class="text-violet-700">{m.role_manager()}</Badge>
-						{:else}
-							<Badge variant="outline">{m.role_employee()}</Badge>
-						{/if}
-					</Card.Content>
-				</Card.Root>
-			{/each}
+			{#if users.length === 0}
+				<p class="text-sm text-muted-foreground italic">No users found</p>
+			{:else}
+				{#each users as user (user.id)}
+					<Card.Root>
+						<Card.Header class="flex flex-row items-center gap-3 pb-2">
+							<Avatar.Root class="h-10 w-10">
+								<Avatar.Fallback
+									class="text-sm font-semibold text-white {avatarColorClass(user.id)}"
+								>
+									{initials(user.name)}
+								</Avatar.Fallback>
+							</Avatar.Root>
+							<div class="min-w-0">
+								<Card.Title class="truncate text-sm">{user.name}</Card.Title>
+								<Card.Description class="truncate text-xs">{user.email}</Card.Description>
+							</div>
+						</Card.Header>
+						<Card.Content>
+							{#if user.role === Role.MANAGER}
+								<Badge variant="secondary" class="text-violet-700">{m.role_manager()}</Badge>
+							{:else}
+								<Badge variant="outline">{m.role_employee()}</Badge>
+							{/if}
+						</Card.Content>
+					</Card.Root>
+				{/each}
+			{/if}
 		</div>
 	{/if}
 </div>

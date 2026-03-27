@@ -18,12 +18,19 @@
 	<div class="flex items-center gap-1 rounded-full border bg-card px-2 py-1 shadow-md">
 		<Globe class="size-3.5 text-muted-foreground" />
 		{#each locales as locale (locale)}
-			<a
-				href={localizeHref(page.url.pathname, { locale })}
-				class="rounded-md px-2 py-0.5 text-xs font-medium transition-colors hover:bg-muted {currentLocale === locale ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}"
-			>
-				{locale.toUpperCase()}
-			</a>
+			{#if currentLocale === locale}
+				<span class="rounded-md px-2 py-0.5 text-xs font-medium bg-primary text-primary-foreground">
+					{locale.toUpperCase()}
+				</span>
+			{:else}
+				<a
+					href={localizeHref(page.url.pathname, { locale })}
+					data-sveltekit-reload
+					class="rounded-md px-2 py-0.5 text-xs font-medium transition-colors text-muted-foreground hover:bg-muted"
+				>
+					{locale.toUpperCase()}
+				</a>
+			{/if}
 		{/each}
 	</div>
 </div>

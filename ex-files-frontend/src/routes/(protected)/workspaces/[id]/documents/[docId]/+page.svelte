@@ -15,6 +15,7 @@
 		deleteDocument
 	} from '$lib/commands.remote';
 	import { m } from '$lib/paraglide/messages.js';
+	import { localizeHref } from '$lib/paraglide/runtime';
 	import * as Card from '$lib/components/ui/card/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
@@ -50,7 +51,7 @@
 	const versions = $derived(detail?.versions ?? []);
 
 	const meQuery = getMe();
-	const me = $derived(meQuery.current?.user);
+	const me = $derived(meQuery.current);
 
 	const wsQuery = getWorkspaceDetail(wsId);
 	const wsDetail = $derived(wsQuery.current);
@@ -272,7 +273,7 @@
 		try {
 			const result = await deleteDocument(docId);
 			if (!result.ok) return;
-			goto(`/workspaces/${wsId}`);
+			goto(localizeHref(`/workspaces/${wsId}`));
 		} catch {
 			// ignore
 		} finally {

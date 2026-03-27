@@ -10,6 +10,7 @@
 		removeWorkspaceMember
 	} from '$lib/commands.remote';
 	import { m } from '$lib/paraglide/messages.js';
+	import { localizeHref } from '$lib/paraglide/runtime';
 	import * as Card from '$lib/components/ui/card/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import * as Avatar from '$lib/components/ui/avatar/index.js';
@@ -45,7 +46,7 @@
 	onDestroy(() => extraBreadcrumbs.set([]));
 
 	const meQuery = getMe();
-	const me = $derived(meQuery.current?.user);
+	const me = $derived(meQuery.current);
 
 	const detailQuery = getWorkspaceDetail(wsId);
 	const detail = $derived(detailQuery.current);
@@ -136,7 +137,7 @@
 		try {
 			const result = await deleteWorkspace(wsId);
 			if (!result.ok) return;
-			goto('/workspaces');
+			goto(localizeHref('/workspaces'));
 		} catch {
 			// ignore
 		} finally {
@@ -292,7 +293,7 @@
 										variant="ghost"
 										size="sm"
 										class="shrink-0 gap-1"
-										href="/workspaces/{wsId}/issues/{issue.id}"
+										href={localizeHref(`/workspaces/${wsId}/issues/${issue.id}`)}
 									>
 										{m.common_view()}
 										<ArrowRight class="size-3.5" />

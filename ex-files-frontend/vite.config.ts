@@ -10,7 +10,11 @@ export default defineConfig({
 		tailwindcss(),
 		sveltekit(),
 		devtoolsJson(),
-		paraglideVitePlugin({ project: './project.inlang', outdir: './src/lib/paraglide' })
+		paraglideVitePlugin({
+			project: './project.inlang',
+			outdir: './src/lib/paraglide',
+			strategy: ['url', 'cookie', 'globalVariable', 'baseLocale']
+		})
 	],
 	test: {
 		expect: { requireAssertions: true },

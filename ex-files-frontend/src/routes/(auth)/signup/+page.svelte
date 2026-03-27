@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { register } from '$lib/commands.remote';
 	import { m } from '$lib/paraglide/messages.js';
+	import { localizeHref } from '$lib/paraglide/runtime';
 	import { FileCheck2 } from '@lucide/svelte';
 	import * as Card from '$lib/components/ui/card/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -22,7 +23,7 @@
 			if (!result.ok) {
 				error = result.error ?? m.signup_error();
 			} else {
-				window.location.href = '/';
+				window.location.href = localizeHref('/');
 			}
 		} catch {
 			error = m.error_network();
@@ -40,7 +41,7 @@
 	<div class="w-full max-w-sm">
 		<div class="flex flex-col gap-6">
 			<!-- Brand -->
-			<a href="/" class="flex items-center justify-center gap-2 self-center">
+			<a href={localizeHref('/')} class="flex items-center justify-center gap-2 self-center">
 				<FileCheck2 class="size-6 text-primary" />
 				<span class="text-xl font-bold tracking-tight">ex-files</span>
 			</a>
@@ -101,7 +102,7 @@
 				</Card.Content>
 				<Card.Footer class="justify-center text-sm text-muted-foreground">
 					{m.signup_has_account()}&nbsp;
-					<a href="/login" class="text-foreground underline-offset-4 hover:underline">{m.signup_login_link()}</a>
+					<a href={localizeHref('/login')} class="text-foreground underline-offset-4 hover:underline">{m.signup_login_link()}</a>
 				</Card.Footer>
 			</Card.Root>
 		</div>

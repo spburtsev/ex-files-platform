@@ -6,7 +6,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"strconv"
+
 	authv1 "github.com/spburtsev/ex-files-backend/gen/auth/v1"
+	issuesv1 "github.com/spburtsev/ex-files-backend/gen/issues/v1"
 	"github.com/spburtsev/ex-files-backend/models"
 	"github.com/spburtsev/ex-files-backend/services"
 )
@@ -134,9 +137,19 @@ func (h *AuthHandler) ListUsers(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list users"})
 		return
 	}
-	pb := make([]*authv1.User, len(users))
+	pb := make([]*issuesv1.User, len(users))
 	for i := range users {
-		pb[i] = userToProto(&users[i])
+		u := users[i]
+		role := issuesv1.Role_ROLE_EMPLOYEE
+		if u.Role == models.RoleManager || u.Role == models.RoleRoot {
+			role = issuesv1.Role_ROLE_MANAGER
+		}
+		pb[i] = &issuesv1.User{
+			Id:    strconv.FormatUint(uint64(u.ID), 10),
+			Name:  u.Name,
+			Email: u.Email,
+			Role:  role,
+		}
 	}
-	c.JSON(http.StatusOK, gin.H{"users": pb})
+	protobufResponse(c, http.StatusOK, &issuesv1.GetUsersResponse{Users: pb})
 }

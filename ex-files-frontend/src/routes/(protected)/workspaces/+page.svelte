@@ -5,6 +5,7 @@
 	import { createWorkspace } from '$lib/commands.remote';
 	import { protoTsToDate, isManager } from '$lib/proto-utils';
 	import { m } from '$lib/paraglide/messages.js';
+	import { localizeHref } from '$lib/paraglide/runtime';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import * as Card from '$lib/components/ui/card/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
@@ -15,7 +16,7 @@
 	import { FolderOpen, Plus, ArrowRight, ChevronLeft, ChevronRight, Users } from '@lucide/svelte';
 
 	const meQuery = getMe();
-	const me = $derived(meQuery.current?.user);
+	const me = $derived(meQuery.current);
 
 	const currentPage = Number(page.url.searchParams.get('page') ?? '1');
 	const workspacesQuery = getWorkspaces(currentPage);
@@ -53,7 +54,7 @@
 			}
 			createOpen = false;
 			createName = '';
-			goto(`/workspaces/${result.workspace.id}`);
+			goto(localizeHref(`/workspaces/${result.workspace.id}`));
 		} catch {
 			createError = m.error_network_retry();
 		} finally {
@@ -168,7 +169,7 @@
 						<p class="mt-1 text-xs text-muted-foreground">{m.ws_created_date({ date: formatDate(ws.createdAt) })}</p>
 					</Card.Content>
 					<Card.Footer class="mt-auto border-t pt-3">
-						<Button size="sm" class="w-full gap-1.5" href="/workspaces/{ws.id}">
+						<Button size="sm" class="w-full gap-1.5" href={localizeHref(`/workspaces/${ws.id}`)}>
 							{m.common_open()}
 							<ArrowRight class="size-3.5" />
 						</Button>
