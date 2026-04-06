@@ -12,11 +12,11 @@
 	import { Skeleton } from '$lib/components/ui/skeleton/index.js';
 	import { ChevronLeft, ChevronRight, Filter, X } from '@lucide/svelte';
 	import { isManager, formatTimestamp } from '$lib/proto-utils';
-	import { getMe } from '$lib/data.remote';
 	import { localizeHref } from '$lib/paraglide/runtime';
+
 	// Redirect employees away from audit page
-	const meQuery = getMe();
-	const me = $derived(meQuery.current);
+    const { data } = $props();
+	const me = $derived(data.user);
 	$effect(() => {
 		if (me && !isManager(me.role)) {
 			goto(localizeHref('/'));

@@ -41,6 +41,14 @@ func (m *mockDocRepo) FindByID(id uint) (*models.Document, error) {
 	return nil, args.Error(1)
 }
 
+func (m *mockDocRepo) FindByHash(hash string) (*models.Document, error) {
+	args := m.Called(hash)
+	if d, ok := args.Get(0).(*models.Document); ok {
+		return d, args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
 func (m *mockDocRepo) Update(doc *models.Document) error {
 	return m.Called(doc).Error(0)
 }

@@ -1,15 +1,17 @@
 .PHONY: proto proto-lint proto-breaking \
         infra-up infra-down \
         backend-dev dev \
-        test test-cover test-race \
+        test test-cover test-race test-e2e \
         build build-frontend build-backend \
-        docker-build up down
+        docker-build up down \
+        logs-up logs-down
 
 PROTO_DIR    := protocol
 BACKEND_GEN  := ex-files-backend/gen
 FRONTEND_GEN := ex-files-frontend/src/lib/gen
 BACKEND_DIR  := ex-files-backend
 FRONTEND_DIR := ex-files-frontend
+E2E_DIR      := integration-testing
 
 # --- Proto ---
 
@@ -49,6 +51,9 @@ test-cover:
 test-race:
 	cd $(BACKEND_DIR) && go test ./... -race -count=1
 
+test-e2e:
+	cd $(E2E_DIR) && bun run test
+
 # --- Production build ---
 
 build-frontend:
@@ -69,3 +74,11 @@ up: docker-build
 
 down:
 	docker compose down
+
+# --- Observability ---
+
+logs-up:
+	docker compose up -d loki promtail grafana
+
+logs-down:
+	docker compose stop loki promtail grafana

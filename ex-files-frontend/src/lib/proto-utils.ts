@@ -11,11 +11,6 @@ export function tsToIso(ts?: Timestamp): string | undefined {
 	return d ? d.toISOString().slice(0, 19) : undefined;
 }
 
-/** Convert a bigint proto ID to a regular number for use in UI/comparisons */
-export function bid(v: bigint): number {
-	return Number(v);
-}
-
 /** Check if a proto auth Role is a manager-level role (manager or root) */
 export function isManager(role?: Role): boolean {
 	return role === Role.MANAGER || role === Role.ROOT;

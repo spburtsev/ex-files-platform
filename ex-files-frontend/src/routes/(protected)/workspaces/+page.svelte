@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
-	import { getWorkspaces, getMe } from '$lib/data.remote';
+	import { getWorkspaces } from '$lib/data.remote';
 	import { createWorkspace } from '$lib/commands.remote';
 	import { formatTimestamp, isManager } from '$lib/proto-utils';
 	import { m } from '$lib/paraglide/messages.js';
@@ -15,8 +15,8 @@
 	import { Skeleton } from '$lib/components/ui/skeleton/index.js';
 	import { FolderOpen, Plus, ArrowRight, ChevronLeft, ChevronRight, Users } from '@lucide/svelte';
 
-	const meQuery = getMe();
-	const me = $derived(meQuery.current);
+	const { data: pageData } = $props();
+	const me = $derived(pageData.user);
 
 	const currentPage = $derived(Number(page.url.searchParams.get('page') ?? '1'));
 	const workspacesQuery = $derived(getWorkspaces(currentPage));

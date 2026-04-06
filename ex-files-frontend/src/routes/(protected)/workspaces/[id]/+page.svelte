@@ -1,7 +1,11 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { goto, invalidateAll } from '$app/navigation';
-	import { getWorkspaceDetail, getMe, getUsers, getIssues } from '$lib/data.remote';
+	import {
+		getWorkspaceDetail,
+		getAssignableMembers,
+		getIssues
+	} from '$lib/data.remote';
 	import { formatTimestamp, roleName, isManager, initials } from '$lib/proto-utils';
 	import {
 		updateWorkspace,
@@ -48,8 +52,8 @@
 	});
 	onDestroy(() => extraBreadcrumbs.set([]));
 
-	const meQuery = getMe();
-	const me = $derived(meQuery.current);
+    const { data } = $props();
+	const me = $derived(data.user);
 
 	const detailQuery = getWorkspaceDetail(wsId);
 	const detail = $derived(detailQuery.current);
@@ -61,11 +65,9 @@
 	const issuesQuery = getIssues(wsId);
 	const issuesList = $derived(issuesQuery.current ?? []);
 
-	// Users (for add-member picker)
-	const usersQuery = getUsers();
-	const allUsers = $derived(usersQuery.current ?? []);
-	const memberIds = $derived(new Set(members.map((mb) => String(mb.id))));
-	const nonMembers = $derived(allUsers.filter((u) => !memberIds.has(String(u.id))));
+	// Users assignable as members (employees not already in workspace)
+	const assignableQuery = getAssignableMembers(wsId);
+	const nonMembers = $derived(assignableQuery.current ?? []);
 
 	const isOwner = $derived(manager && me && manager.id === me.id);
 

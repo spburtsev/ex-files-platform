@@ -17,9 +17,12 @@ import (
 )
 
 type DocumentHandler struct {
-	Repo    services.DocumentRepository
-	Storage services.StorageService
-	Audit   services.AuditRepository
+	Repo     services.DocumentRepository
+	Storage  services.StorageService
+	Audit    services.AuditRepository
+	UserRepo services.UserRepository
+	Email    services.EmailService
+	Hub      *services.SSEHub
 }
 
 func documentToProto(d *models.Document) *docsv1.Document {
@@ -413,6 +416,8 @@ func (h *DocumentHandler) AssignReviewer(c *gin.Context) {
 		"reviewer_id": body.ReviewerID,
 	})
 
+	notifyReviewerAssigned(h.Email, h.UserRepo, h.Hub, doc, body.ReviewerID)
+
 	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
 }
 
@@ -466,6 +471,11 @@ func (h *DocumentHandler) Approve(c *gin.Context) {
 		"document_id": doc.ID,
 	})
 
+	notifyDocumentEvent(h.Email, h.UserRepo, h.Hub, doc, "document.approved",
+		fmt.Sprintf("Document approved: %s", doc.Name),
+		fmt.Sprintf("<p>Your document <strong>%s</strong> has been approved.</p>", doc.Name),
+	)
+
 	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
 }
 
@@ -518,6 +528,11 @@ func (h *DocumentHandler) Reject(c *gin.Context) {
 		"note":        body.Note,
 	})
 
+	notifyDocumentEvent(h.Email, h.UserRepo, h.Hub, doc, "document.rejected",
+		fmt.Sprintf("Document rejected: %s", doc.Name),
+		fmt.Sprintf("<p>Your document <strong>%s</strong> has been rejected.</p><p>Reason: %s</p>", doc.Name, body.Note),
+	)
+
 	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
 }
 
@@ -569,6 +584,11 @@ func (h *DocumentHandler) RequestChanges(c *gin.Context) {
 		"document_id": doc.ID,
 		"note":        body.Note,
 	})
+
+	notifyDocumentEvent(h.Email, h.UserRepo, h.Hub, doc, "document.changes_requested",
+		fmt.Sprintf("Changes requested: %s", doc.Name),
+		fmt.Sprintf("<p>Changes have been requested for your document <strong>%s</strong>.</p><p>Note: %s</p>", doc.Name, body.Note),
+	)
 
 	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
 }

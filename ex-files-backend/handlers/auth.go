@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -33,6 +34,7 @@ type loginRequest struct {
 }
 
 func setSessionCookie(c *gin.Context, token string) {
+	slog.Debug("setting session cookie", "component", "auth", "path", c.Request.URL.Path)
 	c.SetCookie("session", token, int((8 * time.Hour).Seconds()), "/", "", false, true)
 }
 
@@ -43,7 +45,10 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
+	slog.Debug("register attempt", "component", "auth", "email", req.Email)
+
 	if _, err := h.Repo.FindByEmail(req.Email); err == nil {
+		slog.Debug("register failed: email taken", "component", "auth", "email", req.Email)
 		c.JSON(http.StatusConflict, gin.H{"error": "email already registered"})
 		return
 	}
@@ -88,22 +93,29 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
+	slog.Debug("login attempt", "component", "auth", "email", req.Email)
+
 	user, err := h.Repo.FindByEmail(req.Email)
 	if err != nil {
+		slog.Debug("login failed: user not found", "component", "auth", "email", req.Email)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 		return
 	}
 
 	if err := h.Hasher.Compare(user.PasswordHash, req.Password); err != nil {
+		slog.Debug("login failed: wrong password", "component", "auth", "email", req.Email)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 		return
 	}
 
 	token, err := h.Tokens.Issue(user)
 	if err != nil {
+		slog.Error("login: failed to issue token", "component", "auth", "email", req.Email, "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue token"})
 		return
 	}
+
+	slog.Debug("login succeeded", "component", "auth", "user_id", user.ID, "email", user.Email)
 
 	logAudit(h.Audit, models.AuditActionUserLoggedIn, user.ID, uintPtr(user.ID), "user", map[string]any{
 		"email": user.Email,

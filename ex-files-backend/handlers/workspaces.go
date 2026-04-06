@@ -147,6 +147,29 @@ func (h *WorkspaceHandler) Get(c *gin.Context) {
 	})
 }
 
+func (h *WorkspaceHandler) AssignableMembers(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid workspace id"})
+		return
+	}
+
+	users, err := h.Repo.GetAssignableUsers(uint(id))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch assignable users"})
+		return
+	}
+
+	pb := make([]*authv1.User, len(users))
+	for i := range users {
+		pb[i] = userToProto(&users[i])
+	}
+
+	protobufResponse(c, http.StatusOK, &workspacesv1.GetAssignableMembersResponse{
+		Users: pb,
+	})
+}
+
 func (h *WorkspaceHandler) Update(c *gin.Context) {
 	userID, ok := mustGetUserID(c)
 	if !ok {

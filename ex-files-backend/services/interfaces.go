@@ -48,6 +48,7 @@ type StorageService interface {
 type DocumentRepository interface {
 	Create(doc *models.Document) error
 	FindByID(id uint) (*models.Document, error)
+	FindByHash(hash string) (*models.Document, error)
 	Update(doc *models.Document) error
 	ListByIssue(issueID uint, search, status string, limit, offset int) ([]models.Document, int64, error)
 	Delete(id uint) error
@@ -64,6 +65,16 @@ type IssueRepository interface {
 	Create(issue *models.Issue) error
 }
 
+type EmailService interface {
+	Send(to, subject, body string) error
+}
+
+type CommentRepository interface {
+	Create(comment *models.Comment) error
+	FindByID(id uint) (*models.Comment, error)
+	ListByDocument(documentID uint) ([]models.Comment, error)
+}
+
 type WorkspaceRepository interface {
 	Create(workspace *models.Workspace) error
 	FindByID(id uint) (*models.Workspace, error)
@@ -74,4 +85,5 @@ type WorkspaceRepository interface {
 	AddMember(member *models.WorkspaceMember) error
 	RemoveMember(workspaceID, userID uint) error
 	GetMembers(workspaceID uint) ([]models.User, error)
+	GetAssignableUsers(workspaceID uint) ([]models.User, error)
 }

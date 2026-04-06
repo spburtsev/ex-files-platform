@@ -32,7 +32,7 @@ Services implement interfaces defined in `services/interfaces.go` to implement d
 ## Frontend Patterns
 
 - **Remote functions**: `src/lib/data.remote.ts` (queries via `query()`) and `src/lib/commands.remote.ts` (mutations via `command()`) - these are SvelteKit server functions that proxy to the backend
-- **Proto utils**: `src/lib/proto-utils.ts` — helpers like `protoTsToDate()`, `formatTimestamp()`, `bid()` (bigint to number), `isManager()`, `initials()`
+- **Proto utils**: `src/lib/proto-utils.ts` — helpers like `protoTsToDate()`, `formatTimestamp()`, `isManager()`, `initials()`
 - **i18n**: Paraglide JS with `en` and `pl` locales. Messages in `messages/{locale}.json`. Detection: URL - cookie - base locale
 - **UI components**: shadcn-svelte (bits-ui) in `src/lib/components/ui/`
 - **Auth**: Session cookie (`session`, HTTP-only, 8h TTL). Server hook in `hooks.server.ts` validates and redirects unauthenticated users

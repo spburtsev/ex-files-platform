@@ -1,6 +1,6 @@
 services:
   ex-files-pg:
-    image: postgres
+    image: postgres:17
     restart: always
     ports:
       - ${PG_PORT:-5433}:5432
@@ -58,8 +58,14 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_USER:-minioadmin}
       MINIO_SECRET_KEY: ${MINIO_PASSWORD:-minioadmin}
       MINIO_BUCKET: documents
-      CORS_ORIGINS: http://localhost:${FRONTEND_PORT:-3003}
+      CORS_ORIGINS: http://localhost:${FRONTEND_PORT:-3003},http://localhost:5173,http://localhost:4173
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-noreply@ex-files.local}
       GIN_MODE: release
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
     depends_on:
       ex-files-pg:
         condition: service_healthy
@@ -77,6 +83,43 @@ services:
     depends_on:
       - ex-files-backend
 
+  loki:
+    image: grafana/loki:3.4
+    restart: always
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki-data:/loki
+
+  promtail:
+    image: grafana/promtail:3.4
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./infra/promtail/config.yml:/etc/promtail/config.yml:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    restart: always
+    ports:
+      - ${GRAFANA_PORT:-3200}:3000
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - loki
+
 volumes:
   pgdata:
   miniodata:
+  loki-data:
+  grafana-data:

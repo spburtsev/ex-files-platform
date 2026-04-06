@@ -99,3 +99,11 @@ message AddMemberResponse {
 message RemoveMemberResponse {
   string message = 1;
 }
+
+// ---------------------------------------------------------------------------
+// AssignableMembers  GET /workspaces/:id/assignable-members
+// ---------------------------------------------------------------------------
+
+message GetAssignableMembersResponse {
+  repeated auth.v1.User users = 1;
+}

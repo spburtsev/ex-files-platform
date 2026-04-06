@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { goto, invalidateAll } from '$app/navigation';
-	import { getDocumentDetail, getMe, getWorkspaceDetail } from '$lib/data.remote';
-	import { isManager, bid, formatTimestamp } from '$lib/proto-utils';
+	import { getDocumentDetail, getWorkspaceDetail } from '$lib/data.remote';
+	import { isManager, formatTimestamp } from '$lib/proto-utils';
 	import {
 		submitDocument,
 		resubmitDocument,
@@ -51,8 +51,8 @@
 	const doc = $derived(detail?.document);
 	const versions = $derived(detail?.versions ?? []);
 
-	const meQuery = getMe();
-	const me = $derived(meQuery.current);
+    const { data } = $props();
+	const me = $derived(data.user);
 
 	const wsQuery = getWorkspaceDetail(wsId);
 	const wsDetail = $derived(wsQuery.current);
@@ -69,9 +69,9 @@
 	onDestroy(() => extraBreadcrumbs.set([]));
 
 	// Permission flags
-	const isUploaderFlag = $derived(doc && me ? bid(me.id) === bid(doc.uploaderId) : false);
+	const isUploaderFlag = $derived(doc && me ? Number(me.id) === Number(doc.uploaderId) : false);
 	const isManagerFlag = $derived(isManager(me?.role));
-	const isAssignedReviewer = $derived(doc && me ? bid(doc.reviewerId) === bid(me.id) : false);
+	const isAssignedReviewer = $derived(doc && me ? Number(doc.reviewerId) === Number(me.id) : false);
 	const canReview = $derived(isManagerFlag || isAssignedReviewer);
 
 	// Which action buttons to show
