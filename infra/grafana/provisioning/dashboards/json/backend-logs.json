@@ -1,0 +1,72 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "loki", "uid": "" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "prettifyLogMessage": true,
+        "showCommonLabels": false,
+        "showLabels": false,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": false
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "" },
+          "editorMode": "code",
+          "expr": "{service=~\"$service\"} | json | level=~\"$level\"",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Application Logs",
+      "type": "logs"
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["logs", "ex-files"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": false, "text": "All", "value": "$__all" },
+        "datasource": { "type": "loki", "uid": "" },
+        "definition": "label_values(service)",
+        "allValue": ".+",
+        "includeAll": true,
+        "multi": true,
+        "name": "service",
+        "query": "label_values({container=~\".+\"}, service)",
+        "refresh": 2,
+        "type": "query"
+      },
+      {
+        "current": { "selected": false, "text": "All", "value": "$__all" },
+        "allValue": ".+",
+        "includeAll": true,
+        "multi": true,
+        "name": "level",
+        "options": [
+          { "selected": false, "text": "DEBUG", "value": "DEBUG" },
+          { "selected": false, "text": "INFO", "value": "INFO" },
+          { "selected": false, "text": "WARN", "value": "WARN" },
+          { "selected": false, "text": "ERROR", "value": "ERROR" }
+        ],
+        "type": "custom"
+      }
+    ]
+  },
+  "time": { "from": "now-1h", "to": "now" },
+  "title": "Ex-Files Backend Logs",
+  "uid": "ex-files-backend-logs"
+}

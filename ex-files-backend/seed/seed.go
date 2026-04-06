@@ -1,7 +1,7 @@
 package seed
 
 import (
-	"log"
+	"log/slog"
 
 	"github.com/spburtsev/ex-files-backend/models"
 	"github.com/spburtsev/ex-files-backend/services"
@@ -30,7 +30,7 @@ func Run(db *gorm.DB, hasher services.Hasher) {
 		}
 		hash, err := hasher.Hash(su.Password)
 		if err != nil {
-			log.Printf("seed: hash error for %s: %v", su.Email, err)
+			slog.Error("hash error", "component", "seed", "email", su.Email, "error", err)
 			continue
 		}
 		u := models.User{
@@ -40,9 +40,9 @@ func Run(db *gorm.DB, hasher services.Hasher) {
 			Role:         su.Role,
 		}
 		if err := db.Create(&u).Error; err != nil {
-			log.Printf("seed: create error for %s: %v", su.Email, err)
+			slog.Error("create error", "component", "seed", "email", su.Email, "error", err)
 		} else {
-			log.Printf("seed: created user %s (%s)", su.Name, su.Email)
+			slog.Info("created user", "component", "seed", "name", su.Name, "email", su.Email)
 		}
 	}
 }

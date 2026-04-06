@@ -11,11 +11,6 @@ export function tsToIso(ts?: Timestamp): string | undefined {
 	return d ? d.toISOString().slice(0, 19) : undefined;
 }
 
-/** Convert a bigint proto ID to a regular number for use in UI/comparisons */
-export function bid(v: bigint): number {
-	return Number(v);
-}
-
 /** Check if a proto auth Role is a manager-level role (manager or root) */
 export function isManager(role?: Role): boolean {
 	return role === Role.MANAGER || role === Role.ROOT;
@@ -33,4 +28,30 @@ export function roleName(role?: Role): string {
 		default:
 			return 'unknown';
 	}
+}
+
+/** Format a protobuf Timestamp for display */
+export function formatTimestamp(ts?: Timestamp, opts?: { withTime?: boolean }): string {
+	const d = protoTsToDate(ts);
+	if (!d) return '—';
+	if (opts?.withTime) {
+		return d.toLocaleString(undefined, {
+			month: 'short',
+			day: 'numeric',
+			year: 'numeric',
+			hour: '2-digit',
+			minute: '2-digit'
+		});
+	}
+	return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+/** Extract initials from a full name */
+export function initials(name: string): string {
+	return name
+		.split(' ')
+		.map((p) => p[0])
+		.join('')
+		.toUpperCase()
+		.slice(0, 2);
 }

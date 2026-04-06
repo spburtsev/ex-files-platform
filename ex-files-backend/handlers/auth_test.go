@@ -16,6 +16,7 @@ import (
 	"gorm.io/gorm"
 
 	authv1 "github.com/spburtsev/ex-files-backend/gen/auth/v1"
+	issuesv1 "github.com/spburtsev/ex-files-backend/gen/issues/v1"
 	"github.com/spburtsev/ex-files-backend/handlers"
 	"github.com/spburtsev/ex-files-backend/models"
 )
@@ -387,4 +388,47 @@ func TestLogout(t *testing.T) {
 	cookie := w.Header().Get("Set-Cookie")
 	assert.Contains(t, cookie, "session=")
 	assert.Contains(t, cookie, "Max-Age=0")
+}
+
+// --- TestListUsers ---
+
+func TestListUsers(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		repo := &mockRepo{}
+		repo.On("ListAll").Return([]models.User{
+			{Name: "Alice", Email: "alice@acme.org", Role: models.RoleEmployee},
+			{Name: "Bob", Email: "bob@acme.org", Role: models.RoleManager},
+		}, nil)
+
+		h := newHandler(repo, &mockTokens{}, &mockHasher{})
+		w := executeRequest(h.ListUsers, http.MethodGet, "/auth/users", nil)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "application/x-protobuf", w.Header().Get("Content-Type"))
+
+		var resp issuesv1.GetUsersResponse
+		require.NoError(t, proto.Unmarshal(w.Body.Bytes(), &resp))
+		require.Len(t, resp.Users, 2)
+
+		assert.Equal(t, "Alice", resp.Users[0].Name)
+		assert.Equal(t, "alice@acme.org", resp.Users[0].Email)
+		assert.Equal(t, issuesv1.Role_ROLE_EMPLOYEE, resp.Users[0].Role)
+
+		assert.Equal(t, "Bob", resp.Users[1].Name)
+		assert.Equal(t, "bob@acme.org", resp.Users[1].Email)
+		assert.Equal(t, issuesv1.Role_ROLE_MANAGER, resp.Users[1].Role)
+
+		repo.AssertExpectations(t)
+	})
+
+	t.Run("repo_error", func(t *testing.T) {
+		repo := &mockRepo{}
+		repo.On("ListAll").Return(nil, errors.New("db error"))
+
+		h := newHandler(repo, &mockTokens{}, &mockHasher{})
+		w := executeRequest(h.ListUsers, http.MethodGet, "/auth/users", nil)
+
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		repo.AssertExpectations(t)
+	})
 }

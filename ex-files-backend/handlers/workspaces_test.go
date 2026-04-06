@@ -70,6 +70,14 @@ func (m *mockWSRepo) GetMembers(workspaceID uint) ([]models.User, error) {
 	return args.Get(0).([]models.User), args.Error(1)
 }
 
+func (m *mockWSRepo) GetAssignableUsers(workspaceID uint) ([]models.User, error) {
+	args := m.Called(workspaceID)
+	if u, ok := args.Get(0).([]models.User); ok {
+		return u, args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
 // --- helpers ---
 
 func newWSHandler(wsRepo *mockWSRepo, userRepo *mockRepo) *handlers.WorkspaceHandler {

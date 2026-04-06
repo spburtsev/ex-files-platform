@@ -48,8 +48,9 @@ type StorageService interface {
 type DocumentRepository interface {
 	Create(doc *models.Document) error
 	FindByID(id uint) (*models.Document, error)
+	FindByHash(hash string) (*models.Document, error)
 	Update(doc *models.Document) error
-	ListByWorkspace(workspaceID uint, search, status string, limit, offset int) ([]models.Document, int64, error)
+	ListByIssue(issueID uint, search, status string, limit, offset int) ([]models.Document, int64, error)
 	Delete(id uint) error
 	CreateVersion(version *models.DocumentVersion) error
 	GetVersions(documentID uint) ([]models.DocumentVersion, error)
@@ -57,10 +58,21 @@ type DocumentRepository interface {
 	LatestVersionNumber(documentID uint) (int, error)
 }
 
-type AssignmentRepository interface {
-	ListAll() ([]models.Assignment, error)
-	FindByID(id uint) (*models.Assignment, error)
-	Create(a *models.Assignment) error
+type IssueRepository interface {
+	ListAll() ([]models.Issue, error)
+	ListByWorkspace(workspaceID uint) ([]models.Issue, error)
+	FindByID(id uint) (*models.Issue, error)
+	Create(issue *models.Issue) error
+}
+
+type EmailService interface {
+	Send(to, subject, body string) error
+}
+
+type CommentRepository interface {
+	Create(comment *models.Comment) error
+	FindByID(id uint) (*models.Comment, error)
+	ListByDocument(documentID uint) ([]models.Comment, error)
 }
 
 type WorkspaceRepository interface {
@@ -73,4 +85,5 @@ type WorkspaceRepository interface {
 	AddMember(member *models.WorkspaceMember) error
 	RemoveMember(workspaceID, userID uint) error
 	GetMembers(workspaceID uint) ([]models.User, error)
+	GetAssignableUsers(workspaceID uint) ([]models.User, error)
 }

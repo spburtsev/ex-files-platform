@@ -1,8 +1,11 @@
 package main
 
 import (
-	"log"
+	"log/slog"
+	"net/http"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -12,6 +15,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/spburtsev/ex-files-backend/handlers"
+	"github.com/spburtsev/ex-files-backend/logging"
 	"github.com/spburtsev/ex-files-backend/middleware"
 	"github.com/spburtsev/ex-files-backend/models"
 	"github.com/spburtsev/ex-files-backend/seed"
@@ -20,21 +24,27 @@ import (
 
 func main() {
 	if err := godotenv.Load(); err != nil {
-		log.Println("No .env file found, reading environment variables from shell")
+		// .env is optional; will be logged after logger init
+		_ = err
 	}
+
+	logging.Init()
+	slog.Info("starting ex-files-backend")
 
 	dsn := os.Getenv("DB_DSN")
 	if dsn == "" {
-		dsn = "host=localhost user=admin password=admin dbname=exfiles port=5432 sslmode=disable TimeZone=UTC"
+		dsn = "host=localhost user=admin password=admin dbname=exfiles port=5433 sslmode=disable TimeZone=UTC"
 	}
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
-		log.Fatal("failed to connect to database:", err)
+		slog.Error("failed to connect to database", "error", err)
+		os.Exit(1)
 	}
 
-	if err := db.AutoMigrate(&models.User{}, &models.Workspace{}, &models.WorkspaceMember{}, &models.AuditEntry{}, &models.Document{}, &models.DocumentVersion{}, &models.Assignment{}); err != nil {
-		log.Fatal("auto-migrate failed:", err)
+	if err := db.AutoMigrate(&models.User{}, &models.Workspace{}, &models.WorkspaceMember{}, &models.AuditEntry{}, &models.Issue{}, &models.Document{}, &models.DocumentVersion{}, &models.Comment{}); err != nil {
+		slog.Error("auto-migrate failed", "error", err)
+		os.Exit(1)
 	}
 
 	ts := services.NewJWTTokenService(os.Getenv("JWT_SECRET"))
@@ -45,7 +55,7 @@ func main() {
 
 	minioEndpoint := os.Getenv("MINIO_ENDPOINT")
 	if minioEndpoint == "" {
-		minioEndpoint = "localhost:9000"
+		minioEndpoint = "localhost:9002"
 	}
 	minioAccessKey := os.Getenv("MINIO_ACCESS_KEY")
 	if minioAccessKey == "" {
@@ -62,33 +72,53 @@ func main() {
 
 	storage, err := services.NewMinIOStorage(minioEndpoint, minioAccessKey, minioSecretKey, minioBucket, false)
 	if err != nil {
-		log.Fatal("failed to connect to MinIO:", err)
+		slog.Error("failed to connect to MinIO", "error", err)
+		os.Exit(1)
 	}
+
+	smtpPort, _ := strconv.Atoi(os.Getenv("SMTP_PORT"))
+	emailSvc := services.NewSMTPEmailService(
+		os.Getenv("SMTP_HOST"),
+		smtpPort,
+		os.Getenv("SMTP_USER"),
+		os.Getenv("SMTP_PASSWORD"),
+		os.Getenv("SMTP_FROM"),
+	)
+
+	sseHub := services.NewSSEHub()
 
 	auth := &handlers.AuthHandler{Repo: repo, Tokens: ts, Hasher: hasher, Audit: auditRepo}
 	wsRepo := &services.GormWorkspaceRepository{DB: db}
 	ws := &handlers.WorkspaceHandler{Repo: wsRepo, UserRepo: repo, Audit: auditRepo}
 	audit := &handlers.AuditHandler{Repo: auditRepo}
 	docRepo := &services.GormDocumentRepository{DB: db}
-	docs := &handlers.DocumentHandler{Repo: docRepo, Storage: storage, Audit: auditRepo}
+	docs := &handlers.DocumentHandler{Repo: docRepo, Storage: storage, Audit: auditRepo, UserRepo: repo, Email: emailSvc, Hub: sseHub}
+	sse := &handlers.SSEHandler{Hub: sseHub}
+	commentRepo := &services.GormCommentRepository{DB: db}
+	comments := &handlers.CommentHandler{Repo: commentRepo, Audit: auditRepo, Hub: sseHub}
+	verify := &handlers.VerifyHandler{Repo: docRepo}
 
 	seed.Run(db, hasher)
 
-	router := gin.Default()
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.Use(middleware.RequestLogger())
 
+	corsOrigins := os.Getenv("CORS_ORIGINS")
+	if corsOrigins == "" {
+		corsOrigins = "http://localhost:5173,http://localhost:4173"
+	}
+	slog.Debug("CORS configuration", "origins", strings.Split(corsOrigins, ","))
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:5173", "http://localhost:4173"},
+		AllowOrigins:     strings.Split(corsOrigins, ","),
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Content-Type", "Authorization"},
 		ExposeHeaders:    []string{"X-Total-Count", "X-Page", "X-Per-Page", "X-Total-Pages"},
 		AllowCredentials: true,
 	}))
 
-	assignmentRepo := &services.GormAssignmentRepository{DB: db}
-	assignments := &handlers.AssignmentsHandler{Repo: assignmentRepo, UserRepo: repo}
-	router.GET("/users", assignments.GetUsers)
-	router.GET("/assignments", assignments.GetAssignments)
-	router.GET("/assignments/:id", assignments.GetAssignment)
+	issueRepo := &services.GormIssueRepository{DB: db}
+	issues := &handlers.IssuesHandler{Repo: issueRepo, UserRepo: repo, Audit: auditRepo}
 
 	authRoutes := router.Group("/auth")
 	{
@@ -106,10 +136,18 @@ func main() {
 		workspaceRoutes.GET("/:id", ws.Get)
 		workspaceRoutes.PUT("/:id", ws.Update)
 		workspaceRoutes.DELETE("/:id", ws.Delete)
+		workspaceRoutes.GET("/:id/assignable-members", ws.AssignableMembers)
 		workspaceRoutes.POST("/:id/members", ws.AddMember)
 		workspaceRoutes.DELETE("/:id/members/:userId", ws.RemoveMember)
-		workspaceRoutes.POST("/:id/documents", docs.Upload)
-		workspaceRoutes.GET("/:id/documents", docs.List)
+		workspaceRoutes.GET("/:id/issues", issues.ListByWorkspace)
+		workspaceRoutes.POST("/:id/issues", issues.Create)
+	}
+
+	issueRoutes := router.Group("/issues", middleware.AuthMiddleware(ts))
+	{
+		issueRoutes.GET("/:id", issues.Get)
+		issueRoutes.POST("/:id/documents", docs.Upload)
+		issueRoutes.GET("/:id/documents", docs.List)
 	}
 
 	documentRoutes := router.Group("/documents", middleware.AuthMiddleware(ts))
@@ -124,12 +162,24 @@ func main() {
 		documentRoutes.POST("/:id/reject", docs.Reject)
 		documentRoutes.POST("/:id/request-changes", docs.RequestChanges)
 		documentRoutes.PUT("/:id/reviewer", docs.AssignReviewer)
+		documentRoutes.POST("/:id/comments", comments.Create)
+		documentRoutes.GET("/:id/comments", comments.List)
 	}
 
 	auditRoutes := router.Group("/audit", middleware.AuthMiddleware(ts))
 	{
 		auditRoutes.GET("", audit.List)
 	}
+	router.GET("/events", middleware.AuthMiddleware(ts), sse.Stream)
+	router.GET("/verify", verify.Verify)
 
-	router.Run()
+	router.GET("/healthz", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	router.Run(":" + port)
 }

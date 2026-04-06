@@ -83,6 +83,28 @@ func (r *GormWorkspaceRepository) RemoveMember(workspaceID, userID uint) error {
 		Delete(&models.WorkspaceMember{}).Error
 }
 
+// GetAssignableUsers returns employees who are not already members of the workspace
+// and are not the workspace manager or root users.
+func (r *GormWorkspaceRepository) GetAssignableUsers(workspaceID uint) ([]models.User, error) {
+	var ws models.Workspace
+	if err := r.DB.First(&ws, workspaceID).Error; err != nil {
+		return nil, err
+	}
+
+	var users []models.User
+	err := r.DB.
+		Where("role = ?", models.RoleEmployee).
+		Where("id != ?", ws.ManagerID).
+		Where("id NOT IN (?)",
+			r.DB.Model(&models.WorkspaceMember{}).
+				Select("user_id").
+				Where("workspace_id = ? AND deleted_at IS NULL", workspaceID),
+		).
+		Order("name ASC").
+		Find(&users).Error
+	return users, err
+}
+
 func (r *GormWorkspaceRepository) GetMembers(workspaceID uint) ([]models.User, error) {
 	var users []models.User
 	err := r.DB.

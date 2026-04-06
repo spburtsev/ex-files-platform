@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import type { PDFDocumentProxy } from 'pdfjs-dist';
 	import type { Comment } from '$lib/stores/workbench.svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		data: Uint8Array;
@@ -132,7 +133,7 @@
 					class="rounded-full px-1.5 py-0.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800 disabled:opacity-30"
 					disabled={scale <= 0.5}
 					onclick={() => (scale = Math.max(0.5, scale - 0.25))}
-					aria-label="Zoom Out"
+					aria-label={m.pdf_zoom_out()}
 				>
 					<svg
 						class="h-3.5 w-3.5"
@@ -149,7 +150,7 @@
 					class="rounded-full px-1.5 py-0.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800 disabled:opacity-30"
 					disabled={scale >= 3}
 					onclick={() => (scale = Math.min(3, scale + 0.25))}
-					aria-label="Zoom In"
+					aria-label={m.pdf_zoom_in()}
 				>
 					<svg
 						class="h-3.5 w-3.5"
@@ -173,7 +174,7 @@
 					class="rounded-full px-1.5 py-0.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800 disabled:opacity-30"
 					disabled={currentPage <= 0}
 					onclick={() => onpagechange(currentPage - 1)}
-					aria-label="Go One Page Back"
+					aria-label={m.pdf_page_back()}
 				>
 					<svg
 						class="h-3.5 w-3.5"
@@ -192,7 +193,7 @@
 					class="rounded-full px-1.5 py-0.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800 disabled:opacity-30"
 					disabled={!pdfDoc || currentPage >= pdfDoc.numPages - 1}
 					onclick={() => onpagechange(currentPage + 1)}
-					aria-label="Go One Page Forward"
+					aria-label={m.pdf_page_forward()}
 				>
 					<svg
 						class="h-3.5 w-3.5"

@@ -17,6 +17,7 @@ const (
 	AuditActionMemberAdded       AuditAction = "workspace.member_added"
 	AuditActionMemberRemoved     AuditAction = "workspace.member_removed"
 	AuditActionDocumentUploaded         AuditAction = "document.uploaded"
+	AuditActionDocumentDeleted          AuditAction = "document.deleted"
 	AuditActionDocumentApproved         AuditAction = "document.approved"
 	AuditActionDocumentRejected         AuditAction = "document.rejected"
 	AuditActionDocumentSubmitted        AuditAction = "document.submitted"

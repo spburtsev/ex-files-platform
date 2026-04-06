@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { UploadCloud } from '@lucide/svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		onupload: (file: File) => void;
@@ -44,9 +45,10 @@
 >
 	<UploadCloud class="mb-3 size-10 text-muted-foreground" />
 	<p class="text-sm text-muted-foreground">
-		<span class="font-semibold text-primary">Click to upload</span> or drag and drop
+		<span class="font-semibold text-primary">{m.pdf_click_to_upload()}</span>
+		{m.pdf_or_drag_drop()}
 	</p>
-	<p class="mt-1 text-xs text-muted-foreground">PDF files only</p>
+	<p class="mt-1 text-xs text-muted-foreground">{m.pdf_files_only()}</p>
 </button>
 
 <input

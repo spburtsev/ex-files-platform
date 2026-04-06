@@ -17,9 +17,12 @@ import (
 )
 
 type DocumentHandler struct {
-	Repo    services.DocumentRepository
-	Storage services.StorageService
-	Audit   services.AuditRepository
+	Repo     services.DocumentRepository
+	Storage  services.StorageService
+	Audit    services.AuditRepository
+	UserRepo services.UserRepository
+	Email    services.EmailService
+	Hub      *services.SSEHub
 }
 
 func documentToProto(d *models.Document) *docsv1.Document {
@@ -32,7 +35,7 @@ func documentToProto(d *models.Document) *docsv1.Document {
 		Status:       string(d.Status),
 		UploaderId:   uint64(d.UploaderID),
 		UploaderName: d.Uploader.Name,
-		WorkspaceId:  uint64(d.WorkspaceID),
+		IssueId:      uint64(d.IssueID),
 		CreatedAt:    timestamppb.New(d.CreatedAt),
 		UpdatedAt:    timestamppb.New(d.UpdatedAt),
 	}
@@ -59,10 +62,13 @@ func versionToProto(v *models.DocumentVersion) *docsv1.DocumentVersion {
 }
 
 func (h *DocumentHandler) Upload(c *gin.Context) {
-	userID, _ := c.Get("user_id")
-	wsID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	userID, ok := mustGetUserID(c)
+	if !ok {
+		return
+	}
+	issueID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid workspace id"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid issue id"})
 		return
 	}
 
@@ -93,17 +99,17 @@ func (h *DocumentHandler) Upload(c *gin.Context) {
 		MimeType:    header.Header.Get("Content-Type"),
 		Size:        header.Size,
 		Hash:        hash,
-		Status:      models.DocumentStatusPending,
-		UploaderID:  userID.(uint),
-		WorkspaceID: uint(wsID),
+		Status:     models.DocumentStatusPending,
+		UploaderID: userID,
+		IssueID:    uint(issueID),
 	}
 	if err := h.Repo.Create(&doc); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create document"})
 		return
 	}
 
-	// Storage key: workspaces/<wsID>/documents/<docID>/v1/<filename>
-	storageKey := fmt.Sprintf("workspaces/%d/documents/%d/v1/%s", wsID, doc.ID, header.Filename)
+	// Storage key: issues/<issueID>/documents/<docID>/v1/<filename>
+	storageKey := fmt.Sprintf("issues/%d/documents/%d/v1/%s", issueID, doc.ID, header.Filename)
 
 	if err := h.Storage.Upload(c.Request.Context(), storageKey, file, header.Size, doc.MimeType); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to upload file"})
@@ -117,25 +123,26 @@ func (h *DocumentHandler) Upload(c *gin.Context) {
 		Hash:       hash,
 		Size:       header.Size,
 		StorageKey: storageKey,
-		UploaderID: userID.(uint),
+		UploaderID: userID,
 	}
 	if err := h.Repo.CreateVersion(&version); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create version"})
 		return
 	}
 
-	logAudit(h.Audit, models.AuditActionDocumentUploaded, userID.(uint), uintPtr(doc.ID), "document", map[string]any{
-		"name":         doc.Name,
-		"hash":         hash,
-		"workspace_id": wsID,
+	logAudit(h.Audit, models.AuditActionDocumentUploaded, userID, uintPtr(doc.ID), "document", map[string]any{
+		"name":     doc.Name,
+		"hash":     hash,
+		"issue_id": issueID,
 	})
 
 	// Reload doc to get uploader preloaded
-	doc.Uploader = models.User{}
-	loadedDoc, _ := h.Repo.FindByID(doc.ID)
-	if loadedDoc != nil {
-		doc = *loadedDoc
+	loadedDoc, err := h.Repo.FindByID(doc.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reload document"})
+		return
 	}
+	doc = *loadedDoc
 
 	protobufResponse(c, http.StatusCreated, &docsv1.UploadDocumentResponse{
 		Document: documentToProto(&doc),
@@ -153,7 +160,10 @@ func (h *DocumentHandler) Upload(c *gin.Context) {
 }
 
 func (h *DocumentHandler) UploadVersion(c *gin.Context) {
-	userID, _ := c.Get("user_id")
+	userID, ok := mustGetUserID(c)
+	if !ok {
+		return
+	}
 	docID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid document id"})
@@ -192,7 +202,7 @@ func (h *DocumentHandler) UploadVersion(c *gin.Context) {
 	}
 	newVersion := latestVersion + 1
 
-	storageKey := fmt.Sprintf("workspaces/%d/documents/%d/v%d/%s", doc.WorkspaceID, doc.ID, newVersion, header.Filename)
+	storageKey := fmt.Sprintf("issues/%d/documents/%d/v%d/%s", doc.IssueID, doc.ID, newVersion, header.Filename)
 
 	if err := h.Storage.Upload(c.Request.Context(), storageKey, file, header.Size, header.Header.Get("Content-Type")); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to upload file"})
@@ -205,14 +215,14 @@ func (h *DocumentHandler) UploadVersion(c *gin.Context) {
 		Hash:       hash,
 		Size:       header.Size,
 		StorageKey: storageKey,
-		UploaderID: userID.(uint),
+		UploaderID: userID,
 	}
 	if err := h.Repo.CreateVersion(&version); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create version"})
 		return
 	}
 
-	logAudit(h.Audit, models.AuditActionVersionCreated, userID.(uint), uintPtr(doc.ID), "document", map[string]any{
+	logAudit(h.Audit, models.AuditActionVersionCreated, userID, uintPtr(doc.ID), "document", map[string]any{
 		"version": newVersion,
 		"hash":    hash,
 	})
@@ -233,9 +243,9 @@ func (h *DocumentHandler) UploadVersion(c *gin.Context) {
 }
 
 func (h *DocumentHandler) List(c *gin.Context) {
-	wsID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	issueID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid workspace id"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid issue id"})
 		return
 	}
 
@@ -244,7 +254,7 @@ func (h *DocumentHandler) List(c *gin.Context) {
 	search := c.Query("search")
 	status := c.Query("status")
 
-	docs, total, err := h.Repo.ListByWorkspace(uint(wsID), search, status, perPage, offset)
+	docs, total, err := h.Repo.ListByIssue(uint(issueID), search, status, perPage, offset)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch documents"})
 		return
@@ -321,7 +331,10 @@ func (h *DocumentHandler) Download(c *gin.Context) {
 // Submit transitions a document from pending → in_review.
 // Only the uploader may submit their own document.
 func (h *DocumentHandler) Submit(c *gin.Context) {
-	userID, _ := c.Get("user_id")
+	userID, ok := mustGetUserID(c)
+	if !ok {
+		return
+	}
 	docID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid document id"})
@@ -334,7 +347,7 @@ func (h *DocumentHandler) Submit(c *gin.Context) {
 		return
 	}
 
-	if doc.UploaderID != userID.(uint) {
+	if doc.UploaderID != userID {
 		c.JSON(http.StatusForbidden, gin.H{"error": "only the uploader may submit this document"})
 		return
 	}
@@ -351,7 +364,7 @@ func (h *DocumentHandler) Submit(c *gin.Context) {
 		return
 	}
 
-	logAudit(h.Audit, models.AuditActionDocumentSubmitted, userID.(uint), uintPtr(doc.ID), "document", map[string]any{
+	logAudit(h.Audit, models.AuditActionDocumentSubmitted, userID, uintPtr(doc.ID), "document", map[string]any{
 		"document_id": doc.ID,
 	})
 
@@ -360,9 +373,15 @@ func (h *DocumentHandler) Submit(c *gin.Context) {
 
 // AssignReviewer sets the reviewer for a document. Only managers and root users may do this.
 func (h *DocumentHandler) AssignReviewer(c *gin.Context) {
-	userID, _ := c.Get("user_id")
-	role, _ := c.Get("role")
-	if role.(string) != string(models.RoleManager) && role.(string) != string(models.RoleRoot) {
+	userID, ok := mustGetUserID(c)
+	if !ok {
+		return
+	}
+	role, ok := mustGetRole(c)
+	if !ok {
+		return
+	}
+	if !role.CanManageWorkspaces() {
 		c.JSON(http.StatusForbidden, gin.H{"error": "only managers may assign reviewers"})
 		return
 	}
@@ -393,16 +412,18 @@ func (h *DocumentHandler) AssignReviewer(c *gin.Context) {
 		return
 	}
 
-	logAudit(h.Audit, models.AuditActionDocumentReviewerAssigned, userID.(uint), uintPtr(doc.ID), "document", map[string]any{
+	logAudit(h.Audit, models.AuditActionDocumentReviewerAssigned, userID, uintPtr(doc.ID), "document", map[string]any{
 		"reviewer_id": body.ReviewerID,
 	})
+
+	notifyReviewerAssigned(h.Email, h.UserRepo, h.Hub, doc, body.ReviewerID)
 
 	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
 }
 
 // canReview returns true if the caller is the assigned reviewer, a manager, or root.
-func canReview(doc *models.Document, callerID uint, role string) bool {
-	if role == string(models.RoleManager) || role == string(models.RoleRoot) {
+func canReview(doc *models.Document, callerID uint, role models.Role) bool {
+	if role.CanManageWorkspaces() {
 		return true
 	}
 	return doc.ReviewerID != nil && *doc.ReviewerID == callerID
@@ -410,8 +431,14 @@ func canReview(doc *models.Document, callerID uint, role string) bool {
 
 // Approve transitions a document from in_review → approved.
 func (h *DocumentHandler) Approve(c *gin.Context) {
-	userID, _ := c.Get("user_id")
-	role, _ := c.Get("role")
+	userID, ok := mustGetUserID(c)
+	if !ok {
+		return
+	}
+	role, ok := mustGetRole(c)
+	if !ok {
+		return
+	}
 	docID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid document id"})
@@ -424,7 +451,7 @@ func (h *DocumentHandler) Approve(c *gin.Context) {
 		return
 	}
 
-	if !canReview(doc, userID.(uint), role.(string)) {
+	if !canReview(doc, userID, role) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "not authorized to review this document"})
 		return
 	}
@@ -440,17 +467,28 @@ func (h *DocumentHandler) Approve(c *gin.Context) {
 		return
 	}
 
-	logAudit(h.Audit, models.AuditActionDocumentApproved, userID.(uint), uintPtr(doc.ID), "document", map[string]any{
+	logAudit(h.Audit, models.AuditActionDocumentApproved, userID, uintPtr(doc.ID), "document", map[string]any{
 		"document_id": doc.ID,
 	})
+
+	notifyDocumentEvent(h.Email, h.UserRepo, h.Hub, doc, "document.approved",
+		fmt.Sprintf("Document approved: %s", doc.Name),
+		fmt.Sprintf("<p>Your document <strong>%s</strong> has been approved.</p>", doc.Name),
+	)
 
 	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
 }
 
 // Reject transitions a document from in_review → rejected.
 func (h *DocumentHandler) Reject(c *gin.Context) {
-	userID, _ := c.Get("user_id")
-	role, _ := c.Get("role")
+	userID, ok := mustGetUserID(c)
+	if !ok {
+		return
+	}
+	role, ok := mustGetRole(c)
+	if !ok {
+		return
+	}
 	docID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid document id"})
@@ -468,7 +506,7 @@ func (h *DocumentHandler) Reject(c *gin.Context) {
 		return
 	}
 
-	if !canReview(doc, userID.(uint), role.(string)) {
+	if !canReview(doc, userID, role) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "not authorized to review this document"})
 		return
 	}
@@ -485,18 +523,29 @@ func (h *DocumentHandler) Reject(c *gin.Context) {
 		return
 	}
 
-	logAudit(h.Audit, models.AuditActionDocumentRejected, userID.(uint), uintPtr(doc.ID), "document", map[string]any{
+	logAudit(h.Audit, models.AuditActionDocumentRejected, userID, uintPtr(doc.ID), "document", map[string]any{
 		"document_id": doc.ID,
 		"note":        body.Note,
 	})
+
+	notifyDocumentEvent(h.Email, h.UserRepo, h.Hub, doc, "document.rejected",
+		fmt.Sprintf("Document rejected: %s", doc.Name),
+		fmt.Sprintf("<p>Your document <strong>%s</strong> has been rejected.</p><p>Reason: %s</p>", doc.Name, body.Note),
+	)
 
 	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
 }
 
 // RequestChanges transitions a document from in_review → changes_requested.
 func (h *DocumentHandler) RequestChanges(c *gin.Context) {
-	userID, _ := c.Get("user_id")
-	role, _ := c.Get("role")
+	userID, ok := mustGetUserID(c)
+	if !ok {
+		return
+	}
+	role, ok := mustGetRole(c)
+	if !ok {
+		return
+	}
 	docID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid document id"})
@@ -514,7 +563,7 @@ func (h *DocumentHandler) RequestChanges(c *gin.Context) {
 		return
 	}
 
-	if !canReview(doc, userID.(uint), role.(string)) {
+	if !canReview(doc, userID, role) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "not authorized to review this document"})
 		return
 	}
@@ -531,10 +580,15 @@ func (h *DocumentHandler) RequestChanges(c *gin.Context) {
 		return
 	}
 
-	logAudit(h.Audit, models.AuditActionDocumentChangesRequested, userID.(uint), uintPtr(doc.ID), "document", map[string]any{
+	logAudit(h.Audit, models.AuditActionDocumentChangesRequested, userID, uintPtr(doc.ID), "document", map[string]any{
 		"document_id": doc.ID,
 		"note":        body.Note,
 	})
+
+	notifyDocumentEvent(h.Email, h.UserRepo, h.Hub, doc, "document.changes_requested",
+		fmt.Sprintf("Changes requested: %s", doc.Name),
+		fmt.Sprintf("<p>Changes have been requested for your document <strong>%s</strong>.</p><p>Note: %s</p>", doc.Name, body.Note),
+	)
 
 	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
 }
@@ -542,7 +596,10 @@ func (h *DocumentHandler) RequestChanges(c *gin.Context) {
 // Resubmit transitions a document from changes_requested → in_review.
 // Only the uploader may resubmit.
 func (h *DocumentHandler) Resubmit(c *gin.Context) {
-	userID, _ := c.Get("user_id")
+	userID, ok := mustGetUserID(c)
+	if !ok {
+		return
+	}
 	docID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid document id"})
@@ -555,7 +612,7 @@ func (h *DocumentHandler) Resubmit(c *gin.Context) {
 		return
 	}
 
-	if doc.UploaderID != userID.(uint) {
+	if doc.UploaderID != userID {
 		c.JSON(http.StatusForbidden, gin.H{"error": "only the uploader may resubmit this document"})
 		return
 	}
@@ -572,7 +629,7 @@ func (h *DocumentHandler) Resubmit(c *gin.Context) {
 		return
 	}
 
-	logAudit(h.Audit, models.AuditActionDocumentSubmitted, userID.(uint), uintPtr(doc.ID), "document", map[string]any{
+	logAudit(h.Audit, models.AuditActionDocumentSubmitted, userID, uintPtr(doc.ID), "document", map[string]any{
 		"document_id": doc.ID,
 		"resubmit":    true,
 	})
@@ -581,7 +638,10 @@ func (h *DocumentHandler) Resubmit(c *gin.Context) {
 }
 
 func (h *DocumentHandler) Delete(c *gin.Context) {
-	userID, _ := c.Get("user_id")
+	userID, ok := mustGetUserID(c)
+	if !ok {
+		return
+	}
 	docID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid document id"})
@@ -599,9 +659,8 @@ func (h *DocumentHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	logAudit(h.Audit, models.AuditActionDocumentUploaded, userID.(uint), uintPtr(uint(docID)), "document", map[string]any{
-		"name":   doc.Name,
-		"action": "deleted",
+	logAudit(h.Audit, models.AuditActionDocumentDeleted, userID, uintPtr(uint(docID)), "document", map[string]any{
+		"name": doc.Name,
 	})
 
 	protobufResponse(c, http.StatusOK, &docsv1.DeleteDocumentResponse{

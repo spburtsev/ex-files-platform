@@ -30,10 +30,16 @@ func workspaceToProto(ws *models.Workspace) *workspacesv1.Workspace {
 }
 
 func (h *WorkspaceHandler) Create(c *gin.Context) {
-	userID, _ := c.Get("user_id")
-	role, _ := c.Get("role")
+	userID, ok := mustGetUserID(c)
+	if !ok {
+		return
+	}
+	role, ok := mustGetRole(c)
+	if !ok {
+		return
+	}
 
-	if !models.Role(role.(string)).CanManageWorkspaces() {
+	if !role.CanManageWorkspaces() {
 		c.JSON(http.StatusForbidden, gin.H{"error": "only managers can create workspaces"})
 		return
 	}
@@ -46,14 +52,14 @@ func (h *WorkspaceHandler) Create(c *gin.Context) {
 
 	ws := models.Workspace{
 		Name:      req.Name,
-		ManagerID: userID.(uint),
+		ManagerID: userID,
 	}
 	if err := h.Repo.Create(&ws); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create workspace"})
 		return
 	}
 
-	logAudit(h.Audit, models.AuditActionWorkspaceCreated, userID.(uint), uintPtr(ws.ID), "workspace", map[string]any{
+	logAudit(h.Audit, models.AuditActionWorkspaceCreated, userID, uintPtr(ws.ID), "workspace", map[string]any{
 		"name": ws.Name,
 	})
 
@@ -63,8 +69,14 @@ func (h *WorkspaceHandler) Create(c *gin.Context) {
 }
 
 func (h *WorkspaceHandler) List(c *gin.Context) {
-	userID, _ := c.Get("user_id")
-	role, _ := c.Get("role")
+	userID, ok := mustGetUserID(c)
+	if !ok {
+		return
+	}
+	role, ok := mustGetRole(c)
+	if !ok {
+		return
+	}
 
 	page, perPage := parsePagination(c)
 	offset := (page - 1) * perPage
@@ -73,10 +85,10 @@ func (h *WorkspaceHandler) List(c *gin.Context) {
 	var total int64
 	var err error
 
-	if models.Role(role.(string)).CanManageWorkspaces() {
-		workspaces, total, err = h.Repo.FindByManager(userID.(uint), perPage, offset)
+	if role.CanManageWorkspaces() {
+		workspaces, total, err = h.Repo.FindByManager(userID, perPage, offset)
 	} else {
-		workspaces, total, err = h.Repo.FindByMember(userID.(uint), perPage, offset)
+		workspaces, total, err = h.Repo.FindByMember(userID, perPage, offset)
 	}
 
 	if err != nil {
@@ -135,8 +147,34 @@ func (h *WorkspaceHandler) Get(c *gin.Context) {
 	})
 }
 
+func (h *WorkspaceHandler) AssignableMembers(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid workspace id"})
+		return
+	}
+
+	users, err := h.Repo.GetAssignableUsers(uint(id))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch assignable users"})
+		return
+	}
+
+	pb := make([]*authv1.User, len(users))
+	for i := range users {
+		pb[i] = userToProto(&users[i])
+	}
+
+	protobufResponse(c, http.StatusOK, &workspacesv1.GetAssignableMembersResponse{
+		Users: pb,
+	})
+}
+
 func (h *WorkspaceHandler) Update(c *gin.Context) {
-	userID, _ := c.Get("user_id")
+	userID, ok := mustGetUserID(c)
+	if !ok {
+		return
+	}
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid workspace id"})
@@ -149,7 +187,7 @@ func (h *WorkspaceHandler) Update(c *gin.Context) {
 		return
 	}
 
-	if !ws.IsOwnedBy(userID.(uint)) {
+	if !ws.IsOwnedBy(userID) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "only the workspace manager can update it"})
 		return
 	}
@@ -166,7 +204,7 @@ func (h *WorkspaceHandler) Update(c *gin.Context) {
 		return
 	}
 
-	logAudit(h.Audit, models.AuditActionWorkspaceUpdated, userID.(uint), uintPtr(ws.ID), "workspace", map[string]any{
+	logAudit(h.Audit, models.AuditActionWorkspaceUpdated, userID, uintPtr(ws.ID), "workspace", map[string]any{
 		"name": ws.Name,
 	})
 
@@ -176,7 +214,10 @@ func (h *WorkspaceHandler) Update(c *gin.Context) {
 }
 
 func (h *WorkspaceHandler) Delete(c *gin.Context) {
-	userID, _ := c.Get("user_id")
+	userID, ok := mustGetUserID(c)
+	if !ok {
+		return
+	}
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid workspace id"})
@@ -189,7 +230,7 @@ func (h *WorkspaceHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	if !ws.IsOwnedBy(userID.(uint)) {
+	if !ws.IsOwnedBy(userID) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "only the workspace manager can delete it"})
 		return
 	}
@@ -199,7 +240,7 @@ func (h *WorkspaceHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	logAudit(h.Audit, models.AuditActionWorkspaceDeleted, userID.(uint), uintPtr(uint(id)), "workspace", map[string]any{
+	logAudit(h.Audit, models.AuditActionWorkspaceDeleted, userID, uintPtr(uint(id)), "workspace", map[string]any{
 		"name": ws.Name,
 	})
 
@@ -209,7 +250,10 @@ func (h *WorkspaceHandler) Delete(c *gin.Context) {
 }
 
 func (h *WorkspaceHandler) AddMember(c *gin.Context) {
-	userID, _ := c.Get("user_id")
+	userID, ok := mustGetUserID(c)
+	if !ok {
+		return
+	}
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid workspace id"})
@@ -222,7 +266,7 @@ func (h *WorkspaceHandler) AddMember(c *gin.Context) {
 		return
 	}
 
-	if !ws.IsOwnedBy(userID.(uint)) {
+	if !ws.IsOwnedBy(userID) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "only the workspace manager can add members"})
 		return
 	}
@@ -242,7 +286,7 @@ func (h *WorkspaceHandler) AddMember(c *gin.Context) {
 		return
 	}
 
-	logAudit(h.Audit, models.AuditActionMemberAdded, userID.(uint), uintPtr(uint(id)), "workspace", map[string]any{
+	logAudit(h.Audit, models.AuditActionMemberAdded, userID, uintPtr(uint(id)), "workspace", map[string]any{
 		"member_user_id": req.UserId,
 	})
 
@@ -257,7 +301,10 @@ func (h *WorkspaceHandler) AddMember(c *gin.Context) {
 }
 
 func (h *WorkspaceHandler) RemoveMember(c *gin.Context) {
-	userID, _ := c.Get("user_id")
+	userID, ok := mustGetUserID(c)
+	if !ok {
+		return
+	}
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid workspace id"})
@@ -270,7 +317,7 @@ func (h *WorkspaceHandler) RemoveMember(c *gin.Context) {
 		return
 	}
 
-	if !ws.IsOwnedBy(userID.(uint)) {
+	if !ws.IsOwnedBy(userID) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "only the workspace manager can remove members"})
 		return
 	}
@@ -286,7 +333,7 @@ func (h *WorkspaceHandler) RemoveMember(c *gin.Context) {
 		return
 	}
 
-	logAudit(h.Audit, models.AuditActionMemberRemoved, userID.(uint), uintPtr(uint(id)), "workspace", map[string]any{
+	logAudit(h.Audit, models.AuditActionMemberRemoved, userID, uintPtr(uint(id)), "workspace", map[string]any{
 		"member_user_id": memberUserID,
 	})
 

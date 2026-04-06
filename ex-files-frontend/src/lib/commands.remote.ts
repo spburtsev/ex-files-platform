@@ -11,6 +11,7 @@ const NETWORK_ERROR = 'Unable to reach the server. Please try again later.';
 
 async function parseJsonError(res: Response, fallback: string) {
 	const data = await res.json().catch(() => ({}));
+    console.error('API error:', res.status, data);
 	return (data as Record<string, string>).error ?? fallback;
 }
 
@@ -38,6 +39,7 @@ export const login = command(
 		});
 		if (!res) return { ok: false as const, error: NETWORK_ERROR };
 		if (!res.ok) {
+            console.log('response headers:', Array.from(res.headers.entries()));
 			return { ok: false as const, error: await parseJsonError(res, 'Invalid email or password') };
 		}
 		const r = fromBinary(LoginResponseSchema, new Uint8Array(await res.arrayBuffer()));
@@ -160,16 +162,49 @@ export const removeWorkspaceMember = command(
 
 export const uploadDocument = command(
 	'unchecked',
-	async ({ workspaceId, file }: { workspaceId: string; file: File }) => {
+	async ({ issueId, file }: { issueId: string; file: File }) => {
 		const form = new FormData();
 		form.append('file', file);
-		const res = await safeFetch(`${BACKEND}/workspaces/${workspaceId}/documents`, {
+		const res = await safeFetch(`${BACKEND}/issues/${issueId}/documents`, {
 			method: 'POST',
 			body: form
 		});
 		if (!res) return { ok: false as const, error: NETWORK_ERROR };
 		if (!res.ok) {
 			return { ok: false as const, error: await parseJsonError(res, 'Upload failed') };
+		}
+		return { ok: true as const };
+	}
+);
+
+export const createIssue = command(
+	'unchecked',
+	async ({
+		workspaceId,
+		title,
+		description,
+		assigneeId,
+		deadline
+	}: {
+		workspaceId: string;
+		title: string;
+		description?: string;
+		assigneeId: number;
+		deadline?: string;
+	}) => {
+		const res = await safeFetch(`${BACKEND}/workspaces/${workspaceId}/issues`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				title,
+				description: description ?? '',
+				assignee_id: assigneeId,
+				deadline: deadline ?? ''
+			})
+		});
+		if (!res) return { ok: false as const, error: NETWORK_ERROR };
+		if (!res.ok) {
+			return { ok: false as const, error: await parseJsonError(res, 'Failed to create issue') };
 		}
 		return { ok: true as const };
 	}

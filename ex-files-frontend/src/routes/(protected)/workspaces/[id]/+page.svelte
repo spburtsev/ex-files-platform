@@ -1,14 +1,22 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { goto, invalidateAll } from '$app/navigation';
-	import { getWorkspaceDetail, getMe, getSystemUsers, getDocuments } from '$lib/data.remote';
-	import { protoTsToDate, roleName } from '$lib/proto-utils';
+	import {
+		getWorkspaceDetail,
+		getAssignableMembers,
+		getIssues
+	} from '$lib/data.remote';
+	import { formatTimestamp, roleName, isManager, initials } from '$lib/proto-utils';
 	import {
 		updateWorkspace,
 		deleteWorkspace,
 		addWorkspaceMember,
-		removeWorkspaceMember
+		removeWorkspaceMember,
+		createIssue
 	} from '$lib/commands.remote';
+	import { toast } from 'svelte-sonner';
+	import { m } from '$lib/paraglide/messages.js';
+	import { localizeHref } from '$lib/paraglide/runtime';
 	import * as Card from '$lib/components/ui/card/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import * as Avatar from '$lib/components/ui/avatar/index.js';
@@ -18,6 +26,7 @@
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
 	import { Skeleton } from '$lib/components/ui/skeleton/index.js';
+	import { Textarea } from '$lib/components/ui/textarea/index.js';
 	import {
 		Pencil,
 		Trash2,
@@ -26,12 +35,9 @@
 		Calendar,
 		Crown,
 		FileText,
-		Search,
-		ChevronLeft,
-		ChevronRight,
-		ArrowRight
+		ArrowRight,
+		Plus
 	} from '@lucide/svelte';
-	import type { Timestamp } from '@bufbuild/protobuf/wkt';
 	import { extraBreadcrumbs } from '$lib/stores/breadcrumbs';
 	import { onDestroy } from 'svelte';
 
@@ -46,8 +52,8 @@
 	});
 	onDestroy(() => extraBreadcrumbs.set([]));
 
-	const meQuery = getMe();
-	const me = $derived(meQuery.current?.user);
+    const { data } = $props();
+	const me = $derived(data.user);
 
 	const detailQuery = getWorkspaceDetail(wsId);
 	const detail = $derived(detailQuery.current);
@@ -55,28 +61,13 @@
 	const manager = $derived(detail?.manager);
 	const members = $derived(detail?.members ?? []);
 
-	// Documents — encode all params into a single query string for the unchecked query
-	const docPage = Number(page.url.searchParams.get('doc_page') ?? '1');
-	const docSearch = page.url.searchParams.get('doc_search') ?? '';
-	const docStatus = page.url.searchParams.get('doc_status') ?? '';
-	function buildQS(parts: Record<string, string>): string {
-		return Object.entries(parts)
-			.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
-			.join('&');
-	}
-	const docParts: Record<string, string> = { page: String(docPage) };
-	if (docSearch) docParts.search = docSearch;
-	if (docStatus) docParts.status = docStatus;
-	const documentsQuery = getDocuments(`${wsId}?${buildQS(docParts)}`);
-	const docsData = $derived(documentsQuery.current);
-	const documents = $derived(docsData?.documents ?? []);
-	const docTotalPages = $derived(docsData?.totalPages ?? 1);
+	// Issues
+	const issuesQuery = getIssues(wsId);
+	const issuesList = $derived(issuesQuery.current ?? []);
 
-	// Users (for add-member picker)
-	const usersQuery = getSystemUsers();
-	const allUsers = $derived(usersQuery.current ?? []);
-	const memberIds = $derived(new Set(members.map((m) => String(m.id))));
-	const nonMembers = $derived(allUsers.filter((u) => !memberIds.has(String(u.id))));
+	// Users assignable as members (employees not already in workspace)
+	const assignableQuery = getAssignableMembers(wsId);
+	const nonMembers = $derived(assignableQuery.current ?? []);
 
 	const isOwner = $derived(manager && me && manager.id === me.id);
 
@@ -89,6 +80,15 @@
 	// Delete dialog
 	let deleteOpen = $state(false);
 	let deleting = $state(false);
+
+	// New issue dialog
+	let newIssueOpen = $state(false);
+	let newIssueTitle = $state('');
+	let newIssueDesc = $state('');
+	let newIssueAssignee = $state('');
+	let newIssueDeadline = $state('');
+	let creatingIssue = $state(false);
+	let newIssueError = $state('');
 
 	// Add member dialog
 	let addOpen = $state(false);
@@ -105,86 +105,6 @@
 		)
 	);
 
-	// Document search state (local – triggers URL navigation on submit)
-	let searchInput = $state(docSearch);
-	let uploading = $state(false);
-	let uploadError = $state('');
-
-	function formatDate(ts?: Timestamp): string {
-		const d = protoTsToDate(ts);
-		if (!d) return '—';
-		return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-	}
-
-	function formatSize(bytes: number): string {
-		if (bytes < 1024) return `${bytes} B`;
-		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-	}
-
-	function statusVariant(status: string): string {
-		switch (status) {
-			case 'approved':
-				return 'bg-emerald-100 text-emerald-700';
-			case 'rejected':
-				return 'bg-red-100 text-red-700';
-			case 'in_review':
-				return 'bg-blue-100 text-blue-700';
-			case 'changes_requested':
-				return 'bg-amber-100 text-amber-700';
-			default:
-				return 'bg-muted text-muted-foreground';
-		}
-	}
-
-	function statusLabel(status: string): string {
-		switch (status) {
-			case 'in_review':
-				return 'In Review';
-			case 'changes_requested':
-				return 'Changes Requested';
-			default:
-				return status.charAt(0).toUpperCase() + status.slice(1);
-		}
-	}
-
-	function initials(name: string): string {
-		return name
-			.split(' ')
-			.map((p) => p[0])
-			.join('')
-			.toUpperCase()
-			.slice(0, 2);
-	}
-
-	function navigateDocPage(p: number) {
-		const url = new URL(page.url);
-		url.searchParams.set('doc_page', String(p));
-		goto(url.toString());
-	}
-
-	function applyDocSearch() {
-		const url = new URL(page.url);
-		url.searchParams.set('doc_page', '1');
-		if (searchInput.trim()) {
-			url.searchParams.set('doc_search', searchInput.trim());
-		} else {
-			url.searchParams.delete('doc_search');
-		}
-		goto(url.toString());
-	}
-
-	function applyStatusFilter(status: string) {
-		const url = new URL(page.url);
-		url.searchParams.set('doc_page', '1');
-		if (status) {
-			url.searchParams.set('doc_status', status);
-		} else {
-			url.searchParams.delete('doc_status');
-		}
-		goto(url.toString());
-	}
-
 	function openEdit() {
 		editName = ws?.name ?? '';
 		editError = '';
@@ -198,13 +118,13 @@
 		try {
 			const result = await updateWorkspace({ id: wsId, name: editName.trim() });
 			if (!result.ok) {
-				editError = result.error ?? 'Failed to update workspace';
+				editError = result.error ?? m.ws_update_error();
 				return;
 			}
 			editOpen = false;
 			await invalidateAll();
 		} catch {
-			editError = 'Network error, please try again';
+			editError = m.error_network_retry();
 		} finally {
 			editing = false;
 		}
@@ -214,10 +134,13 @@
 		deleting = true;
 		try {
 			const result = await deleteWorkspace(wsId);
-			if (!result.ok) return;
-			goto('/workspaces');
+			if (!result.ok) {
+				toast.error(m.error_delete_workspace());
+				return;
+			}
+			goto(localizeHref('/workspaces'));
 		} catch {
-			// ignore
+			toast.error(m.error_delete_workspace());
 		} finally {
 			deleting = false;
 			deleteOpen = false;
@@ -230,31 +153,63 @@
 		try {
 			const result = await addWorkspaceMember({ workspaceId: wsId, userId: Number(userId) });
 			if (!result.ok) {
-				addError = result.error ?? 'Failed to add member';
+				addError = result.error ?? m.ws_add_member_error();
 				return;
 			}
 			await invalidateAll();
 			memberSearch = '';
 		} catch {
-			addError = 'Network error, please try again';
+			addError = m.error_network_retry();
 		} finally {
 			addingId = null;
+		}
+	}
+
+	async function handleCreateIssue() {
+		if (!newIssueTitle.trim() || !newIssueAssignee) return;
+		creatingIssue = true;
+		newIssueError = '';
+		try {
+			const result = await createIssue({
+				workspaceId: wsId,
+				title: newIssueTitle.trim(),
+				description: newIssueDesc.trim() || undefined,
+				assigneeId: Number(newIssueAssignee),
+				deadline: newIssueDeadline || undefined
+			});
+			if (!result.ok) {
+				newIssueError = result.error ?? m.ws_issue_create_error();
+				return;
+			}
+			newIssueOpen = false;
+			newIssueTitle = '';
+			newIssueDesc = '';
+			newIssueAssignee = '';
+			newIssueDeadline = '';
+			await invalidateAll();
+		} catch {
+			newIssueError = m.error_network_retry();
+		} finally {
+			creatingIssue = false;
 		}
 	}
 
 	async function handleRemoveMember(userId: bigint) {
 		try {
 			const result = await removeWorkspaceMember({ workspaceId: wsId, userId });
-			if (!result.ok) return;
+			if (!result.ok) {
+				toast.error(m.ws_remove_member_error());
+				return;
+			}
 			await invalidateAll();
 		} catch {
-			// ignore
+			toast.error(m.ws_remove_member_error());
 		}
 	}
 </script>
 
 <svelte:head>
-	<title>{ws?.name ?? 'Workspace'} — ex-files</title>
+	<title>{ws?.name ?? m.nav_workspaces()} — ex-files</title>
 </svelte:head>
 
 <div class="flex flex-1 flex-col gap-6 p-6">
@@ -283,11 +238,11 @@
 						<Card.Description class="mt-1 flex flex-wrap gap-3 text-xs">
 							<span class="flex items-center gap-1">
 								<Crown class="size-3.5" />
-								Manager: {manager?.name ?? '—'}
+								{m.ws_manager_label({ name: manager?.name ?? '—' })}
 							</span>
 							<span class="flex items-center gap-1">
 								<Calendar class="size-3.5" />
-								Created {formatDate(ws?.createdAt)}
+								{m.ws_created_date({ date: formatTimestamp(ws?.createdAt) })}
 							</span>
 						</Card.Description>
 					</div>
@@ -295,7 +250,7 @@
 						<div class="flex shrink-0 gap-2">
 							<Button variant="outline" size="sm" class="gap-1.5" onclick={openEdit}>
 								<Pencil class="size-3.5" />
-								Edit
+								{m.common_edit()}
 							</Button>
 							<Button
 								variant="outline"
@@ -304,7 +259,7 @@
 								onclick={() => (deleteOpen = true)}
 							>
 								<Trash2 class="size-3.5" />
-								Delete
+								{m.common_delete()}
 							</Button>
 						</div>
 					{/if}
@@ -312,155 +267,82 @@
 			</Card.Header>
 		</Card.Root>
 
-		<!-- Tabbed content: Documents / Members -->
-		<Tabs.Root value="documents">
-			<Tabs.List>
-				<Tabs.Trigger value="documents">
-					<FileText class="mr-1.5 size-3.5" />
-					Documents
-					{#if docsData && docsData.total > 0}
-						<span class="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold">
-							{docsData.total}
-						</span>
-					{/if}
-				</Tabs.Trigger>
-				<Tabs.Trigger value="members">
-					<UserPlus class="mr-1.5 size-3.5" />
-					Members
-					{#if members.length > 0}
-						<span class="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold">
-							{members.length}
-						</span>
-					{/if}
-				</Tabs.Trigger>
-			</Tabs.List>
-
-			<!-- Documents tab -->
-			<Tabs.Content value="documents" class="mt-4 flex flex-col gap-4">
-				<!-- Search + filter -->
-				<div class="flex flex-wrap items-center gap-2">
-					<form
-						class="flex flex-1 items-center gap-2"
-						onsubmit={(e) => {
-							e.preventDefault();
-							applyDocSearch();
-						}}
-					>
-						<div class="relative min-w-48 flex-1">
-							<Search
-								class="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
-							/>
-							<Input placeholder="Search documents…" class="pl-8" bind:value={searchInput} />
-						</div>
-						<Button type="submit" size="sm" variant="secondary">Search</Button>
-						{#if docSearch}
-							<Button
-								type="button"
-								size="sm"
-								variant="ghost"
-								onclick={() => {
-									searchInput = '';
-									applyDocSearch();
-								}}
-							>
-								Clear
-							</Button>
+		<!-- Tabbed content: Issues / Members -->
+		<Tabs.Root value="issues">
+			<div class="flex items-center justify-between">
+				<Tabs.List>
+					<Tabs.Trigger value="issues">
+						<FileText class="mr-1.5 size-3.5" />
+						{m.ws_issues_tab()}
+						{#if issuesList.length > 0}
+							<span class="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold">
+								{issuesList.length}
+							</span>
 						{/if}
-					</form>
-					<!-- Status filter -->
-					<div class="flex gap-1">
-						{#each [['', 'All'], ['pending', 'Pending'], ['in_review', 'In Review'], ['approved', 'Approved'], ['rejected', 'Rejected']] as [val, label] (val)}
-							<Button
-								variant={docStatus === val ? 'default' : 'outline'}
-								size="sm"
-								class="h-8 text-xs"
-								onclick={() => applyStatusFilter(val)}
-							>
-								{label}
-							</Button>
-						{/each}
-					</div>
-				</div>
+					</Tabs.Trigger>
+					<Tabs.Trigger value="members">
+						<UserPlus class="mr-1.5 size-3.5" />
+						{m.ws_members_tab()}
+						{#if members.length > 0}
+							<span class="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold">
+								{members.length}
+							</span>
+						{/if}
+					</Tabs.Trigger>
+				</Tabs.List>
+				{#if isManager(me?.role)}
+					<Button size="sm" class="gap-1.5" onclick={() => (newIssueOpen = true)}>
+						<Plus class="size-4" />
+						{m.ws_new_issue()}
+					</Button>
+				{/if}
+			</div>
 
-				<!-- Document list -->
-				{#if documents.length === 0}
+			<!-- Issues tab -->
+			<Tabs.Content value="issues" class="mt-4 flex flex-col gap-4">
+				{#if issuesList.length === 0}
 					<Card.Root class="flex flex-col items-center justify-center py-12 text-center">
 						<Card.Content>
 							<FileText class="mx-auto mb-3 size-8 text-muted-foreground/40" />
-							<p class="text-sm font-medium">No documents yet</p>
-							<p class="mt-1 text-xs text-muted-foreground">Upload a PDF to get started.</p>
+							<p class="text-sm font-medium">{m.ws_no_issues()}</p>
+							<p class="mt-1 text-xs text-muted-foreground">{m.ws_no_issues_hint()}</p>
 						</Card.Content>
 					</Card.Root>
 				{:else}
 					<div class="flex flex-col gap-2">
-						{#each documents as doc (doc.id)}
+						{#each issuesList as issue (issue.id)}
 							<Card.Root class="transition-shadow hover:shadow-sm">
 								<Card.Content class="flex items-center gap-3 py-3">
 									<FileText class="size-8 shrink-0 text-muted-foreground/60" />
 									<div class="min-w-0 flex-1">
-										<p class="truncate text-sm font-medium">{doc.name}</p>
-										<div
-											class="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
-										>
-											<span>{formatSize(Number(doc.size))}</span>
-											<span>·</span>
-											<span>{doc.uploaderName}</span>
-											<span>·</span>
-											<span>{formatDate(doc.createdAt)}</span>
-										</div>
+										<p class="truncate text-sm font-medium">{issue.title}</p>
+										{#if issue.description}
+											<p class="mt-0.5 truncate text-xs text-muted-foreground">
+												{issue.description}
+											</p>
+										{/if}
 									</div>
-									<Badge variant="secondary" class="shrink-0 text-xs {statusVariant(doc.status)}">
-										{statusLabel(doc.status)}
+									<Badge
+										variant="secondary"
+										class="shrink-0 text-xs {issue.resolved
+											? 'bg-emerald-100 text-emerald-700'
+											: 'bg-blue-100 text-blue-700'}"
+									>
+										{issue.resolved ? m.issue_resolved() : m.issue_open()}
 									</Badge>
 									<Button
 										variant="ghost"
 										size="sm"
 										class="shrink-0 gap-1"
-										href="/workspaces/{wsId}/documents/{doc.id}"
+										href={localizeHref(`/workspaces/${wsId}/issues/${issue.id}`)}
 									>
-										View
+										{m.common_view()}
 										<ArrowRight class="size-3.5" />
 									</Button>
 								</Card.Content>
 							</Card.Root>
 						{/each}
 					</div>
-
-					<!-- Upload zone (below documents) -->
-					{#if uploading}
-						<p class="text-center text-sm text-muted-foreground">Uploading…</p>
-					{/if}
-					{#if uploadError}
-						<p class="text-center text-sm text-destructive">{uploadError}</p>
-					{/if}
-
-					{#if docTotalPages > 1}
-						<div class="flex items-center justify-center gap-2">
-							<Button
-								variant="outline"
-								size="sm"
-								class="gap-1"
-								disabled={docPage <= 1}
-								onclick={() => navigateDocPage(docPage - 1)}
-							>
-								<ChevronLeft class="size-4" />
-								Prev
-							</Button>
-							<span class="text-sm text-muted-foreground">
-								Page {docPage} of {docTotalPages}
-							</span>
-							<Button
-								variant="outline"
-								size="sm"
-								class="gap-1"
-								disabled={docPage >= docTotalPages}
-								onclick={() => navigateDocPage(docPage + 1)}
-							>
-								Next
-								<ChevronRight class="size-4" />
-							</Button>
-						</div>
-					{/if}
 				{/if}
 			</Tabs.Content>
 
@@ -470,10 +352,11 @@
 					<Card.Header>
 						<div class="flex items-center justify-between gap-2">
 							<div>
-								<Card.Title class="text-sm">Members</Card.Title>
+								<Card.Title class="text-sm">{m.ws_members_heading()}</Card.Title>
 								<Card.Description class="text-xs">
-									{members.length}
-									{members.length === 1 ? 'member' : 'members'}
+									{members.length === 1
+										? m.ws_member_count({ count: String(members.length) })
+										: m.ws_members_count({ count: String(members.length) })}
 								</Card.Description>
 							</div>
 							{#if isOwner}
@@ -482,23 +365,23 @@
 										{#snippet child({ props })}
 											<Button size="sm" class="gap-1.5" {...props}>
 												<UserPlus class="size-4" />
-												Add Member
+												{m.ws_add_member()}
 											</Button>
 										{/snippet}
 									</Dialog.Trigger>
 									<Dialog.Content class="sm:max-w-md">
 										<Dialog.Header>
-											<Dialog.Title>Add Member</Dialog.Title>
+											<Dialog.Title>{m.ws_add_member_title()}</Dialog.Title>
 											<Dialog.Description>
-												Search for a user to add to this workspace.
+												{m.ws_add_member_description()}
 											</Dialog.Description>
 										</Dialog.Header>
 										<div class="grid gap-3 py-4">
 											<div class="grid gap-2">
-												<Label for="member-search">Search</Label>
+												<Label for="member-search">{m.ws_member_search_label()}</Label>
 												<Input
 													id="member-search"
-													placeholder="Name or email…"
+													placeholder={m.ws_member_search_placeholder()}
 													bind:value={memberSearch}
 												/>
 											</div>
@@ -508,9 +391,7 @@
 											<div class="max-h-60 overflow-y-auto rounded-md border">
 												{#if filteredNonMembers.length === 0}
 													<p class="p-4 text-center text-xs text-muted-foreground">
-														{nonMembers.length === 0
-															? 'All users are already members.'
-															: 'No matches.'}
+														{nonMembers.length === 0 ? m.ws_all_members() : m.ws_no_matches()}
 													</p>
 												{:else}
 													{#each filteredNonMembers as u (u.id)}
@@ -531,7 +412,7 @@
 																<p class="truncate text-xs text-muted-foreground">{u.email}</p>
 															</div>
 															{#if addingId === String(u.id)}
-																<span class="text-xs text-muted-foreground">Adding…</span>
+																<span class="text-xs text-muted-foreground">{m.ws_adding()}</span>
 															{/if}
 														</button>
 													{/each}
@@ -541,7 +422,7 @@
 										<Dialog.Footer>
 											<Dialog.Close>
 												{#snippet child({ props })}
-													<Button variant="outline" {...props}>Close</Button>
+													<Button variant="outline" {...props}>{m.common_close()}</Button>
 												{/snippet}
 											</Dialog.Close>
 										</Dialog.Footer>
@@ -553,7 +434,7 @@
 					<Card.Content>
 						{#if members.length === 0}
 							<p class="py-4 text-center text-sm text-muted-foreground">
-								No members yet.{isOwner ? ' Use "Add Member" to invite someone.' : ''}
+								{m.ws_no_members()}{isOwner ? m.ws_no_members_hint() : ''}
 							</p>
 						{:else}
 							<ul class="divide-y">
@@ -573,11 +454,11 @@
 										</div>
 										{#if role === 'manager'}
 											<Badge variant="secondary" class="shrink-0 text-[10px] text-violet-700">
-												Manager
+												{m.role_manager()}
 											</Badge>
 										{:else}
 											<Badge variant="outline" class="shrink-0 text-[10px] text-muted-foreground">
-												Employee
+												{m.role_employee()}
 											</Badge>
 										{/if}
 										{#if isOwner}
@@ -586,7 +467,7 @@
 												size="sm"
 												class="h-7 w-7 shrink-0 p-0 text-muted-foreground hover:text-destructive"
 												onclick={() => handleRemoveMember(member.id)}
-												title="Remove member"
+												title={m.ws_remove_member()}
 											>
 												<UserMinus class="size-4" />
 											</Button>
@@ -606,11 +487,11 @@
 <Dialog.Root bind:open={editOpen}>
 	<Dialog.Content class="sm:max-w-md">
 		<Dialog.Header>
-			<Dialog.Title>Edit Workspace</Dialog.Title>
+			<Dialog.Title>{m.ws_edit_title()}</Dialog.Title>
 		</Dialog.Header>
 		<div class="grid gap-4 py-4">
 			<div class="grid gap-2">
-				<Label for="edit-name">Name</Label>
+				<Label for="edit-name">{m.common_name()}</Label>
 				<Input
 					id="edit-name"
 					bind:value={editName}
@@ -624,11 +505,73 @@
 		<Dialog.Footer>
 			<Dialog.Close>
 				{#snippet child({ props })}
-					<Button variant="outline" {...props}>Cancel</Button>
+					<Button variant="outline" {...props}>{m.common_cancel()}</Button>
 				{/snippet}
 			</Dialog.Close>
 			<Button onclick={handleEdit} disabled={editing || !editName.trim()}>
-				{editing ? 'Saving…' : 'Save'}
+				{editing ? m.common_saving() : m.common_save()}
+			</Button>
+		</Dialog.Footer>
+	</Dialog.Content>
+</Dialog.Root>
+
+<!-- New issue dialog -->
+<Dialog.Root bind:open={newIssueOpen}>
+	<Dialog.Content class="sm:max-w-md">
+		<Dialog.Header>
+			<Dialog.Title>{m.ws_new_issue_title()}</Dialog.Title>
+			<Dialog.Description>{m.ws_new_issue_description()}</Dialog.Description>
+		</Dialog.Header>
+		<div class="grid gap-4 py-4">
+			<div class="grid gap-2">
+				<Label for="issue-title">{m.ws_issue_title_label()}</Label>
+				<Input
+					id="issue-title"
+					placeholder={m.ws_issue_title_placeholder()}
+					bind:value={newIssueTitle}
+				/>
+			</div>
+			<div class="grid gap-2">
+				<Label for="issue-desc">{m.ws_issue_description_label()}</Label>
+				<Textarea
+					id="issue-desc"
+					placeholder={m.ws_issue_description_placeholder()}
+					bind:value={newIssueDesc}
+					rows={3}
+				/>
+			</div>
+			<div class="grid gap-2">
+				<Label for="issue-assignee">{m.ws_issue_assignee_label()}</Label>
+				<select
+					id="issue-assignee"
+					class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none"
+					bind:value={newIssueAssignee}
+				>
+					<option value="" disabled>{m.ws_issue_assignee_select()}</option>
+					{#each members as member (member.id)}
+						<option value={String(member.id)}>{member.name}</option>
+					{/each}
+				</select>
+			</div>
+			<div class="grid gap-2">
+				<Label for="issue-deadline">{m.ws_issue_deadline_label()}</Label>
+				<Input id="issue-deadline" type="date" bind:value={newIssueDeadline} />
+			</div>
+			{#if newIssueError}
+				<p class="text-sm text-destructive">{newIssueError}</p>
+			{/if}
+		</div>
+		<Dialog.Footer>
+			<Dialog.Close>
+				{#snippet child({ props })}
+					<Button variant="outline" {...props}>{m.common_cancel()}</Button>
+				{/snippet}
+			</Dialog.Close>
+			<Button
+				onclick={handleCreateIssue}
+				disabled={creatingIssue || !newIssueTitle.trim() || !newIssueAssignee}
+			>
+				{creatingIssue ? m.common_creating() : m.common_create()}
 			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
@@ -638,19 +581,19 @@
 <Dialog.Root bind:open={deleteOpen}>
 	<Dialog.Content class="sm:max-w-sm">
 		<Dialog.Header>
-			<Dialog.Title>Delete Workspace</Dialog.Title>
+			<Dialog.Title>{m.ws_delete_title()}</Dialog.Title>
 			<Dialog.Description>
-				Are you sure you want to delete <strong>{ws?.name}</strong>? This action cannot be undone.
+				{m.ws_delete_confirm({ name: ws?.name ?? '' })}
 			</Dialog.Description>
 		</Dialog.Header>
 		<Dialog.Footer>
 			<Dialog.Close>
 				{#snippet child({ props })}
-					<Button variant="outline" {...props}>Cancel</Button>
+					<Button variant="outline" {...props}>{m.common_cancel()}</Button>
 				{/snippet}
 			</Dialog.Close>
 			<Button variant="destructive" onclick={handleDelete} disabled={deleting}>
-				{deleting ? 'Deleting…' : 'Delete'}
+				{deleting ? m.common_deleting() : m.common_delete()}
 			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
