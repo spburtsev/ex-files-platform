@@ -13,6 +13,13 @@ type SSEHandler struct {
 	Hub *services.SSEHub
 }
 
+// Stream opens a Server-Sent Events connection for real-time updates.
+// @Summary      SSE event stream
+// @Tags         events
+// @Produce      text/event-stream
+// @Param        documentId  query  int  false  "Filter events by document ID"
+// @Security     BearerAuth || CookieAuth
+// @Router       /events [get]
 func (h *SSEHandler) Stream(c *gin.Context) {
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")

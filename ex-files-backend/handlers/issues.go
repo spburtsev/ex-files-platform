@@ -62,6 +62,14 @@ func (h *IssuesHandler) GetUsers(c *gin.Context) {
 	protobufResponse(c, http.StatusOK, &issuesv1.GetUsersResponse{Users: pb})
 }
 
+// ListByWorkspace returns all issues for a workspace.
+// @Summary      List issues by workspace
+// @Tags         issues
+// @Produce      application/x-protobuf
+// @Param        id   path      int  true  "Workspace ID"
+// @Success      200  {object}  swagGetIssuesResponse  "Protobuf: issues.v1.GetIssuesResponse"
+// @Security     BearerAuth || CookieAuth
+// @Router       /workspaces/{id}/issues [get]
 func (h *IssuesHandler) ListByWorkspace(c *gin.Context) {
 	wsID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
@@ -80,6 +88,15 @@ func (h *IssuesHandler) ListByWorkspace(c *gin.Context) {
 	protobufResponse(c, http.StatusOK, &issuesv1.GetIssuesResponse{Issues: pb})
 }
 
+// Get returns a single issue with its assignee.
+// @Summary      Get issue
+// @Tags         issues
+// @Produce      application/x-protobuf
+// @Param        id   path      int  true  "Issue ID"
+// @Success      200  {object}  swagGetIssueResponse  "Protobuf: issues.v1.GetIssueResponse"
+// @Failure      404  {object}  swagErrorResponse
+// @Security     BearerAuth || CookieAuth
+// @Router       /issues/{id} [get]
 func (h *IssuesHandler) Get(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 64)
@@ -98,6 +115,17 @@ func (h *IssuesHandler) Get(c *gin.Context) {
 	})
 }
 
+// Create creates a new issue in a workspace. Only managers and root users.
+// @Summary      Create issue
+// @Tags         issues
+// @Accept       json
+// @Produce      application/x-protobuf
+// @Param        id    path      int                     true  "Workspace ID"
+// @Param        body  body      swagCreateIssueRequest  true  "Issue payload"
+// @Success      201   {object}  swagCreateIssueResponse "Protobuf: issues.v1.CreateIssueResponse"
+// @Failure      403   {object}  swagErrorResponse
+// @Security     BearerAuth || CookieAuth
+// @Router       /workspaces/{id}/issues [post]
 func (h *IssuesHandler) Create(c *gin.Context) {
 	userID, ok := mustGetUserID(c)
 	if !ok {

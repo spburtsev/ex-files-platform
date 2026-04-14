@@ -16,3 +16,8 @@ plugins:
     out: ../ex-files-frontend/src/lib/gen
     opt:
       - target=ts
+
+  - local: protoc-gen-doc
+    out: ../docs/proto
+    opt:
+      - markdown,index.md

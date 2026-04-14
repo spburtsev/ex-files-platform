@@ -38,6 +38,16 @@ func setSessionCookie(c *gin.Context, token string) {
 	c.SetCookie("session", token, int((8 * time.Hour).Seconds()), "/", "", false, true)
 }
 
+// Register creates a new user account.
+// @Summary      Register a new user
+// @Tags         auth
+// @Accept       json
+// @Produce      application/x-protobuf
+// @Param        body  body      swagRegisterRequest  true  "Registration payload"
+// @Success      201   {object}  swagAuthResponse     "Protobuf: auth.v1.RegisterResponse"
+// @Failure      400   {object}  swagErrorResponse
+// @Failure      409   {object}  swagErrorResponse
+// @Router       /auth/register [post]
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req registerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -86,6 +96,16 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	})
 }
 
+// Login authenticates a user and sets a session cookie.
+// @Summary      Log in
+// @Tags         auth
+// @Accept       json
+// @Produce      application/x-protobuf
+// @Param        body  body      swagLoginRequest  true  "Login credentials"
+// @Success      200   {object}  swagAuthResponse  "Protobuf: auth.v1.LoginResponse"
+// @Failure      400   {object}  swagErrorResponse
+// @Failure      401   {object}  swagErrorResponse
+// @Router       /auth/login [post]
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req loginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -128,6 +148,14 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	})
 }
 
+// Me returns the current authenticated user.
+// @Summary      Current user
+// @Tags         auth
+// @Produce      application/x-protobuf
+// @Success      200  {object}  swagMeResponse     "Protobuf: auth.v1.MeResponse"
+// @Failure      401  {object}  swagErrorResponse
+// @Security     BearerAuth || CookieAuth
+// @Router       /auth/me [get]
 func (h *AuthHandler) Me(c *gin.Context) {
 	userID, ok := mustGetUserID(c)
 	if !ok {
@@ -141,11 +169,25 @@ func (h *AuthHandler) Me(c *gin.Context) {
 	protobufResponse(c, http.StatusOK, &authv1.MeResponse{User: userToProto(user)})
 }
 
+// Logout clears the session cookie.
+// @Summary      Log out
+// @Tags         auth
+// @Produce      application/x-protobuf
+// @Success      200  {object}  swagMessageResponse  "Protobuf: auth.v1.LogoutResponse"
+// @Router       /auth/logout [post]
 func (h *AuthHandler) Logout(c *gin.Context) {
 	c.SetCookie("session", "", -1, "/", "", false, true)
 	protobufResponse(c, http.StatusOK, &authv1.LogoutResponse{Message: "logged out"})
 }
 
+// ListUsers returns all users.
+// @Summary      List users
+// @Tags         auth
+// @Produce      application/x-protobuf
+// @Success      200  {object}  swagGetUsersResponse  "Protobuf: issues.v1.GetUsersResponse"
+// @Failure      401  {object}  swagErrorResponse
+// @Security     BearerAuth || CookieAuth
+// @Router       /auth/users [get]
 func (h *AuthHandler) ListUsers(c *gin.Context) {
 	users, err := h.Repo.ListAll()
 	if err != nil {

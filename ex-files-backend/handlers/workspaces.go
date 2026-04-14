@@ -29,6 +29,17 @@ func workspaceToProto(ws *models.Workspace) *workspacesv1.Workspace {
 	}
 }
 
+// Create creates a new workspace. Only managers and root users.
+// @Summary      Create workspace
+// @Tags         workspaces
+// @Accept       json
+// @Produce      application/x-protobuf
+// @Param        body  body      swagCreateWorkspaceRequest   true  "Workspace payload"
+// @Success      201   {object}  swagCreateWorkspaceResponse  "Protobuf: workspaces.v1.CreateWorkspaceResponse"
+// @Failure      400   {object}  swagErrorResponse
+// @Failure      403   {object}  swagErrorResponse
+// @Security     BearerAuth || CookieAuth
+// @Router       /workspaces [post]
 func (h *WorkspaceHandler) Create(c *gin.Context) {
 	userID, ok := mustGetUserID(c)
 	if !ok {
@@ -68,6 +79,20 @@ func (h *WorkspaceHandler) Create(c *gin.Context) {
 	})
 }
 
+// List returns workspaces for the current user.
+// @Summary      List workspaces
+// @Tags         workspaces
+// @Produce      application/x-protobuf
+// @Param        page      query  int  false  "Page number"      default(1)
+// @Param        per_page  query  int  false  "Items per page"   default(20)
+// @Success      200  {object}  swagGetWorkspacesResponse  "Protobuf: workspaces.v1.GetWorkspacesResponse"
+// @Header       200  {int}     X-Total-Count
+// @Header       200  {int}     X-Total-Pages
+// @Header       200  {int}     X-Page
+// @Header       200  {int}     X-Per-Page
+// @Failure      401  {object}  swagErrorResponse
+// @Security     BearerAuth || CookieAuth
+// @Router       /workspaces [get]
 func (h *WorkspaceHandler) List(c *gin.Context) {
 	userID, ok := mustGetUserID(c)
 	if !ok {
@@ -108,6 +133,15 @@ func (h *WorkspaceHandler) List(c *gin.Context) {
 	})
 }
 
+// Get returns a workspace with its manager and members.
+// @Summary      Get workspace
+// @Tags         workspaces
+// @Produce      application/x-protobuf
+// @Param        id   path      int  true  "Workspace ID"
+// @Success      200  {object}  swagGetWorkspaceResponse  "Protobuf: workspaces.v1.GetWorkspaceResponse"
+// @Failure      404  {object}  swagErrorResponse
+// @Security     BearerAuth || CookieAuth
+// @Router       /workspaces/{id} [get]
 func (h *WorkspaceHandler) Get(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
@@ -147,6 +181,14 @@ func (h *WorkspaceHandler) Get(c *gin.Context) {
 	})
 }
 
+// AssignableMembers returns users that can be added to the workspace.
+// @Summary      Assignable members
+// @Tags         workspaces
+// @Produce      application/x-protobuf
+// @Param        id   path      int  true  "Workspace ID"
+// @Success      200  {object}  swagAssignableMembersResponse  "Protobuf: workspaces.v1.GetAssignableMembersResponse"
+// @Security     BearerAuth || CookieAuth
+// @Router       /workspaces/{id}/assignable-members [get]
 func (h *WorkspaceHandler) AssignableMembers(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
@@ -170,6 +212,18 @@ func (h *WorkspaceHandler) AssignableMembers(c *gin.Context) {
 	})
 }
 
+// Update renames a workspace. Only the workspace manager.
+// @Summary      Update workspace
+// @Tags         workspaces
+// @Accept       json
+// @Produce      application/x-protobuf
+// @Param        id    path      int                         true  "Workspace ID"
+// @Param        body  body      swagUpdateWorkspaceRequest  true  "Update payload"
+// @Success      200   {object}  swagUpdateWorkspaceResponse "Protobuf: workspaces.v1.UpdateWorkspaceResponse"
+// @Failure      403   {object}  swagErrorResponse
+// @Failure      404   {object}  swagErrorResponse
+// @Security     BearerAuth || CookieAuth
+// @Router       /workspaces/{id} [put]
 func (h *WorkspaceHandler) Update(c *gin.Context) {
 	userID, ok := mustGetUserID(c)
 	if !ok {
@@ -213,6 +267,16 @@ func (h *WorkspaceHandler) Update(c *gin.Context) {
 	})
 }
 
+// Delete removes a workspace. Only the workspace manager.
+// @Summary      Delete workspace
+// @Tags         workspaces
+// @Produce      application/x-protobuf
+// @Param        id   path      int  true  "Workspace ID"
+// @Success      200  {object}  swagMessageResponse  "Protobuf: workspaces.v1.DeleteWorkspaceResponse"
+// @Failure      403  {object}  swagErrorResponse
+// @Failure      404  {object}  swagErrorResponse
+// @Security     BearerAuth || CookieAuth
+// @Router       /workspaces/{id} [delete]
 func (h *WorkspaceHandler) Delete(c *gin.Context) {
 	userID, ok := mustGetUserID(c)
 	if !ok {
@@ -249,6 +313,17 @@ func (h *WorkspaceHandler) Delete(c *gin.Context) {
 	})
 }
 
+// AddMember adds a user to a workspace. Only the workspace manager.
+// @Summary      Add member
+// @Tags         workspaces
+// @Accept       json
+// @Produce      application/x-protobuf
+// @Param        id    path      int                   true  "Workspace ID"
+// @Param        body  body      swagAddMemberRequest  true  "Member payload"
+// @Success      201   {object}  swagAddMemberResponse "Protobuf: workspaces.v1.AddMemberResponse"
+// @Failure      403   {object}  swagErrorResponse
+// @Security     BearerAuth || CookieAuth
+// @Router       /workspaces/{id}/members [post]
 func (h *WorkspaceHandler) AddMember(c *gin.Context) {
 	userID, ok := mustGetUserID(c)
 	if !ok {
@@ -300,6 +375,16 @@ func (h *WorkspaceHandler) AddMember(c *gin.Context) {
 	})
 }
 
+// RemoveMember removes a user from a workspace. Only the workspace manager.
+// @Summary      Remove member
+// @Tags         workspaces
+// @Produce      application/x-protobuf
+// @Param        id      path      int  true  "Workspace ID"
+// @Param        userId  path      int  true  "User ID"
+// @Success      200     {object}  swagMessageResponse  "Protobuf: workspaces.v1.RemoveMemberResponse"
+// @Failure      403     {object}  swagErrorResponse
+// @Security     BearerAuth || CookieAuth
+// @Router       /workspaces/{id}/members/{userId} [delete]
 func (h *WorkspaceHandler) RemoveMember(c *gin.Context) {
 	userID, ok := mustGetUserID(c)
 	if !ok {

@@ -209,7 +209,7 @@
 </script>
 
 <svelte:head>
-	<title>{ws?.name ?? m.nav_workspaces()} — ex-files</title>
+	<title>{ws?.name ?? m.nav_workspaces()} - ex-files</title>
 </svelte:head>
 
 <div class="flex flex-1 flex-col gap-6 p-6">
@@ -238,7 +238,7 @@
 						<Card.Description class="mt-1 flex flex-wrap gap-3 text-xs">
 							<span class="flex items-center gap-1">
 								<Crown class="size-3.5" />
-								{m.ws_manager_label({ name: manager?.name ?? '—' })}
+								{m.ws_manager_label({ name: manager?.name ?? '-' })}
 							</span>
 							<span class="flex items-center gap-1">
 								<Calendar class="size-3.5" />

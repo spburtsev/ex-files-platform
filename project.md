@@ -16,7 +16,7 @@ Notarization platform where documents are uploaded, routed through a configurabl
 
 Users can upload PDF documents in common formats through a drag-and-drop interface or file picker. Each upload is hashed with SHA-256 to produce a unique fingerprint. The system stores the original file in S3-compatible object storage and records metadata such as file name, size, uploader, and timestamp in a relational DB. Uploads are validated for size limits and files type.
 
-Documents are organized into workspaces. Within each workspace, managers can create issues — discrete review tasks or requests that group related documents together. Documents are uploaded to a specific issue, not directly to the workspace. Each issue has a title, description, and tracks its own lifecycle. Users can search and filter documents by name, date, status and uploader within an issue. A document detail view shows the current version, full version history, approval status and comments.
+Documents are organized into workspaces. Within each workspace, managers can create issues - discrete review tasks or requests that group related documents together. Documents are uploaded to a specific issue, not directly to the workspace. Each issue has a title, description, and tracks its own lifecycle. Users can search and filter documents by name, date, status and uploader within an issue. A document detail view shows the current version, full version history, approval status and comments.
 
 **2 Role-Based Access Control**
 
@@ -44,7 +44,7 @@ Users can browse the full version history in a timeline view, download any past 
 
 The platform maintains an audit log that records every significant action: document uploads, version creations, approval decisions (with reviewer ID and timestamp), rejections with reasons, comments and role changes. Each entry includes the acting user and the target resource.
 
-Administrators can view the full audit log through a dedicated UI with filtering by date range, event type, user, or document. The log is append-only by design—entries cannot be modified or deleted, even by administrators ensuring a trustworthy record for compliance and dispute resolution.
+Administrators can view the full audit log through a dedicated UI with filtering by date range, event type, user, or document. The log is append-only by design-entries cannot be modified or deleted, even by administrators ensuring a trustworthy record for compliance and dispute resolution.
 
 **7 Public Verification Endpoint**
 

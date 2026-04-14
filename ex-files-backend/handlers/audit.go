@@ -42,6 +42,25 @@ func auditEntryToProto(e *models.AuditEntry) *auditv1.AuditEntry {
 	return entry
 }
 
+// List returns the audit log with optional filters.
+// @Summary      List audit entries
+// @Tags         audit
+// @Produce      application/x-protobuf
+// @Param        action       query  string  false  "Filter by action"
+// @Param        target_type  query  string  false  "Filter by target type"
+// @Param        actor_id     query  int     false  "Filter by actor ID"
+// @Param        target_id    query  int     false  "Filter by target ID"
+// @Param        from         query  string  false  "From date (RFC3339)"
+// @Param        to           query  string  false  "To date (RFC3339)"
+// @Param        page         query  int     false  "Page number"     default(1)
+// @Param        per_page     query  int     false  "Items per page"  default(20)
+// @Success      200  {object}  swagGetAuditLogResponse  "Protobuf: audit.v1.GetAuditLogResponse"
+// @Header       200  {int}     X-Total-Count
+// @Header       200  {int}     X-Total-Pages
+// @Header       200  {int}     X-Page
+// @Header       200  {int}     X-Per-Page
+// @Security     BearerAuth || CookieAuth
+// @Router       /audit [get]
 func (h *AuditHandler) List(c *gin.Context) {
 	page, perPage := parsePagination(c)
 	offset := (page - 1) * perPage

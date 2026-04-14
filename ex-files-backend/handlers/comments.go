@@ -29,6 +29,16 @@ func commentToProto(c *models.Comment) *docsv1.Comment {
 	}
 }
 
+// Create adds a comment to a document.
+// @Summary      Create comment
+// @Tags         comments
+// @Accept       json
+// @Produce      application/x-protobuf
+// @Param        id    path      int                       true  "Document ID"
+// @Param        body  body      swagCreateCommentRequest  true  "Comment payload"
+// @Success      201   {object}  swagCreateCommentResponse "Protobuf: documents.v1.CreateCommentResponse"
+// @Security     BearerAuth || CookieAuth
+// @Router       /documents/{id}/comments [post]
 func (h *CommentHandler) Create(c *gin.Context) {
 	userID, ok := mustGetUserID(c)
 	if !ok {
@@ -80,6 +90,14 @@ func (h *CommentHandler) Create(c *gin.Context) {
 	})
 }
 
+// List returns all comments for a document.
+// @Summary      List comments
+// @Tags         comments
+// @Produce      application/x-protobuf
+// @Param        id   path      int  true  "Document ID"
+// @Success      200  {object}  swagListCommentsResponse  "Protobuf: documents.v1.ListCommentsResponse"
+// @Security     BearerAuth || CookieAuth
+// @Router       /documents/{id}/comments [get]
 func (h *CommentHandler) List(c *gin.Context) {
 	docID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {

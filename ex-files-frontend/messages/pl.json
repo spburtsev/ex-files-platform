@@ -50,7 +50,7 @@
 	"nav_logout": "Wyloguj się",
 	"nav_offline": "Offline",
 
-	"login_page_title": "Logowanie — ex-files",
+	"login_page_title": "Logowanie - ex-files",
 	"login_welcome": "Witamy ponownie",
 	"login_description": "Zaloguj się do konta ex-files",
 	"login_email_placeholder": "ty@example.com",
@@ -62,7 +62,7 @@
 	"login_no_account": "Nie masz konta?",
 	"login_signup_link": "Zarejestruj się",
 
-	"signup_page_title": "Rejestracja — ex-files",
+	"signup_page_title": "Rejestracja - ex-files",
 	"signup_heading": "Utwórz konto",
 	"signup_description": "Wprowadź swoje dane, aby rozpocząć",
 	"signup_full_name": "Imię i nazwisko",
@@ -76,10 +76,10 @@
 	"signup_has_account": "Masz już konto?",
 	"signup_login_link": "Zaloguj się",
 
-	"dashboard_page_title": "Panel — ex-files",
+	"dashboard_page_title": "Panel - ex-files",
 	"dashboard_greeting": "Cześć, {name}!",
 
-	"ws_page_title": "Przestrzenie robocze — ex-files",
+	"ws_page_title": "Przestrzenie robocze - ex-files",
 	"ws_heading": "Przestrzenie robocze",
 	"ws_description": "Organizuj powiązane dokumenty w przestrzeniach roboczych w celu sprawnej weryfikacji.",
 	"ws_new": "Nowa przestrzeń",
@@ -133,7 +133,7 @@
 	"ws_issue_create_error": "Nie udało się utworzyć zagadnienia",
 	"ws_filter_all": "Wszystkie",
 
-	"doc_page_title": "{name} — ex-files",
+	"doc_page_title": "{name} - ex-files",
 	"doc_loading": "Ładowanie dokumentu…",
 	"doc_reviewer_label": "Recenzent: {name}",
 	"doc_assign_reviewer": "Przypisz recenzenta",
@@ -181,11 +181,11 @@
 	"doc_assign": "Przypisz",
 	"doc_assign_error": "Nie udało się przypisać recenzenta",
 
-	"users_page_title": "Użytkownicy — ex-files",
+	"users_page_title": "Użytkownicy - ex-files",
 	"users_heading": "Użytkownicy",
 	"users_description": "Zarządzaj członkami platformy i ich rolami.",
 
-	"audit_page_title": "Dziennik audytu — ex-files",
+	"audit_page_title": "Dziennik audytu - ex-files",
 	"audit_heading": "Dziennik audytu",
 	"audit_description": "Niezmienny rejestr wszystkich działań na platformie.",
 	"audit_entries_count": "{count} wpisów",

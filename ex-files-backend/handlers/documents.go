@@ -61,6 +61,17 @@ func versionToProto(v *models.DocumentVersion) *docsv1.DocumentVersion {
 	}
 }
 
+// Upload uploads a new document to an issue.
+// @Summary      Upload document
+// @Tags         documents
+// @Accept       multipart/form-data
+// @Produce      application/x-protobuf
+// @Param        id    path      int   true  "Issue ID"
+// @Param        file  formData  file  true  "Document file"
+// @Success      201   {object}  swagUploadDocumentResponse  "Protobuf: documents.v1.UploadDocumentResponse"
+// @Failure      400   {object}  swagErrorResponse
+// @Security     BearerAuth || CookieAuth
+// @Router       /issues/{id}/documents [post]
 func (h *DocumentHandler) Upload(c *gin.Context) {
 	userID, ok := mustGetUserID(c)
 	if !ok {
@@ -159,6 +170,16 @@ func (h *DocumentHandler) Upload(c *gin.Context) {
 	})
 }
 
+// UploadVersion uploads a new version of an existing document.
+// @Summary      Upload new version
+// @Tags         documents
+// @Accept       multipart/form-data
+// @Produce      application/x-protobuf
+// @Param        id    path      int   true  "Document ID"
+// @Param        file  formData  file  true  "Document file"
+// @Success      201   {object}  swagUploadDocumentResponse  "Protobuf: documents.v1.UploadDocumentResponse"
+// @Security     BearerAuth || CookieAuth
+// @Router       /documents/{id}/versions [post]
 func (h *DocumentHandler) UploadVersion(c *gin.Context) {
 	userID, ok := mustGetUserID(c)
 	if !ok {
@@ -242,6 +263,22 @@ func (h *DocumentHandler) UploadVersion(c *gin.Context) {
 	})
 }
 
+// List returns documents for an issue with optional search and status filter.
+// @Summary      List documents
+// @Tags         documents
+// @Produce      application/x-protobuf
+// @Param        id        path   int     true   "Issue ID"
+// @Param        search    query  string  false  "Search by name"
+// @Param        status    query  string  false  "Filter by status"
+// @Param        page      query  int     false  "Page number"     default(1)
+// @Param        per_page  query  int     false  "Items per page"  default(20)
+// @Success      200  {object}  swagListDocumentsResponse  "Protobuf: documents.v1.ListDocumentsResponse"
+// @Header       200  {int}     X-Total-Count
+// @Header       200  {int}     X-Total-Pages
+// @Header       200  {int}     X-Page
+// @Header       200  {int}     X-Per-Page
+// @Security     BearerAuth || CookieAuth
+// @Router       /issues/{id}/documents [get]
 func (h *DocumentHandler) List(c *gin.Context) {
 	issueID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
@@ -272,6 +309,15 @@ func (h *DocumentHandler) List(c *gin.Context) {
 	})
 }
 
+// Get returns a document with all its versions.
+// @Summary      Get document
+// @Tags         documents
+// @Produce      application/x-protobuf
+// @Param        id   path      int  true  "Document ID"
+// @Success      200  {object}  swagGetDocumentResponse  "Protobuf: documents.v1.GetDocumentResponse"
+// @Failure      404  {object}  swagErrorResponse
+// @Security     BearerAuth || CookieAuth
+// @Router       /documents/{id} [get]
 func (h *DocumentHandler) Get(c *gin.Context) {
 	docID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
@@ -304,6 +350,16 @@ func (h *DocumentHandler) Get(c *gin.Context) {
 	})
 }
 
+// Download returns a presigned URL for downloading a document version.
+// @Summary      Download version
+// @Tags         documents
+// @Produce      application/x-protobuf
+// @Param        id         path      int  true  "Document ID"
+// @Param        versionId  path      int  true  "Version ID"
+// @Success      200  {object}  swagDownloadURLResponse  "Protobuf: documents.v1.GetDownloadURLResponse"
+// @Failure      404  {object}  swagErrorResponse
+// @Security     BearerAuth || CookieAuth
+// @Router       /documents/{id}/versions/{versionId}/download [get]
 func (h *DocumentHandler) Download(c *gin.Context) {
 	versionID, err := strconv.ParseUint(c.Param("versionId"), 10, 64)
 	if err != nil {
@@ -328,8 +384,16 @@ func (h *DocumentHandler) Download(c *gin.Context) {
 	})
 }
 
-// Submit transitions a document from pending → in_review.
-// Only the uploader may submit their own document.
+// Submit transitions a document from pending to in_review. Only the uploader.
+// @Summary      Submit document for review
+// @Tags         documents
+// @Produce      application/x-protobuf
+// @Param        id   path      int  true  "Document ID"
+// @Success      200  {object}  swagUpdateDocumentResponse  "Protobuf: documents.v1.UpdateDocumentResponse"
+// @Failure      403  {object}  swagErrorResponse
+// @Failure      422  {object}  swagErrorResponse
+// @Security     BearerAuth || CookieAuth
+// @Router       /documents/{id}/submit [post]
 func (h *DocumentHandler) Submit(c *gin.Context) {
 	userID, ok := mustGetUserID(c)
 	if !ok {
@@ -371,7 +435,17 @@ func (h *DocumentHandler) Submit(c *gin.Context) {
 	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
 }
 
-// AssignReviewer sets the reviewer for a document. Only managers and root users may do this.
+// AssignReviewer sets the reviewer for a document. Only managers and root users.
+// @Summary      Assign reviewer
+// @Tags         documents
+// @Accept       json
+// @Produce      application/x-protobuf
+// @Param        id    path      int                        true  "Document ID"
+// @Param        body  body      swagAssignReviewerRequest  true  "Reviewer payload"
+// @Success      200   {object}  swagUpdateDocumentResponse "Protobuf: documents.v1.UpdateDocumentResponse"
+// @Failure      403   {object}  swagErrorResponse
+// @Security     BearerAuth || CookieAuth
+// @Router       /documents/{id}/reviewer [put]
 func (h *DocumentHandler) AssignReviewer(c *gin.Context) {
 	userID, ok := mustGetUserID(c)
 	if !ok {
@@ -429,7 +503,16 @@ func canReview(doc *models.Document, callerID uint, role models.Role) bool {
 	return doc.ReviewerID != nil && *doc.ReviewerID == callerID
 }
 
-// Approve transitions a document from in_review → approved.
+// Approve transitions a document from in_review to approved.
+// @Summary      Approve document
+// @Tags         documents
+// @Produce      application/x-protobuf
+// @Param        id   path      int  true  "Document ID"
+// @Success      200  {object}  swagUpdateDocumentResponse  "Protobuf: documents.v1.UpdateDocumentResponse"
+// @Failure      403  {object}  swagErrorResponse
+// @Failure      422  {object}  swagErrorResponse
+// @Security     BearerAuth || CookieAuth
+// @Router       /documents/{id}/approve [post]
 func (h *DocumentHandler) Approve(c *gin.Context) {
 	userID, ok := mustGetUserID(c)
 	if !ok {
@@ -479,7 +562,18 @@ func (h *DocumentHandler) Approve(c *gin.Context) {
 	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
 }
 
-// Reject transitions a document from in_review → rejected.
+// Reject transitions a document from in_review to rejected.
+// @Summary      Reject document
+// @Tags         documents
+// @Accept       json
+// @Produce      application/x-protobuf
+// @Param        id    path      int                    true  "Document ID"
+// @Param        body  body      swagReviewNoteRequest  false "Rejection note"
+// @Success      200   {object}  swagUpdateDocumentResponse  "Protobuf: documents.v1.UpdateDocumentResponse"
+// @Failure      403   {object}  swagErrorResponse
+// @Failure      422   {object}  swagErrorResponse
+// @Security     BearerAuth || CookieAuth
+// @Router       /documents/{id}/reject [post]
 func (h *DocumentHandler) Reject(c *gin.Context) {
 	userID, ok := mustGetUserID(c)
 	if !ok {
@@ -536,7 +630,18 @@ func (h *DocumentHandler) Reject(c *gin.Context) {
 	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
 }
 
-// RequestChanges transitions a document from in_review → changes_requested.
+// RequestChanges transitions a document from in_review to changes_requested.
+// @Summary      Request changes
+// @Tags         documents
+// @Accept       json
+// @Produce      application/x-protobuf
+// @Param        id    path      int                    true  "Document ID"
+// @Param        body  body      swagReviewNoteRequest  false "Change request note"
+// @Success      200   {object}  swagUpdateDocumentResponse  "Protobuf: documents.v1.UpdateDocumentResponse"
+// @Failure      403   {object}  swagErrorResponse
+// @Failure      422   {object}  swagErrorResponse
+// @Security     BearerAuth || CookieAuth
+// @Router       /documents/{id}/request-changes [post]
 func (h *DocumentHandler) RequestChanges(c *gin.Context) {
 	userID, ok := mustGetUserID(c)
 	if !ok {
@@ -593,8 +698,16 @@ func (h *DocumentHandler) RequestChanges(c *gin.Context) {
 	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
 }
 
-// Resubmit transitions a document from changes_requested → in_review.
-// Only the uploader may resubmit.
+// Resubmit transitions a document from changes_requested to in_review. Only the uploader.
+// @Summary      Resubmit document
+// @Tags         documents
+// @Produce      application/x-protobuf
+// @Param        id   path      int  true  "Document ID"
+// @Success      200  {object}  swagUpdateDocumentResponse  "Protobuf: documents.v1.UpdateDocumentResponse"
+// @Failure      403  {object}  swagErrorResponse
+// @Failure      422  {object}  swagErrorResponse
+// @Security     BearerAuth || CookieAuth
+// @Router       /documents/{id}/resubmit [post]
 func (h *DocumentHandler) Resubmit(c *gin.Context) {
 	userID, ok := mustGetUserID(c)
 	if !ok {
@@ -637,6 +750,15 @@ func (h *DocumentHandler) Resubmit(c *gin.Context) {
 	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
 }
 
+// Delete removes a document.
+// @Summary      Delete document
+// @Tags         documents
+// @Produce      application/x-protobuf
+// @Param        id   path      int  true  "Document ID"
+// @Success      200  {object}  swagMessageResponse  "Protobuf: documents.v1.DeleteDocumentResponse"
+// @Failure      404  {object}  swagErrorResponse
+// @Security     BearerAuth || CookieAuth
+// @Router       /documents/{id} [delete]
 func (h *DocumentHandler) Delete(c *gin.Context) {
 	userID, ok := mustGetUserID(c)
 	if !ok {

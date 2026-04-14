@@ -4,7 +4,8 @@
         test test-cover test-race test-e2e \
         build build-frontend build-backend \
         docker-build up down \
-        logs-up logs-down
+        logs-up logs-down \
+        docs docs-proto docs-swagger
 
 PROTO_DIR    := protocol
 BACKEND_GEN  := ex-files-backend/gen
@@ -17,14 +18,27 @@ E2E_DIR      := integration-testing
 
 proto:
 	cd $(PROTO_DIR) && buf dep update && buf generate
-	@echo "Go  → $(BACKEND_GEN)"
-	@echo "TS  → $(FRONTEND_GEN)"
+	@echo "Go $(BACKEND_GEN)"
+	@echo "TS $(FRONTEND_GEN)"
 
 proto-lint:
 	cd $(PROTO_DIR) && buf lint
 
 proto-breaking:
 	cd $(PROTO_DIR) && buf breaking --against '.git#subdir=$(PROTO_DIR)'
+
+# --- Documentation ---
+
+docs-proto:
+	mkdir -p docs/proto
+	cd $(PROTO_DIR) && buf dep update && buf generate
+
+docs-swagger:
+	cd $(BACKEND_DIR) && swag init --parseDependency --parseInternal
+
+docs: docs-proto docs-swagger
+	@echo "Proto docs docs/proto/index.md"
+	@echo "Swagger    $(BACKEND_DIR)/docs/"
 
 # --- Local development ---
 

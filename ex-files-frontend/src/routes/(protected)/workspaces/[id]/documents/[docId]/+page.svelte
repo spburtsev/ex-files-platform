@@ -310,7 +310,7 @@
 							</span>
 							<span class="flex items-center gap-1">
 								<FileText class="size-3.5" />
-								{doc ? formatSize(doc.size) : '—'} · {doc?.mimeType}
+								{doc ? formatSize(doc.size) : '-'} · {doc?.mimeType}
 							</span>
 							{#if doc?.reviewerName}
 								<span class="flex items-center gap-1">

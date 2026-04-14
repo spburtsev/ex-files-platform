@@ -33,7 +33,7 @@ export function roleName(role?: Role): string {
 /** Format a protobuf Timestamp for display */
 export function formatTimestamp(ts?: Timestamp, opts?: { withTime?: boolean }): string {
 	const d = protoTsToDate(ts);
-	if (!d) return '—';
+	if (!d) return '-';
 	if (opts?.withTime) {
 		return d.toLocaleString(undefined, {
 			month: 'short',

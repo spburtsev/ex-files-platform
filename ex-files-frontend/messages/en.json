@@ -50,7 +50,7 @@
 	"nav_logout": "Log out",
 	"nav_offline": "Offline",
 
-	"login_page_title": "Log in — ex-files",
+	"login_page_title": "Log in - ex-files",
 	"login_welcome": "Welcome back",
 	"login_description": "Log in to your ex-files account",
 	"login_email_placeholder": "you@example.com",
@@ -62,7 +62,7 @@
 	"login_no_account": "Don't have an account?",
 	"login_signup_link": "Sign up",
 
-	"signup_page_title": "Sign up — ex-files",
+	"signup_page_title": "Sign up - ex-files",
 	"signup_heading": "Create an account",
 	"signup_description": "Enter your details to get started",
 	"signup_full_name": "Full name",
@@ -76,10 +76,10 @@
 	"signup_has_account": "Already have an account?",
 	"signup_login_link": "Log in",
 
-	"dashboard_page_title": "Dashboard — ex-files",
+	"dashboard_page_title": "Dashboard - ex-files",
 	"dashboard_greeting": "Hello, {name}!",
 
-	"ws_page_title": "Workspaces — ex-files",
+	"ws_page_title": "Workspaces - ex-files",
 	"ws_heading": "Workspaces",
 	"ws_description": "Organize related documents into workspaces for streamlined review.",
 	"ws_new": "New Workspace",
@@ -133,7 +133,7 @@
 	"ws_issue_create_error": "Failed to create issue",
 	"ws_filter_all": "All",
 
-	"doc_page_title": "{name} — ex-files",
+	"doc_page_title": "{name} - ex-files",
 	"doc_loading": "Loading document…",
 	"doc_reviewer_label": "Reviewer: {name}",
 	"doc_assign_reviewer": "Assign Reviewer",
@@ -181,11 +181,11 @@
 	"doc_assign": "Assign",
 	"doc_assign_error": "Failed to assign reviewer",
 
-	"users_page_title": "Users — ex-files",
+	"users_page_title": "Users - ex-files",
 	"users_heading": "Users",
 	"users_description": "Manage platform members and their roles.",
 
-	"audit_page_title": "Audit Log — ex-files",
+	"audit_page_title": "Audit Log - ex-files",
 	"audit_heading": "Audit Log",
 	"audit_description": "Immutable record of all platform actions.",
 	"audit_entries_count": "{count} entries",

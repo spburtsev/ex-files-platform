@@ -4,7 +4,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/gin-contrib/cors"
@@ -22,6 +21,19 @@ import (
 	"github.com/spburtsev/ex-files-backend/services"
 )
 
+// @title           ex-files Platform API
+// @version         1.0
+// @description     Document management and review platform. Successful responses use protobuf binary encoding (application/x-protobuf). Error responses are JSON. Schemas below show JSON-equivalent structure of each protobuf message.
+// @host            localhost:8080
+// @BasePath        /
+//
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+//
+// @securityDefinitions.apikey CookieAuth
+// @in cookie
+// @name session
 func main() {
 	if err := godotenv.Load(); err != nil {
 		// .env is optional; will be logged after logger init
@@ -76,15 +88,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	smtpPort, _ := strconv.Atoi(os.Getenv("SMTP_PORT"))
-	emailSvc := services.NewSMTPEmailService(
-		os.Getenv("SMTP_HOST"),
-		smtpPort,
-		os.Getenv("SMTP_USER"),
-		os.Getenv("SMTP_PASSWORD"),
-		os.Getenv("SMTP_FROM"),
-	)
-
+	emailSvc := services.NewResendEmailService()
 	sseHub := services.NewSSEHub()
 
 	auth := &handlers.AuthHandler{Repo: repo, Tokens: ts, Hasher: hasher, Audit: auditRepo}

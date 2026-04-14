@@ -14,6 +14,14 @@ type VerifyHandler struct {
 	Repo services.DocumentRepository
 }
 
+// Verify checks whether a document with the given hash exists.
+// @Summary      Verify document hash
+// @Tags         verify
+// @Produce      json
+// @Param        hash  query     string  true  "SHA-256 document hash"
+// @Success      200   {object}  swagVerifyResponse
+// @Failure      400   {object}  swagErrorResponse
+// @Router       /verify [get]
 func (h *VerifyHandler) Verify(c *gin.Context) {
 	hash := c.Query("hash")
 	if hash == "" {
