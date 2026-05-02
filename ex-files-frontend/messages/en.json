@@ -152,6 +152,11 @@
 	"ws_issue_deadline_label": "Deadline",
 	"ws_issue_create_error": "Failed to create issue",
 	"ws_filter_all": "All",
+	"ws_search_no_results": "No workspaces match your search.",
+	"ws_status_label": "Status",
+	"ws_status_all": "All",
+	"ws_status_active": "Active",
+	"ws_status_archived": "Archived",
 
 	"doc_page_title": "{name} - ex-files",
 	"doc_loading": "Loading document...",

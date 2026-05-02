@@ -107,10 +107,90 @@ func TestGormWorkspaceRepo_CRUD(t *testing.T) {
 	found2, _ := wsRepo.FindByID(ws.ID)
 	assert.Equal(t, "Updated WS", found2.Name)
 
-	workspaces, total, err := wsRepo.FindByManager(manager.ID, 10, 0)
+	workspaces, total, err := wsRepo.FindByManager(manager.ID, "", "", 10, 0)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), total)
 	assert.Len(t, workspaces, 1)
+}
+
+func TestGormWorkspaceRepo_SearchByName(t *testing.T) {
+	db := setupTestDB(t)
+	wsRepo := &GormWorkspaceRepository{DB: db}
+	userRepo := &GormUserRepository{DB: db}
+
+	manager := &models.User{Email: "mgr2@test.com", Name: "Mgr", PasswordHash: "h", Role: models.RoleManager}
+	require.NoError(t, userRepo.Create(manager))
+
+	for _, name := range []string{"Alpha Project", "Beta Plan", "Gamma Initiative"} {
+		require.NoError(t, wsRepo.Create(&models.Workspace{Name: name, ManagerID: manager.ID}))
+	}
+
+	got, total, err := wsRepo.FindByManager(manager.ID, "ALPHA", "", 10, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	require.Len(t, got, 1)
+	assert.Equal(t, "Alpha Project", got[0].Name)
+
+	_, total, err = wsRepo.FindByManager(manager.ID, "a P", "", 10, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), total) // "Alpha Project" + "Beta Plan"
+
+	_, total, err = wsRepo.FindByManager(manager.ID, "zzz", "", 10, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), total)
+
+	_, total, err = wsRepo.FindByManager(manager.ID, "", "", 10, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), total)
+}
+
+func TestGormWorkspaceRepo_FilterByStatus(t *testing.T) {
+	db := setupTestDB(t)
+	wsRepo := &GormWorkspaceRepository{DB: db}
+	userRepo := &GormUserRepository{DB: db}
+
+	manager := &models.User{Email: "mgr-status@t.com", Name: "Mgr", PasswordHash: "h", Role: models.RoleManager}
+	require.NoError(t, userRepo.Create(manager))
+
+	for _, name := range []string{"A1", "A2"} {
+		require.NoError(t, wsRepo.Create(&models.Workspace{Name: name, ManagerID: manager.ID, Status: models.WorkspaceStatusActive}))
+	}
+	require.NoError(t, wsRepo.Create(&models.Workspace{Name: "Z1", ManagerID: manager.ID, Status: models.WorkspaceStatusArchived}))
+
+	_, total, err := wsRepo.FindByManager(manager.ID, "", models.WorkspaceStatusActive, 10, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), total)
+
+	_, total, err = wsRepo.FindByManager(manager.ID, "", models.WorkspaceStatusArchived, 10, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+
+	_, total, err = wsRepo.FindByManager(manager.ID, "", "", 10, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), total)
+}
+
+func TestGormWorkspaceRepo_SearchByMember(t *testing.T) {
+	db := setupTestDB(t)
+	wsRepo := &GormWorkspaceRepository{DB: db}
+	userRepo := &GormUserRepository{DB: db}
+
+	manager := &models.User{Email: "mgr3@test.com", Name: "Mgr", PasswordHash: "h", Role: models.RoleManager}
+	require.NoError(t, userRepo.Create(manager))
+	member := &models.User{Email: "mem@test.com", Name: "Mem", PasswordHash: "h", Role: models.RoleEmployee}
+	require.NoError(t, userRepo.Create(member))
+
+	for _, name := range []string{"Alpha Project", "Beta Plan"} {
+		ws := &models.Workspace{Name: name, ManagerID: manager.ID}
+		require.NoError(t, wsRepo.Create(ws))
+		require.NoError(t, wsRepo.AddMember(&models.WorkspaceMember{WorkspaceID: ws.ID, UserID: member.ID}))
+	}
+
+	got, total, err := wsRepo.FindByMember(member.ID, "alpha", "", 10, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	require.Len(t, got, 1)
+	assert.Equal(t, "Alpha Project", got[0].Name)
 }
 
 func TestGormWorkspaceRepo_Members(t *testing.T) {
@@ -134,7 +214,7 @@ func TestGormWorkspaceRepo_Members(t *testing.T) {
 	assert.Len(t, members, 1)
 	assert.Equal(t, "Emp", members[0].Name)
 
-	workspaces, total, err := wsRepo.FindByMember(employee.ID, 10, 0)
+	workspaces, total, err := wsRepo.FindByMember(employee.ID, "", "", 10, 0)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), total)
 	assert.Len(t, workspaces, 1)

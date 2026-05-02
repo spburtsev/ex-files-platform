@@ -166,12 +166,12 @@ func (m *mockWorkspaceRepo) FindByID(id uint) (*models.Workspace, error) {
 	}
 	return nil, a.Error(1)
 }
-func (m *mockWorkspaceRepo) FindByManager(managerID uint, limit, offset int) ([]models.Workspace, int64, error) {
-	a := m.Called(managerID, limit, offset)
+func (m *mockWorkspaceRepo) FindByManager(managerID uint, search string, status models.WorkspaceStatus, limit, offset int) ([]models.Workspace, int64, error) {
+	a := m.Called(managerID, search, status, limit, offset)
 	return a.Get(0).([]models.Workspace), a.Get(1).(int64), a.Error(2)
 }
-func (m *mockWorkspaceRepo) FindByMember(userID uint, limit, offset int) ([]models.Workspace, int64, error) {
-	a := m.Called(userID, limit, offset)
+func (m *mockWorkspaceRepo) FindByMember(userID uint, search string, status models.WorkspaceStatus, limit, offset int) ([]models.Workspace, int64, error) {
+	a := m.Called(userID, search, status, limit, offset)
 	return a.Get(0).([]models.Workspace), a.Get(1).(int64), a.Error(2)
 }
 func (m *mockWorkspaceRepo) Update(ws *models.Workspace) error {

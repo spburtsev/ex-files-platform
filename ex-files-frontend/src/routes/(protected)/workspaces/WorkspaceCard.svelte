@@ -15,13 +15,21 @@
 	<Card.Header>
 		<div class="flex items-start justify-between gap-2">
 			<Card.Title class="text-sm">{ws.name}</Card.Title>
-			<Badge variant="secondary" class="shrink-0 text-xs">{m.status_active()}</Badge>
+			{#if ws.status === 'archived'}
+				<Badge variant="secondary" class="shrink-0 bg-slate-100 text-xs text-slate-700">
+					{m.ws_status_archived()}
+				</Badge>
+			{:else}
+				<Badge variant="secondary" class="shrink-0 text-xs">
+					{m.ws_status_active()}
+				</Badge>
+			{/if}
 		</div>
 	</Card.Header>
 	<Card.Content class="pb-3">
 		<div class="flex items-center gap-1.5 text-xs text-muted-foreground">
 			<Users class="size-3.5" />
-			<span>{m.ws_manager_id({ id: ws.managerId })}</span>
+			<span>{m.ws_manager_label({ name: ws.managerName })}</span>
 		</div>
 		<p class="mt-1 text-xs text-muted-foreground">
 			{m.ws_created_date({ date: formatTimestamp(ws.createdAt) })}

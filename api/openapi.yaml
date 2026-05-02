@@ -180,6 +180,15 @@ paths:
       parameters:
         - $ref: '#/components/parameters/PageQuery'
         - $ref: '#/components/parameters/PerPageQuery'
+        - name: search
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [all, active, archived]
+            default: active
       responses:
         '200':
           description: Paginated workspaces.
@@ -1014,11 +1023,15 @@ components:
 
     Workspace:
       type: object
-      required: [id, name, managerId, createdAt, updatedAt]
+      required: [id, name, status, managerId, managerName, createdAt, updatedAt]
       properties:
         id:        { type: string }
         name:      { type: string }
-        managerId: { type: string }
+        status:
+          type: string
+          enum: [active, archived]
+        managerId:   { type: string }
+        managerName: { type: string }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 

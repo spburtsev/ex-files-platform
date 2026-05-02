@@ -8,12 +8,18 @@ import (
 )
 
 func workspaceToOAPI(ws *models.Workspace) oapi.Workspace {
+	status := oapi.WorkspaceStatus(ws.Status)
+	if status == "" {
+		status = oapi.WorkspaceStatusActive
+	}
 	return oapi.Workspace{
-		ID:        formatID(ws.ID),
-		Name:      ws.Name,
-		ManagerId: formatID(ws.ManagerID),
-		CreatedAt: ws.CreatedAt,
-		UpdatedAt: ws.UpdatedAt,
+		ID:          formatID(ws.ID),
+		Name:        ws.Name,
+		Status:      status,
+		ManagerId:   formatID(ws.ManagerID),
+		ManagerName: ws.Manager.Name,
+		CreatedAt:   ws.CreatedAt,
+		UpdatedAt:   ws.UpdatedAt,
 	}
 }
 
@@ -27,10 +33,13 @@ func (s *Server) WorkspacesCreate(ctx context.Context, req *oapi.CreateWorkspace
 		return &oapi.WorkspacesCreateForbidden{Error: "only managers can create workspaces"}, nil
 	}
 
-	ws := models.Workspace{Name: req.Name, ManagerID: uid}
+	ws := models.Workspace{Name: req.Name, Status: models.WorkspaceStatusActive, ManagerID: uid}
 	if err := s.WorkspaceRepo.Create(&ws); err != nil {
 		logErr("workspaces.create", err)
 		return &oapi.WorkspacesCreateInternalServerError{Error: "failed to create workspace"}, nil
+	}
+	if mgr, err := s.UserRepo.FindByID(uid); err == nil && mgr != nil {
+		ws.Manager = *mgr
 	}
 
 	logAudit(s.Audit, models.AuditActionWorkspaceCreated, uid, uintPtr(ws.ID), "workspace", map[string]any{
@@ -48,15 +57,21 @@ func (s *Server) WorkspacesList(ctx context.Context, params oapi.WorkspacesListP
 	}
 
 	page, perPage, offset := resolvePagination(params.Page, params.PerPage)
+	search := params.Search.Or("")
+	statusParam := params.Status.Or(oapi.WorkspacesListStatusActive)
+	var status models.WorkspaceStatus
+	if statusParam != oapi.WorkspacesListStatusAll {
+		status = models.WorkspaceStatus(statusParam)
+	}
 
 	var (
 		ws    []models.Workspace
 		total int64
 	)
 	if role.CanManageWorkspaces() {
-		ws, total, err = s.WorkspaceRepo.FindByManager(uid, perPage, offset)
+		ws, total, err = s.WorkspaceRepo.FindByManager(uid, search, status, perPage, offset)
 	} else {
-		ws, total, err = s.WorkspaceRepo.FindByMember(uid, perPage, offset)
+		ws, total, err = s.WorkspaceRepo.FindByMember(uid, search, status, perPage, offset)
 	}
 	if err != nil {
 		logErr("workspaces.list", err)
@@ -95,6 +110,7 @@ func (s *Server) WorkspacesGet(ctx context.Context, params oapi.WorkspacesGetPar
 		logErr("workspaces.get.manager", err)
 		return &oapi.WorkspacesGetInternalServerError{Error: "failed to fetch manager"}, nil
 	}
+	ws.Manager = *manager
 	members, err := s.WorkspaceRepo.GetMembers(id)
 	if err != nil {
 		logErr("workspaces.get.members", err)
@@ -155,6 +171,9 @@ func (s *Server) WorkspacesUpdate(ctx context.Context, req *oapi.UpdateWorkspace
 	if err := s.WorkspaceRepo.Update(ws); err != nil {
 		logErr("workspaces.update", err)
 		return &oapi.WorkspacesUpdateInternalServerError{Error: "failed to update workspace"}, nil
+	}
+	if mgr, err := s.UserRepo.FindByID(ws.ManagerID); err == nil && mgr != nil {
+		ws.Manager = *mgr
 	}
 	logAudit(s.Audit, models.AuditActionWorkspaceUpdated, uid, uintPtr(ws.ID), "workspace", map[string]any{
 		"name": ws.Name,

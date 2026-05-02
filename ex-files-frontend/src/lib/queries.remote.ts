@@ -50,13 +50,23 @@ export const getUsers = query(async () => {
 // Workspaces
 // ---------------------------------------------------------------------------
 
-export const getWorkspaces = query('unchecked', async (page: number = 1) => {
-	const r = await workspacesList({ ...apiOpts(), query: { page, perPage: 20 } });
-	return {
-		workspaces: r.data?.workspaces ?? [],
-		...paginationFromHeaders(r.response)
-	};
-});
+export const getWorkspaces = query(
+	'unchecked',
+	async ({
+		page = 1,
+		search = '',
+		status = 'active'
+	}: { page?: number; search?: string; status?: 'all' | 'active' | 'archived' } = {}) => {
+		const r = await workspacesList({
+			...apiOpts(),
+			query: { page, perPage: 20, search: search || undefined, status }
+		});
+		return {
+			workspaces: r.data?.workspaces ?? [],
+			...paginationFromHeaders(r.response)
+		};
+	}
+);
 
 export const getWorkspaceDetail = query('unchecked', async (id: string) => {
 	const r = await workspacesGet({ ...apiOpts(), path: { id } });

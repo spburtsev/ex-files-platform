@@ -2,11 +2,19 @@ package models
 
 import "gorm.io/gorm"
 
+type WorkspaceStatus string
+
+const (
+	WorkspaceStatusActive   WorkspaceStatus = "active"
+	WorkspaceStatusArchived WorkspaceStatus = "archived"
+)
+
 type Workspace struct {
 	gorm.Model
-	Name      string `gorm:"not null"`
-	ManagerID uint   `gorm:"not null"`
-	Manager   User   `gorm:"foreignKey:ManagerID"`
+	Name      string          `gorm:"not null"`
+	Status    WorkspaceStatus `gorm:"not null;default:'active'"`
+	ManagerID uint            `gorm:"not null"`
+	Manager   User            `gorm:"foreignKey:ManagerID"`
 }
 
 func (w *Workspace) IsOwnedBy(userID uint) bool {

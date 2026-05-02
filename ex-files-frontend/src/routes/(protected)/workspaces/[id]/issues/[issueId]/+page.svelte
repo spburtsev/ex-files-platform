@@ -34,6 +34,7 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import * as ScrollArea from '$lib/components/ui/scroll-area/index.js';
 	import * as Tabs from '$lib/components/ui/tabs/index.js';
+	import * as Select from '$lib/components/ui/select/index.js';
 	import { Textarea } from '$lib/components/ui/textarea/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
 	import {
@@ -134,6 +135,18 @@
 			? workbenchStore.documents
 			: workbenchStore.documents.filter((d) => d.reviewStatus === submissionFilter)
 	);
+	const displayedSubmissionFilter = $derived.by(() => {
+		switch (submissionFilter) {
+			case 'approved':
+				return m.workbench_status_approved();
+			case 'changes_requested':
+				return m.workbench_status_changes_requested();
+			case 'rejected':
+				return m.workbench_status_rejected();
+			default:
+				return m.ws_status_all();
+		}
+	});
 
 	let pdfViewer = $state<ReturnType<typeof PdfViewer> | undefined>();
 	const pageByDoc = new SvelteMap<string, number>();
@@ -258,14 +271,14 @@
 		if (!doc.serverId) return null;
 		let versionId = doc.versionId;
 		if (!versionId) {
-			const detail = await getDocumentDetail(doc.serverId);
+			const detail = await getDocumentDetail(doc.serverId).run();
 			const latest = [...(detail?.versions ?? [])].sort(
 				(a, b) => Number(b.version) - Number(a.version)
 			)[0];
 			if (!latest) return null;
 			versionId = latest.id;
 		}
-		const data = await getDocumentBytes({ docId: doc.serverId, versionId });
+		const data = await getDocumentBytes({ docId: doc.serverId, versionId }).run();
 		const pdfjsLib = await getPdfjs();
 		const probe = await pdfjsLib.getDocument({ data: data.slice() }).promise;
 		const numPages = probe.numPages;
@@ -550,20 +563,21 @@
 					</div>
 
 					<!-- Submissions list header -->
-					<div class="shrink-0 space-y-1.5 px-3 pt-3 pb-1">
+					<div class="shrink-0 space-y-1.5 px-3 pt-3 pb-3">
 						<p class="text-[10px] font-semibold text-muted-foreground">
 							{m.workbench_submissions()}
 						</p>
-						<select
-							bind:value={submissionFilter}
-							aria-label={m.workbench_submissions()}
-							class="flex h-7 w-full rounded-md border border-input bg-background px-2 mb-2 text-xs shadow-sm transition-colors focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none"
-						>
-							<option value="all">{m.ws_filter_all()}</option>
-							<option value="approved">{m.workbench_status_approved()}</option>
-							<option value="changes_requested">{m.workbench_status_changes_requested()}</option>
-							<option value="rejected">{m.workbench_status_rejected()}</option>
-						</select>
+						<Select.Root bind:value={submissionFilter} type="single">
+							<Select.Trigger class="w-full">{displayedSubmissionFilter}</Select.Trigger>
+							<Select.Content>
+								<Select.Item value="all">{m.ws_status_all()}</Select.Item>
+								<Select.Item value="approved">{m.workbench_status_approved()}</Select.Item>
+								<Select.Item value="changes_requested"
+									>{m.workbench_status_changes_requested()}</Select.Item
+								>
+								<Select.Item value="rejected">{m.workbench_status_rejected()}</Select.Item>
+							</Select.Content>
+						</Select.Root>
 					</div>
 
 					<!-- Document list -->
@@ -949,17 +963,18 @@
 				<Dialog.Title>{m.ws_issue_change_assignee_label()}</Dialog.Title>
 			</Dialog.Header>
 			<div class="space-y-2 py-2">
-				<Label for="assignee-select">{m.ws_issue_assignee_label()}</Label>
-				<select
-					id="assignee-select"
-					bind:value={assigneeSelection}
-					class="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none"
-				>
-					<option value="">{m.ws_issue_assignee_select()}</option>
-					{#each workspaceMembers as member (member.id)}
-						<option value={String(member.id)}>{member.name}</option>
-					{/each}
-				</select>
+				<Select.Root bind:value={assigneeSelection} type="single">
+					<Select.Label>{m.ws_issue_assignee_label()}</Select.Label>
+					<Select.Trigger class="w-full"
+						>{workspaceMembers.find((m) => m.id === assigneeSelection)?.name ||
+							m.ws_issue_assignee_select()}</Select.Trigger
+					>
+					<Select.Content>
+						{#each workspaceMembers as member (member.id)}
+							<Select.Item value={String(member.id)}>{member.name}</Select.Item>
+						{/each}
+					</Select.Content>
+				</Select.Root>
 			</div>
 			<Dialog.Footer>
 				<Button

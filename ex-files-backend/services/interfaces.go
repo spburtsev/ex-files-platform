@@ -94,8 +94,8 @@ type CommentRepository interface {
 type WorkspaceRepository interface {
 	Create(workspace *models.Workspace) error
 	FindByID(id uint) (*models.Workspace, error)
-	FindByManager(managerID uint, limit, offset int) ([]models.Workspace, int64, error)
-	FindByMember(userID uint, limit, offset int) ([]models.Workspace, int64, error)
+	FindByManager(managerID uint, search string, status models.WorkspaceStatus, limit, offset int) ([]models.Workspace, int64, error)
+	FindByMember(userID uint, search string, status models.WorkspaceStatus, limit, offset int) ([]models.Workspace, int64, error)
 	Update(workspace *models.Workspace) error
 	Delete(id uint) error
 	AddMember(member *models.WorkspaceMember) error
