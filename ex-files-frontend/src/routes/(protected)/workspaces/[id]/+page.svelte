@@ -5,8 +5,8 @@
 		getWorkspaceDetail,
 		getAssignableMembers,
 		getIssues
-	} from '$lib/data.remote';
-	import { formatTimestamp, roleName, isManager, initials } from '$lib/proto-utils';
+	} from '$lib/queries.remote';
+	import { formatTimestamp, roleName, isManager, initials } from '$lib/utils';
 	import {
 		updateWorkspace,
 		deleteWorkspace,
@@ -38,7 +38,7 @@
 		ArrowRight,
 		Plus
 	} from '@lucide/svelte';
-	import { extraBreadcrumbs } from '$lib/stores/breadcrumbs';
+	import { extraBreadcrumbs } from '$lib/stores/breadcrumbs.svelte';
 	import { onDestroy } from 'svelte';
 
 	const wsId = page.params.id ?? '';

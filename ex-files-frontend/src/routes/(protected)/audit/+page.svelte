@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
-	import { getAuditLog } from '$lib/data.remote';
+	import { getAuditLog } from '$lib/queries.remote';
 	import { m } from '$lib/paraglide/messages.js';
 	import * as Card from '$lib/components/ui/card/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
@@ -10,9 +10,10 @@
 	import { Label } from '$lib/components/ui/label/index.js';
 	import { Separator } from '$lib/components/ui/separator/index.js';
 	import { Skeleton } from '$lib/components/ui/skeleton/index.js';
-	import { ChevronLeft, ChevronRight, Filter, X } from '@lucide/svelte';
-	import { isManager, formatTimestamp } from '$lib/proto-utils';
+	import { Filter, X } from '@lucide/svelte';
+	import { isManager, formatTimestamp } from '$lib/utils';
 	import { localizeHref } from '$lib/paraglide/runtime';
+	import Pagination from '$lib/components/custom/Pagination.svelte';
 
 	// Redirect employees away from audit page
     const { data } = $props();
@@ -299,33 +300,8 @@
 			</Card.Content>
 		</Card.Root>
 
-		<!-- Pagination -->
 		{#if totalPages > 1}
-			<div class="flex items-center justify-center gap-2">
-				<Button
-					variant="outline"
-					size="sm"
-					class="gap-1"
-					disabled={currentPage <= 1}
-					onclick={() => navigatePage(currentPage - 1)}
-				>
-					<ChevronLeft class="size-4" />
-					{m.common_prev()}
-				</Button>
-				<span class="text-sm text-muted-foreground"
-					>{m.common_page_of({ current: String(currentPage), total: String(totalPages) })}</span
-				>
-				<Button
-					variant="outline"
-					size="sm"
-					class="gap-1"
-					disabled={currentPage >= totalPages}
-					onclick={() => navigatePage(currentPage + 1)}
-				>
-					{m.common_next()}
-					<ChevronRight class="size-4" />
-				</Button>
-			</div>
+            <Pagination {currentPage} {totalPages} {navigatePage} />
 		{/if}
 	{/if}
 </div>

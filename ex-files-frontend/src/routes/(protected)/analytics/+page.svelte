@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { getAuditStats } from '$lib/data.remote';
-	import type { AuditStats } from '$lib/data.remote';
+	import { getAuditStats } from '$lib/queries.remote';
+	import type { AuditStats } from '$lib/queries.remote';
 	import { m } from '$lib/paraglide/messages.js';
 	import * as Card from '$lib/components/ui/card/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';

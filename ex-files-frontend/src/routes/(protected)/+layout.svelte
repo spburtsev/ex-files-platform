@@ -3,7 +3,7 @@
 	import { localizeHref, deLocalizeHref } from '$lib/paraglide/runtime';
 	import { m } from '$lib/paraglide/messages.js';
 	import { logout } from '$lib/commands.remote';
-	import { isManager, initials as getInitials } from '$lib/proto-utils';
+	import { isManager, initials as getInitials } from '$lib/utils';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import * as Avatar from '$lib/components/ui/avatar/index.js';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
@@ -21,7 +21,8 @@
 		ScrollText,
 		ChartColumn
 	} from '@lucide/svelte';
-	import { extraBreadcrumbs } from '$lib/stores/breadcrumbs';
+	import { extraBreadcrumbs } from '$lib/stores/breadcrumbs.svelte';
+	import ErrorBoundary from '$lib/components/custom/ErrorBoundary.svelte';
 
 	let { children, data } = $props();
 
@@ -193,7 +194,7 @@
 			<Separator orientation="vertical" class="me-2 data-[orientation=vertical]:h-4" />
 			<Breadcrumb.Root>
 				<Breadcrumb.List>
-					{#if $extraBreadcrumbs.length > 0}
+					{#if extraBreadcrumbs.segments.length > 0}
 						<Breadcrumb.Item>
 							<Breadcrumb.Link
 								href={navLinks.find((l) => l.match(cleanPathname))?.href ?? localizeHref('/')}
@@ -201,7 +202,7 @@
 								{pageLabel}
 							</Breadcrumb.Link>
 						</Breadcrumb.Item>
-						{#each $extraBreadcrumbs as segment (segment.label)}
+						{#each extraBreadcrumbs.segments as segment (segment.label)}
 							<Breadcrumb.Separator />
 							<Breadcrumb.Item>
 								{#if segment.href}
@@ -223,12 +224,7 @@
 		<svelte:boundary>
 			{@render children()}
 			{#snippet failed(error)}
-				<div class="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
-					<p class="text-4xl font-bold text-muted-foreground">!</p>
-					<p class="text-sm text-destructive">
-						{(error as Error).message ?? m.error_action_failed()}
-					</p>
-				</div>
+                <ErrorBoundary {error} />
 			{/snippet}
 		</svelte:boundary>
 	</Sidebar.Inset>

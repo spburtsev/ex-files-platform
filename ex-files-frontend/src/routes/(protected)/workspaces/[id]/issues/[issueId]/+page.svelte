@@ -3,14 +3,14 @@
 	import { onDestroy, tick } from 'svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { workbenchStore } from '$lib/stores/workbench.svelte';
-	import { extraBreadcrumbs } from '$lib/stores/breadcrumbs';
+	import { extraBreadcrumbs } from '$lib/stores/breadcrumbs.svelte';
 	import {
 		getIssue,
 		getWorkspaceDetail,
 		getDocuments,
 		getDocumentDetail,
 		getDocumentBytes
-	} from '$lib/data.remote';
+	} from '$lib/queries.remote';
 	import {
 		uploadDocument,
 		approveDocument,
@@ -18,7 +18,7 @@
 		requestDocumentChanges,
 		updateIssueAssignee
 	} from '$lib/commands.remote';
-	import { isManager } from '$lib/proto-utils';
+	import { isManager } from '$lib/utils';
 	import { m } from '$lib/paraglide/messages.js';
 	import { localizeHref } from '$lib/paraglide/runtime';
 	import { toast } from 'svelte-sonner';

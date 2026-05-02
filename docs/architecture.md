@@ -19,7 +19,7 @@ All API operations and schemas are defined in `api/openapi.yaml`. Code generatio
 - `make openapi-lint` - validates the spec with redocly
 - `make openapi-docs` - renders human-readable HTML at `docs/api/index.html`
 
-Backend handlers implement the ogen `Handler` interface and return typed response structs. Responses are serialised as JSON. Frontend remote functions (`data.remote.ts`, `commands.remote.ts`) call the generated SDK rather than constructing fetches by hand.
+Backend handlers implement the ogen `Handler` interface and return typed response structs. Responses are serialised as JSON. Frontend remote functions (`queries.remote.ts`, `commands.remote.ts`) call the generated SDK rather than constructing fetches by hand.
 
 The `/events` SSE endpoint is intentionally outside the spec (OpenAPI does not model `text/event-stream` cleanly) and is handled by a hand-written `http.Handler` mounted alongside the ogen server.
 
@@ -40,8 +40,8 @@ Services implement interfaces defined in `services/interfaces.go` to enable depe
 
 - **Generated SDK**: `src/lib/api/` contains the typed fetch client (gitignored, rebuilt by `bun run gen:api`)
 - **API runtime config**: `src/lib/api-client.ts` exports `createClientConfig` (base URL) and `apiOpts()` (per-call helper that threads SvelteKit `event.fetch` and forwards the session cookie as a Bearer token)
-- **Remote functions**: `src/lib/data.remote.ts` (queries via `query()`) and `src/lib/commands.remote.ts` (mutations via `command()`) - SvelteKit server functions that call the generated SDK
-- **Format helpers**: `src/lib/proto-utils.ts` - `formatTimestamp(iso)`, `isManager(role)`, `roleName(role)`, `initials(name)` (the file is named for historical reasons; the helpers operate on plain strings now)
+- **Remote functions**: `src/lib/queries.remote.ts` (queries via `query()`) and `src/lib/commands.remote.ts` (mutations via `command()`) - SvelteKit server functions that call the generated SDK
+- **Format helpers**: `src/lib/utils.ts` - `formatTimestamp(iso)`, `isManager(role)`, `roleName(role)`, `initials(name)` (the file is named for historical reasons; the helpers operate on plain strings now)
 - **i18n**: Paraglide JS with `en` and `pl` locales. Messages in `messages/{locale}.json`. Detection: URL → cookie → base locale
 - **UI components**: shadcn-svelte (bits-ui) in `src/lib/components/ui/`
 - **Auth**: Session cookie (`session`, HTTP-only, 8h TTL). Server hook in `hooks.server.ts` validates and redirects unauthenticated users
