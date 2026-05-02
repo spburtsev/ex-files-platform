@@ -1,0 +1,1381 @@
+openapi: 3.0.3
+info:
+  title: ex-files Platform API
+  version: 1.0.0
+  description: |
+    Document management and review platform. JSON over HTTP.
+
+    Authentication: either an `Authorization: Bearer <jwt>` header or a `session` cookie.
+    Successful list endpoints return pagination metadata in `X-Total-Count`, `X-Page`,
+    `X-Per-Page`, and `X-Total-Pages` headers.
+
+    The `/events` Server-Sent Events stream is documented separately in the architecture
+    docs and is intentionally excluded from this spec because OpenAPI does not model
+    `text/event-stream` cleanly. The frontend consumes it via native `EventSource`.
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+tags:
+  - name: auth
+    description: Registration, login, password reset, current user.
+  - name: workspaces
+    description: Workspaces and their members.
+  - name: issues
+    description: Issues scoped to workspaces.
+  - name: documents
+    description: Documents, versions, review workflow.
+  - name: comments
+    description: Comments on documents.
+  - name: audit
+    description: Audit log and statistics.
+  - name: verify
+    description: Public hash verification.
+
+security:
+  - bearerAuth: []
+  - cookieAuth: []
+
+paths:
+  /auth/register:
+    post:
+      tags: [auth]
+      operationId: authRegister
+      summary: Register a new user
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: User created. Sets session cookie.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /auth/login:
+    post:
+      tags: [auth]
+      operationId: authLogin
+      summary: Log in
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authenticated. Sets session cookie.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      operationId: authLogout
+      summary: Log out
+      responses:
+        '200':
+          description: Logged out. Clears session cookie.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/forgot-password:
+    post:
+      tags: [auth]
+      operationId: authForgotPassword
+      summary: Request a password reset link
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForgotPasswordRequest'
+      responses:
+        '200':
+          description: Always returns success to prevent email enumeration.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /auth/reset-password:
+    post:
+      tags: [auth]
+      operationId: authResetPassword
+      summary: Reset password using a token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetPasswordRequest'
+      responses:
+        '200':
+          description: Password updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /auth/me:
+    get:
+      tags: [auth]
+      operationId: authMe
+      summary: Get the current authenticated user
+      responses:
+        '200':
+          description: Current user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /auth/users:
+    get:
+      tags: [auth]
+      operationId: authListUsers
+      summary: List all users
+      responses:
+        '200':
+          description: User list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetUsersResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /workspaces:
+    get:
+      tags: [workspaces]
+      operationId: workspacesList
+      summary: List workspaces visible to the caller
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/PerPageQuery'
+      responses:
+        '200':
+          description: Paginated workspaces.
+          headers:
+            X-Total-Count: { $ref: '#/components/headers/XTotalCount' }
+            X-Total-Pages: { $ref: '#/components/headers/XTotalPages' }
+            X-Page:        { $ref: '#/components/headers/XPage' }
+            X-Per-Page:    { $ref: '#/components/headers/XPerPage' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetWorkspacesResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      tags: [workspaces]
+      operationId: workspacesCreate
+      summary: Create a workspace (managers and root only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWorkspaceRequest'
+      responses:
+        '201':
+          description: Workspace created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateWorkspaceResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /workspaces/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [workspaces]
+      operationId: workspacesGet
+      summary: Get a workspace with its manager and members
+      responses:
+        '200':
+          description: Workspace detail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetWorkspaceResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    put:
+      tags: [workspaces]
+      operationId: workspacesUpdate
+      summary: Rename a workspace (manager only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateWorkspaceRequest'
+      responses:
+        '200':
+          description: Updated workspace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateWorkspaceResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      tags: [workspaces]
+      operationId: workspacesDelete
+      summary: Delete a workspace (manager only)
+      responses:
+        '200':
+          description: Deleted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /workspaces/{id}/assignable-members:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [workspaces]
+      operationId: workspacesAssignableMembers
+      summary: List users that can be added to this workspace
+      responses:
+        '200':
+          description: Users not yet members.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssignableMembersResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /workspaces/{id}/members:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [workspaces]
+      operationId: workspacesAddMember
+      summary: Add a member to a workspace (manager only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddMemberRequest'
+      responses:
+        '201':
+          description: Member added.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddMemberResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /workspaces/{id}/members/{userId}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+      - name: userId
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      tags: [workspaces]
+      operationId: workspacesRemoveMember
+      summary: Remove a member from a workspace (manager only)
+      responses:
+        '200':
+          description: Member removed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /workspaces/{id}/issues:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [issues]
+      operationId: issuesListByWorkspace
+      summary: List issues in a workspace
+      responses:
+        '200':
+          description: Issues list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetIssuesResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      tags: [issues]
+      operationId: issuesCreate
+      summary: Create an issue in a workspace (manager only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIssueRequest'
+      responses:
+        '201':
+          description: Issue created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateIssueResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /issues/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [issues]
+      operationId: issuesGet
+      summary: Get an issue with its assignee
+      responses:
+        '200':
+          description: Issue detail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetIssueResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /issues/{id}/assignee:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    put:
+      tags: [issues]
+      operationId: issuesUpdateAssignee
+      summary: Change the assignee of an issue (manager or issue creator)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAssigneeRequest'
+      responses:
+        '200':
+          description: Updated issue.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetIssueResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /issues/{id}/documents:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [documents]
+      operationId: documentsList
+      summary: List documents on an issue
+      parameters:
+        - name: search
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/DocumentStatus' }
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/PerPageQuery'
+      responses:
+        '200':
+          description: Paginated documents.
+          headers:
+            X-Total-Count: { $ref: '#/components/headers/XTotalCount' }
+            X-Total-Pages: { $ref: '#/components/headers/XTotalPages' }
+            X-Page:        { $ref: '#/components/headers/XPage' }
+            X-Per-Page:    { $ref: '#/components/headers/XPerPage' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListDocumentsResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      tags: [documents]
+      operationId: documentsUpload
+      summary: Upload a new document to an issue
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Uploaded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadDocumentResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /documents/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [documents]
+      operationId: documentsGet
+      summary: Get a document with all its versions
+      responses:
+        '200':
+          description: Document detail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetDocumentResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      tags: [documents]
+      operationId: documentsDelete
+      summary: Delete a document
+      responses:
+        '200':
+          description: Deleted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /documents/{id}/versions:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [documents]
+      operationId: documentsUploadVersion
+      summary: Upload a new version of a document
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Version uploaded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadDocumentResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /documents/{id}/versions/{versionId}/download:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+      - name: versionId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [documents]
+      operationId: documentsGetDownloadUrl
+      summary: Get a presigned URL to download a version
+      responses:
+        '200':
+          description: Presigned URL valid for ~15 minutes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetDownloadUrlResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /documents/{id}/versions/{versionId}/file:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+      - name: versionId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [documents]
+      operationId: documentsGetFile
+      summary: Stream the binary contents of a version
+      responses:
+        '200':
+          description: Binary file contents.
+          headers:
+            Content-Type:
+              schema: { type: string }
+            Content-Length:
+              schema: { type: integer, format: int64 }
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /documents/{id}/submit:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [documents]
+      operationId: documentsSubmit
+      summary: Submit a pending document for review (uploader only)
+      responses:
+        '200':
+          description: Updated document.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateDocumentResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /documents/{id}/resubmit:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [documents]
+      operationId: documentsResubmit
+      summary: Resubmit a document after changes were requested (uploader only)
+      responses:
+        '200':
+          description: Updated document.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateDocumentResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /documents/{id}/approve:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [documents]
+      operationId: documentsApprove
+      summary: Approve a document under review
+      responses:
+        '200':
+          description: Updated document.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateDocumentResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /documents/{id}/reject:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [documents]
+      operationId: documentsReject
+      summary: Reject a document under review
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewNoteRequest'
+      responses:
+        '200':
+          description: Updated document.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateDocumentResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /documents/{id}/request-changes:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [documents]
+      operationId: documentsRequestChanges
+      summary: Request changes on a document under review
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewNoteRequest'
+      responses:
+        '200':
+          description: Updated document.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateDocumentResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /documents/{id}/reviewer:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    put:
+      tags: [documents]
+      operationId: documentsAssignReviewer
+      summary: Assign a reviewer to a document (manager only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignReviewerRequest'
+      responses:
+        '200':
+          description: Updated document.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateDocumentResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /documents/{id}/comments:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [comments]
+      operationId: commentsList
+      summary: List comments on a document
+      responses:
+        '200':
+          description: Comments.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListCommentsResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      tags: [comments]
+      operationId: commentsCreate
+      summary: Add a comment to a document
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCommentRequest'
+      responses:
+        '201':
+          description: Comment created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateCommentResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /audit:
+    get:
+      tags: [audit]
+      operationId: auditList
+      summary: List audit entries with optional filters
+      parameters:
+        - name: action
+          in: query
+          schema: { type: string }
+        - name: targetType
+          in: query
+          schema: { type: string }
+        - name: actorId
+          in: query
+          schema: { type: string }
+        - name: targetId
+          in: query
+          schema: { type: string }
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/PerPageQuery'
+      responses:
+        '200':
+          description: Paginated audit entries.
+          headers:
+            X-Total-Count: { $ref: '#/components/headers/XTotalCount' }
+            X-Total-Pages: { $ref: '#/components/headers/XTotalPages' }
+            X-Page:        { $ref: '#/components/headers/XPage' }
+            X-Per-Page:    { $ref: '#/components/headers/XPerPage' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetAuditLogResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /audit/stats:
+    get:
+      tags: [audit]
+      operationId: auditStats
+      summary: Aggregated audit and document statistics
+      responses:
+        '200':
+          description: Stats payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditStatsResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /verify:
+    get:
+      tags: [verify]
+      operationId: verifyHash
+      summary: Check whether a document with the given SHA-256 hash exists
+      security: []
+      parameters:
+        - name: hash
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Verification result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerifyResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: session
+
+  parameters:
+    IdPath:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    PageQuery:
+      name: page
+      in: query
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        default: 1
+    PerPageQuery:
+      name: perPage
+      in: query
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        maximum: 100
+        default: 20
+
+  headers:
+    XTotalCount:
+      schema: { type: integer, format: int64 }
+      description: Total items matching the query.
+    XTotalPages:
+      schema: { type: integer, format: int32 }
+      description: Total pages.
+    XPage:
+      schema: { type: integer, format: int32 }
+      description: Current page (1-based).
+    XPerPage:
+      schema: { type: integer, format: int32 }
+      description: Items per page.
+
+  responses:
+    BadRequest:
+      description: Bad request.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Unauthenticated.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Authenticated but not authorised.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Not found.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: Conflict.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unprocessable:
+      description: Unprocessable entity.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    InternalError:
+      description: Internal server error.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    MessageResponse:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+
+    Role:
+      type: string
+      enum: [root, manager, employee]
+
+    DocumentStatus:
+      type: string
+      enum: [pending, in_review, approved, rejected, changes_requested]
+
+    User:
+      type: object
+      required: [id, email, name, role, createdAt]
+      properties:
+        id: { type: string }
+        email: { type: string, format: email }
+        name: { type: string }
+        avatarUrl: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        createdAt: { type: string, format: date-time }
+
+    AuthResponse:
+      type: object
+      required: [user, token]
+      properties:
+        user:  { $ref: '#/components/schemas/User' }
+        token: { type: string }
+
+    MeResponse:
+      type: object
+      required: [user]
+      properties:
+        user: { $ref: '#/components/schemas/User' }
+
+    GetUsersResponse:
+      type: object
+      required: [users]
+      properties:
+        users:
+          type: array
+          items: { $ref: '#/components/schemas/User' }
+
+    RegisterRequest:
+      type: object
+      required: [email, password, name]
+      properties:
+        email:    { type: string, format: email }
+        password: { type: string, minLength: 8 }
+        name:     { type: string, minLength: 1 }
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:    { type: string, format: email }
+        password: { type: string, minLength: 1 }
+
+    ForgotPasswordRequest:
+      type: object
+      required: [email]
+      properties:
+        email: { type: string, format: email }
+
+    ResetPasswordRequest:
+      type: object
+      required: [token, password]
+      properties:
+        token:    { type: string }
+        password: { type: string, minLength: 8 }
+
+    Workspace:
+      type: object
+      required: [id, name, managerId, createdAt, updatedAt]
+      properties:
+        id:        { type: string }
+        name:      { type: string }
+        managerId: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    WorkspaceDetail:
+      type: object
+      required: [workspace, manager, members]
+      properties:
+        workspace: { $ref: '#/components/schemas/Workspace' }
+        manager:   { $ref: '#/components/schemas/User' }
+        members:
+          type: array
+          items: { $ref: '#/components/schemas/User' }
+
+    WorkspaceMember:
+      type: object
+      required: [id, workspaceId, userId, createdAt]
+      properties:
+        id:          { type: string }
+        workspaceId: { type: string }
+        userId:      { type: string }
+        createdAt:   { type: string, format: date-time }
+
+    CreateWorkspaceRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1 }
+
+    CreateWorkspaceResponse:
+      type: object
+      required: [workspace]
+      properties:
+        workspace: { $ref: '#/components/schemas/Workspace' }
+
+    GetWorkspacesResponse:
+      type: object
+      required: [workspaces]
+      properties:
+        workspaces:
+          type: array
+          items: { $ref: '#/components/schemas/Workspace' }
+
+    GetWorkspaceResponse:
+      type: object
+      required: [workspace]
+      properties:
+        workspace: { $ref: '#/components/schemas/WorkspaceDetail' }
+
+    UpdateWorkspaceRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1 }
+
+    UpdateWorkspaceResponse:
+      type: object
+      required: [workspace]
+      properties:
+        workspace: { $ref: '#/components/schemas/Workspace' }
+
+    AddMemberRequest:
+      type: object
+      required: [userId]
+      properties:
+        userId: { type: string }
+
+    AddMemberResponse:
+      type: object
+      required: [member]
+      properties:
+        member: { $ref: '#/components/schemas/WorkspaceMember' }
+
+    AssignableMembersResponse:
+      type: object
+      required: [users]
+      properties:
+        users:
+          type: array
+          items: { $ref: '#/components/schemas/User' }
+
+    Issue:
+      type: object
+      required:
+        - id
+        - workspaceId
+        - creatorId
+        - assigneeId
+        - title
+        - description
+        - resolved
+        - commentsCount
+        - versionsCount
+      properties:
+        id:            { type: string }
+        workspaceId:   { type: string }
+        creatorId:     { type: string }
+        assigneeId:    { type: string }
+        title:         { type: string }
+        description:   { type: string }
+        deadline:      { type: string, format: date-time, nullable: true }
+        resolved:      { type: boolean }
+        commentsCount: { type: integer, format: int32 }
+        versionsCount: { type: integer, format: int32 }
+
+    CreateIssueRequest:
+      type: object
+      required: [title, assigneeId]
+      properties:
+        title:       { type: string, minLength: 1 }
+        description: { type: string }
+        assigneeId:  { type: string }
+        deadline:    { type: string, format: date-time, nullable: true }
+
+    GetIssuesResponse:
+      type: object
+      required: [issues]
+      properties:
+        issues:
+          type: array
+          items: { $ref: '#/components/schemas/Issue' }
+
+    GetIssueResponse:
+      type: object
+      required: [issue, user]
+      properties:
+        issue: { $ref: '#/components/schemas/Issue' }
+        user:  { $ref: '#/components/schemas/User' }
+
+    CreateIssueResponse:
+      type: object
+      required: [issue]
+      properties:
+        issue: { $ref: '#/components/schemas/Issue' }
+
+    Document:
+      type: object
+      required:
+        - id
+        - name
+        - mimeType
+        - size
+        - hash
+        - status
+        - uploaderId
+        - uploaderName
+        - issueId
+        - createdAt
+        - updatedAt
+      properties:
+        id:           { type: string }
+        name:         { type: string }
+        mimeType:     { type: string }
+        size:         { type: integer, format: int64 }
+        hash:         { type: string }
+        status:       { $ref: '#/components/schemas/DocumentStatus' }
+        uploaderId:   { type: string }
+        uploaderName: { type: string }
+        issueId:      { type: string }
+        reviewerId:   { type: string, nullable: true }
+        reviewerName: { type: string, nullable: true }
+        reviewerNote: { type: string }
+        createdAt:    { type: string, format: date-time }
+        updatedAt:    { type: string, format: date-time }
+
+    DocumentVersion:
+      type: object
+      required:
+        - id
+        - documentId
+        - version
+        - hash
+        - size
+        - storageKey
+        - uploaderId
+        - uploaderName
+        - createdAt
+      properties:
+        id:           { type: string }
+        documentId:   { type: string }
+        version:      { type: integer, format: int32 }
+        hash:         { type: string }
+        size:         { type: integer, format: int64 }
+        storageKey:   { type: string }
+        uploaderId:   { type: string }
+        uploaderName: { type: string }
+        createdAt:    { type: string, format: date-time }
+
+    DocumentDetail:
+      type: object
+      required: [document, versions]
+      properties:
+        document: { $ref: '#/components/schemas/Document' }
+        versions:
+          type: array
+          items: { $ref: '#/components/schemas/DocumentVersion' }
+
+    UploadDocumentResponse:
+      type: object
+      required: [document, version]
+      properties:
+        document: { $ref: '#/components/schemas/Document' }
+        version:  { $ref: '#/components/schemas/DocumentVersion' }
+
+    GetDocumentResponse:
+      type: object
+      required: [document]
+      properties:
+        document: { $ref: '#/components/schemas/DocumentDetail' }
+
+    ListDocumentsResponse:
+      type: object
+      required: [documents]
+      properties:
+        documents:
+          type: array
+          items: { $ref: '#/components/schemas/Document' }
+
+    UpdateDocumentResponse:
+      type: object
+      required: [document]
+      properties:
+        document: { $ref: '#/components/schemas/Document' }
+
+    GetDownloadUrlResponse:
+      type: object
+      required: [url]
+      properties:
+        url: { type: string, format: uri }
+
+    ReviewNoteRequest:
+      type: object
+      properties:
+        note: { type: string }
+
+    AssignReviewerRequest:
+      type: object
+      required: [reviewerId]
+      properties:
+        reviewerId: { type: string }
+
+    UpdateAssigneeRequest:
+      type: object
+      required: [assigneeId]
+      properties:
+        assigneeId: { type: string }
+
+    Comment:
+      type: object
+      required: [id, documentId, authorId, authorName, body, createdAt]
+      properties:
+        id:         { type: string }
+        documentId: { type: string }
+        authorId:   { type: string }
+        authorName: { type: string }
+        body:       { type: string }
+        createdAt:  { type: string, format: date-time }
+
+    CreateCommentRequest:
+      type: object
+      required: [body]
+      properties:
+        body: { type: string, minLength: 1 }
+
+    CreateCommentResponse:
+      type: object
+      required: [comment]
+      properties:
+        comment: { $ref: '#/components/schemas/Comment' }
+
+    ListCommentsResponse:
+      type: object
+      required: [comments]
+      properties:
+        comments:
+          type: array
+          items: { $ref: '#/components/schemas/Comment' }
+
+    AuditEntry:
+      type: object
+      required: [id, action, actorId, actorName, targetType, createdAt]
+      properties:
+        id:         { type: string }
+        action:     { type: string }
+        actorId:    { type: string }
+        actorName:  { type: string }
+        targetId:   { type: string, nullable: true }
+        targetType: { type: string }
+        metadata:
+          type: object
+          additionalProperties: true
+          nullable: true
+        createdAt:  { type: string, format: date-time }
+
+    GetAuditLogResponse:
+      type: object
+      required: [entries]
+      properties:
+        entries:
+          type: array
+          items: { $ref: '#/components/schemas/AuditEntry' }
+
+    AuditActionCount:
+      type: object
+      required: [action, count]
+      properties:
+        action: { type: string }
+        count:  { type: integer, format: int64 }
+
+    AuditDailyActivity:
+      type: object
+      required: [date, count]
+      properties:
+        date:  { type: string }
+        count: { type: integer, format: int64 }
+
+    DocumentStatusCount:
+      type: object
+      required: [status, count]
+      properties:
+        status: { type: string }
+        count:  { type: integer, format: int64 }
+
+    AuditTopActor:
+      type: object
+      required: [actorId, actorName, count]
+      properties:
+        actorId:   { type: string }
+        actorName: { type: string }
+        count:     { type: integer, format: int64 }
+
+    AuditStatsResponse:
+      type: object
+      required:
+        - actionsByType
+        - dailyActivity
+        - documentsByStatus
+        - topActors
+      properties:
+        actionsByType:
+          type: array
+          items: { $ref: '#/components/schemas/AuditActionCount' }
+        dailyActivity:
+          type: array
+          items: { $ref: '#/components/schemas/AuditDailyActivity' }
+        documentsByStatus:
+          type: array
+          items: { $ref: '#/components/schemas/DocumentStatusCount' }
+        topActors:
+          type: array
+          items: { $ref: '#/components/schemas/AuditTopActor' }
+
+    VerifyResponse:
+      type: object
+      required: [verified]
+      properties:
+        verified:     { type: boolean }
+        documentName: { type: string }
+        status:       { $ref: '#/components/schemas/DocumentStatus' }
+        notarizedAt:  { type: string, format: date-time }
+        hash:         { type: string }

@@ -1,558 +1,413 @@
 package handlers
 
 import (
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
-	"strconv"
+	"net/url"
 	"time"
 
-	"github.com/gin-gonic/gin"
-	"google.golang.org/protobuf/types/known/timestamppb"
 	"gorm.io/gorm"
 
-	docsv1 "github.com/spburtsev/ex-files-backend/gen/documents/v1"
 	"github.com/spburtsev/ex-files-backend/models"
-	"github.com/spburtsev/ex-files-backend/services"
+	"github.com/spburtsev/ex-files-backend/oapi"
 )
 
-type DocumentHandler struct {
-	Repo     services.DocumentRepository
-	Storage  services.StorageService
-	Audit    services.AuditRepository
-	UserRepo services.UserRepository
-	Email    services.EmailService
-	Hub      *services.SSEHub
-}
-
-func documentToProto(d *models.Document) *docsv1.Document {
-	pb := &docsv1.Document{
-		Id:           uint64(d.ID),
+func documentToOAPI(d *models.Document) oapi.Document {
+	out := oapi.Document{
+		ID:           formatID(d.ID),
 		Name:         d.Name,
 		MimeType:     d.MimeType,
 		Size:         d.Size,
 		Hash:         d.Hash,
-		Status:       string(d.Status),
-		UploaderId:   uint64(d.UploaderID),
+		Status:       oapi.DocumentStatus(d.Status),
+		UploaderId:   formatID(d.UploaderID),
 		UploaderName: d.Uploader.Name,
-		IssueId:      uint64(d.IssueID),
-		CreatedAt:    timestamppb.New(d.CreatedAt),
-		UpdatedAt:    timestamppb.New(d.UpdatedAt),
+		IssueId:      formatID(d.IssueID),
+		CreatedAt:    d.CreatedAt,
+		UpdatedAt:    d.UpdatedAt,
 	}
 	if d.ReviewerID != nil {
-		pb.ReviewerId = uint64(*d.ReviewerID)
-		pb.ReviewerName = d.Reviewer.Name
+		out.ReviewerId = oapi.NewOptNilString(formatID(*d.ReviewerID))
+		out.ReviewerName = oapi.NewOptNilString(d.Reviewer.Name)
 	}
-	pb.ReviewerNote = d.ReviewerNote
-	return pb
+	if d.ReviewerNote != "" {
+		out.ReviewerNote = oapi.NewOptString(d.ReviewerNote)
+	}
+	return out
 }
 
-func versionToProto(v *models.DocumentVersion) *docsv1.DocumentVersion {
-	return &docsv1.DocumentVersion{
-		Id:           uint64(v.ID),
-		DocumentId:   uint64(v.DocumentID),
+func versionToOAPI(v *models.DocumentVersion) oapi.DocumentVersion {
+	return oapi.DocumentVersion{
+		ID:           formatID(v.ID),
+		DocumentId:   formatID(v.DocumentID),
 		Version:      int32(v.Version),
 		Hash:         v.Hash,
 		Size:         v.Size,
 		StorageKey:   v.StorageKey,
-		UploaderId:   uint64(v.UploaderID),
+		UploaderId:   formatID(v.UploaderID),
 		UploaderName: v.Uploader.Name,
-		CreatedAt:    timestamppb.New(v.CreatedAt),
+		CreatedAt:    v.CreatedAt,
 	}
 }
 
-// Upload uploads a new document to an issue.
-// @Summary      Upload document
-// @Tags         documents
-// @Accept       multipart/form-data
-// @Produce      application/x-protobuf
-// @Param        id    path      int   true  "Issue ID"
-// @Param        file  formData  file  true  "Document file"
-// @Success      201   {object}  swagUploadDocumentResponse  "Protobuf: documents.v1.UploadDocumentResponse"
-// @Failure      400   {object}  swagErrorResponse
-// @Security     BearerAuth || CookieAuth
-// @Router       /issues/{id}/documents [post]
-func (h *DocumentHandler) Upload(c *gin.Context) {
-	userID, ok := mustGetUserID(c)
+// DocumentsList implements GET /issues/{id}/documents.
+func (s *Server) DocumentsList(ctx context.Context, params oapi.DocumentsListParams) (oapi.DocumentsListRes, error) {
+	if _, err := s.callerID(ctx); err != nil {
+		return &oapi.DocumentsListUnauthorized{Error: "unauthorized"}, nil
+	}
+	issueID, ok := parseUintID(params.ID)
 	if !ok {
-		return
-	}
-	issueID, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid issue id"})
-		return
+		return &oapi.DocumentsListInternalServerError{Error: "invalid issue id"}, nil
 	}
 
-	file, header, err := c.Request.FormFile("file")
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
-		return
+	page, perPage, offset := resolvePagination(params.Page, params.PerPage)
+	search := params.Search.Or("")
+	status := ""
+	if v, ok := params.Status.Get(); ok {
+		status = string(v)
 	}
-	defer file.Close()
 
-	// Hash the file content
+	docs, total, err := s.DocumentRepo.ListByIssue(issueID, search, status, perPage, offset)
+	if err != nil {
+		logErr("documents.list", err)
+		return &oapi.DocumentsListInternalServerError{Error: "failed to fetch documents"}, nil
+	}
+
+	out := make([]oapi.Document, len(docs))
+	for i := range docs {
+		out[i] = documentToOAPI(&docs[i])
+	}
+	return &oapi.ListDocumentsResponseHeaders{
+		XPage:       optInt32(page),
+		XPerPage:    optInt32(perPage),
+		XTotalCount: optInt64(total),
+		XTotalPages: optInt32(totalPages(total, perPage)),
+		Response:    oapi.ListDocumentsResponse{Documents: out},
+	}, nil
+}
+
+// DocumentsUpload implements POST /issues/{id}/documents.
+func (s *Server) DocumentsUpload(ctx context.Context, req *oapi.DocumentsUploadReq, params oapi.DocumentsUploadParams) (oapi.DocumentsUploadRes, error) {
+	uid, err := s.callerID(ctx)
+	if err != nil {
+		return &oapi.DocumentsUploadUnauthorized{Error: "unauthorized"}, nil
+	}
+	issueID, ok := parseUintID(params.ID)
+	if !ok {
+		return &oapi.DocumentsUploadBadRequest{Error: "invalid issue id"}, nil
+	}
+
+	issue, err := s.IssueRepo.FindByID(issueID)
+	if err != nil {
+		return &oapi.DocumentsUploadBadRequest{Error: "issue not found"}, nil
+	}
+	if issue.Resolved {
+		return &oapi.DocumentsUploadUnprocessableEntity{
+			Error: "issue is resolved; no more documents may be uploaded",
+		}, nil
+	}
+
+	mp := req.File
+
 	hasher := sha256.New()
-	if _, err := io.Copy(hasher, file); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to hash file"})
-		return
+	if _, err := io.Copy(hasher, mp.File); err != nil {
+		logErr("documents.upload.hash", err)
+		return &oapi.DocumentsUploadInternalServerError{Error: "failed to hash file"}, nil
 	}
 	hash := fmt.Sprintf("%x", hasher.Sum(nil))
 
-	// Reject if this issue already has a document with the same content.
-	if existing, err := h.Repo.FindByIssueAndHash(uint(issueID), hash); err == nil && existing != nil {
-		c.JSON(http.StatusConflict, gin.H{
-			"error": fmt.Sprintf("issue already has a document with the same content: %q", existing.Name),
-		})
-		return
+	if existing, err := s.DocumentRepo.FindByIssueAndHash(issueID, hash); err == nil && existing != nil {
+		return &oapi.DocumentsUploadConflict{
+			Error: fmt.Sprintf("issue already has a document with the same content: %q", existing.Name),
+		}, nil
 	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check existing documents"})
-		return
+		logErr("documents.upload.lookup", err)
+		return &oapi.DocumentsUploadInternalServerError{Error: "failed to check existing documents"}, nil
 	}
 
-	// Reset file reader for upload
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read file"})
-		return
+	seeker, ok := mp.File.(io.Seeker)
+	if !ok {
+		return &oapi.DocumentsUploadInternalServerError{Error: "uploaded file is not seekable"}, nil
+	}
+	if _, err := seeker.Seek(0, io.SeekStart); err != nil {
+		logErr("documents.upload.seek", err)
+		return &oapi.DocumentsUploadInternalServerError{Error: "failed to read file"}, nil
 	}
 
-	// Create document record
+	mimeType := mp.Header.Get("Content-Type")
 	doc := models.Document{
-		Name:        header.Filename,
-		MimeType:    header.Header.Get("Content-Type"),
-		Size:        header.Size,
-		Hash:        hash,
+		Name:       mp.Name,
+		MimeType:   mimeType,
+		Size:       mp.Size,
+		Hash:       hash,
 		Status:     models.DocumentStatusPending,
-		UploaderID: userID,
-		IssueID:    uint(issueID),
+		UploaderID: uid,
+		IssueID:    issueID,
 	}
-	if err := h.Repo.Create(&doc); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create document"})
-		return
-	}
-
-	// Storage key: issues/<issueID>/documents/<docID>/v1/<filename>
-	storageKey := fmt.Sprintf("issues/%d/documents/%d/v1/%s", issueID, doc.ID, header.Filename)
-
-	if err := h.Storage.Upload(c.Request.Context(), storageKey, file, header.Size, doc.MimeType); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to upload file"})
-		return
+	if err := s.DocumentRepo.Create(&doc); err != nil {
+		logErr("documents.upload.create", err)
+		return &oapi.DocumentsUploadInternalServerError{Error: "failed to create document"}, nil
 	}
 
-	// Create version 1
+	storageKey := fmt.Sprintf("issues/%d/documents/%d/v1/%s", issueID, doc.ID, mp.Name)
+	if err := s.Storage.Upload(ctx, storageKey, mp.File, mp.Size, mimeType); err != nil {
+		logErr("documents.upload.storage", err)
+		return &oapi.DocumentsUploadInternalServerError{Error: "failed to upload file"}, nil
+	}
+
 	version := models.DocumentVersion{
 		DocumentID: doc.ID,
 		Version:    1,
 		Hash:       hash,
-		Size:       header.Size,
+		Size:       mp.Size,
 		StorageKey: storageKey,
-		UploaderID: userID,
+		UploaderID: uid,
 	}
-	if err := h.Repo.CreateVersion(&version); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create version"})
-		return
+	if err := s.DocumentRepo.CreateVersion(&version); err != nil {
+		logErr("documents.upload.create_version", err)
+		return &oapi.DocumentsUploadInternalServerError{Error: "failed to create version"}, nil
 	}
 
-	logAudit(h.Audit, models.AuditActionDocumentUploaded, userID, uintPtr(doc.ID), "document", map[string]any{
+	logAudit(s.Audit, models.AuditActionDocumentUploaded, uid, uintPtr(doc.ID), "document", map[string]any{
 		"name":     doc.Name,
 		"hash":     hash,
 		"issue_id": issueID,
 	})
 
-	// Reload doc to get uploader preloaded
-	loadedDoc, err := h.Repo.FindByID(doc.ID)
+	loaded, err := s.DocumentRepo.FindByID(doc.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reload document"})
-		return
+		logErr("documents.upload.reload", err)
+		return &oapi.DocumentsUploadInternalServerError{Error: "failed to reload document"}, nil
 	}
-	doc = *loadedDoc
 
-	protobufResponse(c, http.StatusCreated, &docsv1.UploadDocumentResponse{
-		Document: documentToProto(&doc),
-		Version: &docsv1.DocumentVersion{
-			Id:         uint64(version.ID),
-			DocumentId: uint64(version.DocumentID),
-			Version:    int32(version.Version),
-			Hash:       version.Hash,
-			Size:       version.Size,
-			StorageKey: version.StorageKey,
-			UploaderId: uint64(version.UploaderID),
-			CreatedAt:  timestamppb.New(version.CreatedAt),
-		},
-	})
+	return &oapi.UploadDocumentResponse{
+		Document: documentToOAPI(loaded),
+		Version:  versionToOAPI(&version),
+	}, nil
 }
 
-// UploadVersion uploads a new version of an existing document.
-// @Summary      Upload new version
-// @Tags         documents
-// @Accept       multipart/form-data
-// @Produce      application/x-protobuf
-// @Param        id    path      int   true  "Document ID"
-// @Param        file  formData  file  true  "Document file"
-// @Success      201   {object}  swagUploadDocumentResponse  "Protobuf: documents.v1.UploadDocumentResponse"
-// @Security     BearerAuth || CookieAuth
-// @Router       /documents/{id}/versions [post]
-func (h *DocumentHandler) UploadVersion(c *gin.Context) {
-	userID, ok := mustGetUserID(c)
+// DocumentsUploadVersion implements POST /documents/{id}/versions.
+func (s *Server) DocumentsUploadVersion(ctx context.Context, req *oapi.DocumentsUploadVersionReq, params oapi.DocumentsUploadVersionParams) (oapi.DocumentsUploadVersionRes, error) {
+	uid, err := s.callerID(ctx)
+	if err != nil {
+		return &oapi.DocumentsUploadVersionUnauthorized{Error: "unauthorized"}, nil
+	}
+	docID, ok := parseUintID(params.ID)
 	if !ok {
-		return
+		return &oapi.DocumentsUploadVersionBadRequest{Error: "invalid document id"}, nil
 	}
-	docID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	doc, err := s.DocumentRepo.FindByID(docID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid document id"})
-		return
+		return &oapi.DocumentsUploadVersionNotFound{Error: "document not found"}, nil
 	}
 
-	doc, err := h.Repo.FindByID(uint(docID))
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "document not found"})
-		return
-	}
-
-	file, header, err := c.Request.FormFile("file")
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
-		return
-	}
-	defer file.Close()
+	mp := req.File
 
 	hasher := sha256.New()
-	if _, err := io.Copy(hasher, file); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to hash file"})
-		return
+	if _, err := io.Copy(hasher, mp.File); err != nil {
+		logErr("documents.upload_version.hash", err)
+		return &oapi.DocumentsUploadVersionInternalServerError{Error: "failed to hash file"}, nil
 	}
 	hash := fmt.Sprintf("%x", hasher.Sum(nil))
 
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read file"})
-		return
+	seeker, ok := mp.File.(io.Seeker)
+	if !ok {
+		return &oapi.DocumentsUploadVersionInternalServerError{Error: "uploaded file is not seekable"}, nil
+	}
+	if _, err := seeker.Seek(0, io.SeekStart); err != nil {
+		logErr("documents.upload_version.seek", err)
+		return &oapi.DocumentsUploadVersionInternalServerError{Error: "failed to read file"}, nil
 	}
 
-	latestVersion, err := h.Repo.LatestVersionNumber(uint(docID))
+	latest, err := s.DocumentRepo.LatestVersionNumber(docID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get version info"})
-		return
+		logErr("documents.upload_version.latest", err)
+		return &oapi.DocumentsUploadVersionInternalServerError{Error: "failed to get version info"}, nil
 	}
-	newVersion := latestVersion + 1
+	newVersion := latest + 1
 
-	storageKey := fmt.Sprintf("issues/%d/documents/%d/v%d/%s", doc.IssueID, doc.ID, newVersion, header.Filename)
-
-	if err := h.Storage.Upload(c.Request.Context(), storageKey, file, header.Size, header.Header.Get("Content-Type")); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to upload file"})
-		return
+	storageKey := fmt.Sprintf("issues/%d/documents/%d/v%d/%s", doc.IssueID, doc.ID, newVersion, mp.Name)
+	mimeType := mp.Header.Get("Content-Type")
+	if err := s.Storage.Upload(ctx, storageKey, mp.File, mp.Size, mimeType); err != nil {
+		logErr("documents.upload_version.storage", err)
+		return &oapi.DocumentsUploadVersionInternalServerError{Error: "failed to upload file"}, nil
 	}
 
 	version := models.DocumentVersion{
-		DocumentID: uint(docID),
+		DocumentID: docID,
 		Version:    newVersion,
 		Hash:       hash,
-		Size:       header.Size,
+		Size:       mp.Size,
 		StorageKey: storageKey,
-		UploaderID: userID,
+		UploaderID: uid,
 	}
-	if err := h.Repo.CreateVersion(&version); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create version"})
-		return
+	if err := s.DocumentRepo.CreateVersion(&version); err != nil {
+		logErr("documents.upload_version.create", err)
+		return &oapi.DocumentsUploadVersionInternalServerError{Error: "failed to create version"}, nil
 	}
 
-	logAudit(h.Audit, models.AuditActionVersionCreated, userID, uintPtr(doc.ID), "document", map[string]any{
+	logAudit(s.Audit, models.AuditActionVersionCreated, uid, uintPtr(doc.ID), "document", map[string]any{
 		"version": newVersion,
 		"hash":    hash,
 	})
 
-	protobufResponse(c, http.StatusCreated, &docsv1.UploadDocumentResponse{
-		Document: documentToProto(doc),
-		Version: &docsv1.DocumentVersion{
-			Id:         uint64(version.ID),
-			DocumentId: uint64(version.DocumentID),
-			Version:    int32(version.Version),
-			Hash:       version.Hash,
-			Size:       version.Size,
-			StorageKey: version.StorageKey,
-			UploaderId: uint64(version.UploaderID),
-			CreatedAt:  timestamppb.New(version.CreatedAt),
-		},
-	})
+	return &oapi.UploadDocumentResponse{
+		Document: documentToOAPI(doc),
+		Version:  versionToOAPI(&version),
+	}, nil
 }
 
-// List returns documents for an issue with optional search and status filter.
-// @Summary      List documents
-// @Tags         documents
-// @Produce      application/x-protobuf
-// @Param        id        path   int     true   "Issue ID"
-// @Param        search    query  string  false  "Search by name"
-// @Param        status    query  string  false  "Filter by status"
-// @Param        page      query  int     false  "Page number"     default(1)
-// @Param        per_page  query  int     false  "Items per page"  default(20)
-// @Success      200  {object}  swagListDocumentsResponse  "Protobuf: documents.v1.ListDocumentsResponse"
-// @Header       200  {int}     X-Total-Count
-// @Header       200  {int}     X-Total-Pages
-// @Header       200  {int}     X-Page
-// @Header       200  {int}     X-Per-Page
-// @Security     BearerAuth || CookieAuth
-// @Router       /issues/{id}/documents [get]
-func (h *DocumentHandler) List(c *gin.Context) {
-	issueID, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid issue id"})
-		return
+// DocumentsGet implements GET /documents/{id}.
+func (s *Server) DocumentsGet(ctx context.Context, params oapi.DocumentsGetParams) (oapi.DocumentsGetRes, error) {
+	if _, err := s.callerID(ctx); err != nil {
+		return &oapi.DocumentsGetUnauthorized{Error: "unauthorized"}, nil
 	}
-
-	page, perPage := parsePagination(c)
-	offset := (page - 1) * perPage
-	search := c.Query("search")
-	status := c.Query("status")
-
-	docs, total, err := h.Repo.ListByIssue(uint(issueID), search, status, perPage, offset)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch documents"})
-		return
-	}
-
-	setPaginationHeaders(c, page, perPage, total)
-
-	pbDocs := make([]*docsv1.Document, len(docs))
-	for i := range docs {
-		pbDocs[i] = documentToProto(&docs[i])
-	}
-
-	protobufResponse(c, http.StatusOK, &docsv1.ListDocumentsResponse{
-		Documents: pbDocs,
-	})
-}
-
-// Get returns a document with all its versions.
-// @Summary      Get document
-// @Tags         documents
-// @Produce      application/x-protobuf
-// @Param        id   path      int  true  "Document ID"
-// @Success      200  {object}  swagGetDocumentResponse  "Protobuf: documents.v1.GetDocumentResponse"
-// @Failure      404  {object}  swagErrorResponse
-// @Security     BearerAuth || CookieAuth
-// @Router       /documents/{id} [get]
-func (h *DocumentHandler) Get(c *gin.Context) {
-	docID, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid document id"})
-		return
-	}
-
-	doc, err := h.Repo.FindByID(uint(docID))
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "document not found"})
-		return
-	}
-
-	versions, err := h.Repo.GetVersions(uint(docID))
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch versions"})
-		return
-	}
-
-	pbVersions := make([]*docsv1.DocumentVersion, len(versions))
-	for i := range versions {
-		pbVersions[i] = versionToProto(&versions[i])
-	}
-
-	protobufResponse(c, http.StatusOK, &docsv1.GetDocumentResponse{
-		Document: &docsv1.DocumentDetail{
-			Document: documentToProto(doc),
-			Versions: pbVersions,
-		},
-	})
-}
-
-// File streams the binary contents of a document version.
-// @Summary      Stream version file
-// @Tags         documents
-// @Produce      application/octet-stream
-// @Param        id         path      int  true  "Document ID"
-// @Param        versionId  path      int  true  "Version ID"
-// @Success      200  {file}    binary
-// @Failure      404  {object}  swagErrorResponse
-// @Security     BearerAuth || CookieAuth
-// @Router       /documents/{id}/versions/{versionId}/file [get]
-func (h *DocumentHandler) File(c *gin.Context) {
-	versionID, err := strconv.ParseUint(c.Param("versionId"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid version id"})
-		return
-	}
-
-	version, err := h.Repo.GetVersion(uint(versionID))
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "version not found"})
-		return
-	}
-
-	reader, err := h.Storage.Get(c.Request.Context(), version.StorageKey)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read file"})
-		return
-	}
-	defer reader.Close()
-
-	contentType := "application/octet-stream"
-	if doc, err := h.Repo.FindByID(version.DocumentID); err == nil && doc.MimeType != "" {
-		contentType = doc.MimeType
-	}
-	c.Header("Content-Type", contentType)
-	if version.Size > 0 {
-		c.Header("Content-Length", strconv.FormatInt(version.Size, 10))
-	}
-	if _, err := io.Copy(c.Writer, reader); err != nil {
-		// Headers already sent — log and bail.
-		return
-	}
-}
-
-// Download returns a presigned URL for downloading a document version.
-// @Summary      Download version
-// @Tags         documents
-// @Produce      application/x-protobuf
-// @Param        id         path      int  true  "Document ID"
-// @Param        versionId  path      int  true  "Version ID"
-// @Success      200  {object}  swagDownloadURLResponse  "Protobuf: documents.v1.GetDownloadURLResponse"
-// @Failure      404  {object}  swagErrorResponse
-// @Security     BearerAuth || CookieAuth
-// @Router       /documents/{id}/versions/{versionId}/download [get]
-func (h *DocumentHandler) Download(c *gin.Context) {
-	versionID, err := strconv.ParseUint(c.Param("versionId"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid version id"})
-		return
-	}
-
-	version, err := h.Repo.GetVersion(uint(versionID))
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "version not found"})
-		return
-	}
-
-	url, err := h.Storage.PresignedURL(c.Request.Context(), version.StorageKey, 15*time.Minute)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate download URL"})
-		return
-	}
-
-	protobufResponse(c, http.StatusOK, &docsv1.GetDownloadURLResponse{
-		Url: url,
-	})
-}
-
-// Submit transitions a document from pending to in_review. Only the uploader.
-// @Summary      Submit document for review
-// @Tags         documents
-// @Produce      application/x-protobuf
-// @Param        id   path      int  true  "Document ID"
-// @Success      200  {object}  swagUpdateDocumentResponse  "Protobuf: documents.v1.UpdateDocumentResponse"
-// @Failure      403  {object}  swagErrorResponse
-// @Failure      422  {object}  swagErrorResponse
-// @Security     BearerAuth || CookieAuth
-// @Router       /documents/{id}/submit [post]
-func (h *DocumentHandler) Submit(c *gin.Context) {
-	userID, ok := mustGetUserID(c)
+	docID, ok := parseUintID(params.ID)
 	if !ok {
-		return
+		return &oapi.DocumentsGetNotFound{Error: "document not found"}, nil
 	}
-	docID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	doc, err := s.DocumentRepo.FindByID(docID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid document id"})
-		return
+		return &oapi.DocumentsGetNotFound{Error: "document not found"}, nil
 	}
-
-	doc, err := h.Repo.FindByID(uint(docID))
+	versions, err := s.DocumentRepo.GetVersions(docID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "document not found"})
-		return
+		logErr("documents.get.versions", err)
+		return &oapi.DocumentsGetInternalServerError{Error: "failed to fetch versions"}, nil
 	}
-
-	if doc.UploaderID != userID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "only the uploader may submit this document"})
-		return
+	out := make([]oapi.DocumentVersion, len(versions))
+	for i := range versions {
+		out[i] = versionToOAPI(&versions[i])
 	}
+	return &oapi.GetDocumentResponse{
+		Document: oapi.DocumentDetail{
+			Document: documentToOAPI(doc),
+			Versions: out,
+		},
+	}, nil
+}
 
+// DocumentsGetFile implements GET /documents/{id}/versions/{versionId}/file.
+func (s *Server) DocumentsGetFile(ctx context.Context, params oapi.DocumentsGetFileParams) (oapi.DocumentsGetFileRes, error) {
+	if _, err := s.callerID(ctx); err != nil {
+		return &oapi.DocumentsGetFileUnauthorized{Error: "unauthorized"}, nil
+	}
+	versionID, ok := parseUintID(params.VersionId)
+	if !ok {
+		return &oapi.DocumentsGetFileNotFound{Error: "invalid version id"}, nil
+	}
+	version, err := s.DocumentRepo.GetVersion(versionID)
+	if err != nil {
+		return &oapi.DocumentsGetFileNotFound{Error: "version not found"}, nil
+	}
+	reader, err := s.Storage.Get(ctx, version.StorageKey)
+	if err != nil {
+		logErr("documents.file.read", err)
+		return &oapi.DocumentsGetFileInternalServerError{Error: "failed to read file"}, nil
+	}
+	out := oapi.DocumentsGetFileOKHeaders{
+		Response: oapi.DocumentsGetFileOK{Data: reader},
+	}
+	if version.Size > 0 {
+		out.ContentLength = optInt64(version.Size)
+	}
+	return &out, nil
+}
+
+// DocumentsGetDownloadUrl implements GET /documents/{id}/versions/{versionId}/download.
+func (s *Server) DocumentsGetDownloadUrl(ctx context.Context, params oapi.DocumentsGetDownloadUrlParams) (oapi.DocumentsGetDownloadUrlRes, error) {
+	if _, err := s.callerID(ctx); err != nil {
+		return &oapi.DocumentsGetDownloadUrlUnauthorized{Error: "unauthorized"}, nil
+	}
+	versionID, ok := parseUintID(params.VersionId)
+	if !ok {
+		return &oapi.DocumentsGetDownloadUrlNotFound{Error: "invalid version id"}, nil
+	}
+	version, err := s.DocumentRepo.GetVersion(versionID)
+	if err != nil {
+		return &oapi.DocumentsGetDownloadUrlNotFound{Error: "version not found"}, nil
+	}
+	signedURL, err := s.Storage.PresignedURL(ctx, version.StorageKey, 15*time.Minute)
+	if err != nil {
+		logErr("documents.download.presign", err)
+		return &oapi.DocumentsGetDownloadUrlInternalServerError{Error: "failed to generate download URL"}, nil
+	}
+	parsed, err := url.Parse(signedURL)
+	if err != nil {
+		logErr("documents.download.parse", err)
+		return &oapi.DocumentsGetDownloadUrlInternalServerError{Error: "failed to parse download URL"}, nil
+	}
+	return &oapi.GetDownloadUrlResponse{URL: *parsed}, nil
+}
+
+// DocumentsSubmit implements POST /documents/{id}/submit.
+func (s *Server) DocumentsSubmit(ctx context.Context, params oapi.DocumentsSubmitParams) (oapi.DocumentsSubmitRes, error) {
+	uid, err := s.callerID(ctx)
+	if err != nil {
+		return &oapi.DocumentsSubmitUnauthorized{Error: "unauthorized"}, nil
+	}
+	docID, ok := parseUintID(params.ID)
+	if !ok {
+		return &oapi.DocumentsSubmitNotFound{Error: "document not found"}, nil
+	}
+	doc, err := s.DocumentRepo.FindByID(docID)
+	if err != nil {
+		return &oapi.DocumentsSubmitNotFound{Error: "document not found"}, nil
+	}
+	if doc.UploaderID != uid {
+		return &oapi.DocumentsSubmitForbidden{Error: "only the uploader may submit this document"}, nil
+	}
 	if !doc.CanTransitionTo(models.DocumentStatusInReview) {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "document cannot be submitted from its current status"})
-		return
+		return &oapi.DocumentsSubmitUnprocessableEntity{Error: "document cannot be submitted from its current status"}, nil
 	}
-
 	doc.Status = models.DocumentStatusInReview
 	doc.ReviewerNote = ""
-	if err := h.Repo.Update(doc); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update document"})
-		return
+	if err := s.DocumentRepo.Update(doc); err != nil {
+		logErr("documents.submit.update", err)
+		return &oapi.DocumentsSubmitInternalServerError{Error: "failed to update document"}, nil
 	}
-
-	logAudit(h.Audit, models.AuditActionDocumentSubmitted, userID, uintPtr(doc.ID), "document", map[string]any{
+	logAudit(s.Audit, models.AuditActionDocumentSubmitted, uid, uintPtr(doc.ID), "document", map[string]any{
 		"document_id": doc.ID,
 	})
-
-	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
+	return &oapi.UpdateDocumentResponse{Document: documentToOAPI(doc)}, nil
 }
 
-// AssignReviewer sets the reviewer for a document. Only managers and root users.
-// @Summary      Assign reviewer
-// @Tags         documents
-// @Accept       json
-// @Produce      application/x-protobuf
-// @Param        id    path      int                        true  "Document ID"
-// @Param        body  body      swagAssignReviewerRequest  true  "Reviewer payload"
-// @Success      200   {object}  swagUpdateDocumentResponse "Protobuf: documents.v1.UpdateDocumentResponse"
-// @Failure      403   {object}  swagErrorResponse
-// @Security     BearerAuth || CookieAuth
-// @Router       /documents/{id}/reviewer [put]
-func (h *DocumentHandler) AssignReviewer(c *gin.Context) {
-	userID, ok := mustGetUserID(c)
-	if !ok {
-		return
-	}
-	role, ok := mustGetRole(c)
-	if !ok {
-		return
-	}
-	if !role.CanManageWorkspaces() {
-		c.JSON(http.StatusForbidden, gin.H{"error": "only managers may assign reviewers"})
-		return
-	}
-
-	docID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+// DocumentsResubmit implements POST /documents/{id}/resubmit.
+func (s *Server) DocumentsResubmit(ctx context.Context, params oapi.DocumentsResubmitParams) (oapi.DocumentsResubmitRes, error) {
+	uid, err := s.callerID(ctx)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid document id"})
-		return
+		return &oapi.DocumentsResubmitUnauthorized{Error: "unauthorized"}, nil
 	}
-
-	var body struct {
-		ReviewerID uint `json:"reviewer_id" binding:"required"`
+	docID, ok := parseUintID(params.ID)
+	if !ok {
+		return &oapi.DocumentsResubmitNotFound{Error: "document not found"}, nil
 	}
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "reviewer_id is required"})
-		return
-	}
-
-	doc, err := h.Repo.FindByID(uint(docID))
+	doc, err := s.DocumentRepo.FindByID(docID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "document not found"})
-		return
+		return &oapi.DocumentsResubmitNotFound{Error: "document not found"}, nil
 	}
-
-	doc.ReviewerID = &body.ReviewerID
-	if err := h.Repo.Update(doc); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update document"})
-		return
+	if doc.UploaderID != uid {
+		return &oapi.DocumentsResubmitForbidden{Error: "only the uploader may resubmit this document"}, nil
 	}
-
-	logAudit(h.Audit, models.AuditActionDocumentReviewerAssigned, userID, uintPtr(doc.ID), "document", map[string]any{
-		"reviewer_id": body.ReviewerID,
+	if !doc.CanTransitionTo(models.DocumentStatusInReview) {
+		return &oapi.DocumentsResubmitUnprocessableEntity{Error: "document cannot be resubmitted from its current status"}, nil
+	}
+	doc.Status = models.DocumentStatusInReview
+	doc.ReviewerNote = ""
+	if err := s.DocumentRepo.Update(doc); err != nil {
+		logErr("documents.resubmit.update", err)
+		return &oapi.DocumentsResubmitInternalServerError{Error: "failed to update document"}, nil
+	}
+	logAudit(s.Audit, models.AuditActionDocumentSubmitted, uid, uintPtr(doc.ID), "document", map[string]any{
+		"document_id": doc.ID,
+		"resubmit":    true,
 	})
-
-	notifyReviewerAssigned(h.Email, h.UserRepo, h.Hub, doc, body.ReviewerID)
-
-	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
+	return &oapi.UpdateDocumentResponse{Document: documentToOAPI(doc)}, nil
 }
 
-// canReview returns true if the caller is the assigned reviewer, a manager, or root.
 func canReview(doc *models.Document, callerID uint, role models.Role) bool {
 	if role.CanManageWorkspaces() {
 		return true
@@ -560,289 +415,187 @@ func canReview(doc *models.Document, callerID uint, role models.Role) bool {
 	return doc.ReviewerID != nil && *doc.ReviewerID == callerID
 }
 
-// Approve transitions a document from in_review to approved.
-// @Summary      Approve document
-// @Tags         documents
-// @Produce      application/x-protobuf
-// @Param        id   path      int  true  "Document ID"
-// @Success      200  {object}  swagUpdateDocumentResponse  "Protobuf: documents.v1.UpdateDocumentResponse"
-// @Failure      403  {object}  swagErrorResponse
-// @Failure      422  {object}  swagErrorResponse
-// @Security     BearerAuth || CookieAuth
-// @Router       /documents/{id}/approve [post]
-func (h *DocumentHandler) Approve(c *gin.Context) {
-	userID, ok := mustGetUserID(c)
-	if !ok {
-		return
-	}
-	role, ok := mustGetRole(c)
-	if !ok {
-		return
-	}
-	docID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+// DocumentsApprove implements POST /documents/{id}/approve.
+func (s *Server) DocumentsApprove(ctx context.Context, params oapi.DocumentsApproveParams) (oapi.DocumentsApproveRes, error) {
+	uid, role, err := s.callerIDAndRole(ctx)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid document id"})
-		return
+		return &oapi.DocumentsApproveUnauthorized{Error: "unauthorized"}, nil
 	}
-
-	doc, err := h.Repo.FindByID(uint(docID))
+	docID, ok := parseUintID(params.ID)
+	if !ok {
+		return &oapi.DocumentsApproveNotFound{Error: "document not found"}, nil
+	}
+	doc, err := s.DocumentRepo.FindByID(docID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "document not found"})
-		return
+		return &oapi.DocumentsApproveNotFound{Error: "document not found"}, nil
 	}
-
-	if !canReview(doc, userID, role) {
-		c.JSON(http.StatusForbidden, gin.H{"error": "not authorized to review this document"})
-		return
+	if !canReview(doc, uid, role) {
+		return &oapi.DocumentsApproveForbidden{Error: "not authorized to review this document"}, nil
 	}
-
 	if !doc.CanTransitionTo(models.DocumentStatusApproved) {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "document cannot be approved from its current status"})
-		return
+		return &oapi.DocumentsApproveUnprocessableEntity{Error: "document cannot be approved from its current status"}, nil
 	}
-
 	doc.Status = models.DocumentStatusApproved
-	if err := h.Repo.Update(doc); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update document"})
-		return
+	if err := s.DocumentRepo.Update(doc); err != nil {
+		logErr("documents.approve.update", err)
+		return &oapi.DocumentsApproveInternalServerError{Error: "failed to update document"}, nil
 	}
 
-	logAudit(h.Audit, models.AuditActionDocumentApproved, userID, uintPtr(doc.ID), "document", map[string]any{
+	if issue, err := s.IssueRepo.FindByID(doc.IssueID); err != nil {
+		logErr("documents.approve.issue_lookup", err)
+	} else if !issue.Resolved {
+		issue.Resolved = true
+		if err := s.IssueRepo.Update(issue); err != nil {
+			logErr("documents.approve.issue_resolve", err)
+		}
+	}
+
+	logAudit(s.Audit, models.AuditActionDocumentApproved, uid, uintPtr(doc.ID), "document", map[string]any{
 		"document_id": doc.ID,
 	})
-
-	notifyDocumentEvent(h.Email, h.UserRepo, h.Hub, doc, "document.approved",
+	notifyDocumentEvent(s.Email, s.UserRepo, s.Hub, doc, "document.approved",
 		fmt.Sprintf("Document approved: %s", doc.Name),
 		fmt.Sprintf("<p>Your document <strong>%s</strong> has been approved.</p>", doc.Name),
 	)
-
-	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
+	return &oapi.UpdateDocumentResponse{Document: documentToOAPI(doc)}, nil
 }
 
-// Reject transitions a document from in_review to rejected.
-// @Summary      Reject document
-// @Tags         documents
-// @Accept       json
-// @Produce      application/x-protobuf
-// @Param        id    path      int                    true  "Document ID"
-// @Param        body  body      swagReviewNoteRequest  false "Rejection note"
-// @Success      200   {object}  swagUpdateDocumentResponse  "Protobuf: documents.v1.UpdateDocumentResponse"
-// @Failure      403   {object}  swagErrorResponse
-// @Failure      422   {object}  swagErrorResponse
-// @Security     BearerAuth || CookieAuth
-// @Router       /documents/{id}/reject [post]
-func (h *DocumentHandler) Reject(c *gin.Context) {
-	userID, ok := mustGetUserID(c)
-	if !ok {
-		return
-	}
-	role, ok := mustGetRole(c)
-	if !ok {
-		return
-	}
-	docID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+// DocumentsReject implements POST /documents/{id}/reject.
+func (s *Server) DocumentsReject(ctx context.Context, req oapi.OptReviewNoteRequest, params oapi.DocumentsRejectParams) (oapi.DocumentsRejectRes, error) {
+	uid, role, err := s.callerIDAndRole(ctx)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid document id"})
-		return
+		return &oapi.DocumentsRejectUnauthorized{Error: "unauthorized"}, nil
 	}
-
-	var body struct {
-		Note string `json:"note"`
+	docID, ok := parseUintID(params.ID)
+	if !ok {
+		return &oapi.DocumentsRejectNotFound{Error: "document not found"}, nil
 	}
-	_ = c.ShouldBindJSON(&body)
-
-	doc, err := h.Repo.FindByID(uint(docID))
+	doc, err := s.DocumentRepo.FindByID(docID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "document not found"})
-		return
+		return &oapi.DocumentsRejectNotFound{Error: "document not found"}, nil
 	}
-
-	if !canReview(doc, userID, role) {
-		c.JSON(http.StatusForbidden, gin.H{"error": "not authorized to review this document"})
-		return
+	if !canReview(doc, uid, role) {
+		return &oapi.DocumentsRejectForbidden{Error: "not authorized to review this document"}, nil
 	}
-
 	if !doc.CanTransitionTo(models.DocumentStatusRejected) {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "document cannot be rejected from its current status"})
-		return
+		return &oapi.DocumentsRejectUnprocessableEntity{Error: "document cannot be rejected from its current status"}, nil
 	}
-
+	note := ""
+	if v, ok := req.Get(); ok {
+		note = v.Note.Or("")
+	}
 	doc.Status = models.DocumentStatusRejected
-	doc.ReviewerNote = body.Note
-	if err := h.Repo.Update(doc); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update document"})
-		return
+	doc.ReviewerNote = note
+	if err := s.DocumentRepo.Update(doc); err != nil {
+		logErr("documents.reject.update", err)
+		return &oapi.DocumentsRejectInternalServerError{Error: "failed to update document"}, nil
 	}
-
-	logAudit(h.Audit, models.AuditActionDocumentRejected, userID, uintPtr(doc.ID), "document", map[string]any{
+	logAudit(s.Audit, models.AuditActionDocumentRejected, uid, uintPtr(doc.ID), "document", map[string]any{
 		"document_id": doc.ID,
-		"note":        body.Note,
+		"note":        note,
 	})
-
-	notifyDocumentEvent(h.Email, h.UserRepo, h.Hub, doc, "document.rejected",
+	notifyDocumentEvent(s.Email, s.UserRepo, s.Hub, doc, "document.rejected",
 		fmt.Sprintf("Document rejected: %s", doc.Name),
-		fmt.Sprintf("<p>Your document <strong>%s</strong> has been rejected.</p><p>Reason: %s</p>", doc.Name, body.Note),
+		fmt.Sprintf("<p>Your document <strong>%s</strong> has been rejected.</p><p>Reason: %s</p>", doc.Name, note),
 	)
-
-	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
+	return &oapi.UpdateDocumentResponse{Document: documentToOAPI(doc)}, nil
 }
 
-// RequestChanges transitions a document from in_review to changes_requested.
-// @Summary      Request changes
-// @Tags         documents
-// @Accept       json
-// @Produce      application/x-protobuf
-// @Param        id    path      int                    true  "Document ID"
-// @Param        body  body      swagReviewNoteRequest  false "Change request note"
-// @Success      200   {object}  swagUpdateDocumentResponse  "Protobuf: documents.v1.UpdateDocumentResponse"
-// @Failure      403   {object}  swagErrorResponse
-// @Failure      422   {object}  swagErrorResponse
-// @Security     BearerAuth || CookieAuth
-// @Router       /documents/{id}/request-changes [post]
-func (h *DocumentHandler) RequestChanges(c *gin.Context) {
-	userID, ok := mustGetUserID(c)
-	if !ok {
-		return
-	}
-	role, ok := mustGetRole(c)
-	if !ok {
-		return
-	}
-	docID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+// DocumentsRequestChanges implements POST /documents/{id}/request-changes.
+func (s *Server) DocumentsRequestChanges(ctx context.Context, req oapi.OptReviewNoteRequest, params oapi.DocumentsRequestChangesParams) (oapi.DocumentsRequestChangesRes, error) {
+	uid, role, err := s.callerIDAndRole(ctx)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid document id"})
-		return
+		return &oapi.DocumentsRequestChangesUnauthorized{Error: "unauthorized"}, nil
 	}
-
-	var body struct {
-		Note string `json:"note"`
+	docID, ok := parseUintID(params.ID)
+	if !ok {
+		return &oapi.DocumentsRequestChangesNotFound{Error: "document not found"}, nil
 	}
-	_ = c.ShouldBindJSON(&body)
-
-	doc, err := h.Repo.FindByID(uint(docID))
+	doc, err := s.DocumentRepo.FindByID(docID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "document not found"})
-		return
+		return &oapi.DocumentsRequestChangesNotFound{Error: "document not found"}, nil
 	}
-
-	if !canReview(doc, userID, role) {
-		c.JSON(http.StatusForbidden, gin.H{"error": "not authorized to review this document"})
-		return
+	if !canReview(doc, uid, role) {
+		return &oapi.DocumentsRequestChangesForbidden{Error: "not authorized to review this document"}, nil
 	}
-
 	if !doc.CanTransitionTo(models.DocumentStatusChangesRequested) {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "document cannot have changes requested from its current status"})
-		return
+		return &oapi.DocumentsRequestChangesUnprocessableEntity{Error: "document cannot have changes requested from its current status"}, nil
 	}
-
+	note := ""
+	if v, ok := req.Get(); ok {
+		note = v.Note.Or("")
+	}
 	doc.Status = models.DocumentStatusChangesRequested
-	doc.ReviewerNote = body.Note
-	if err := h.Repo.Update(doc); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update document"})
-		return
+	doc.ReviewerNote = note
+	if err := s.DocumentRepo.Update(doc); err != nil {
+		logErr("documents.request_changes.update", err)
+		return &oapi.DocumentsRequestChangesInternalServerError{Error: "failed to update document"}, nil
 	}
-
-	logAudit(h.Audit, models.AuditActionDocumentChangesRequested, userID, uintPtr(doc.ID), "document", map[string]any{
+	logAudit(s.Audit, models.AuditActionDocumentChangesRequested, uid, uintPtr(doc.ID), "document", map[string]any{
 		"document_id": doc.ID,
-		"note":        body.Note,
+		"note":        note,
 	})
-
-	notifyDocumentEvent(h.Email, h.UserRepo, h.Hub, doc, "document.changes_requested",
+	notifyDocumentEvent(s.Email, s.UserRepo, s.Hub, doc, "document.changes_requested",
 		fmt.Sprintf("Changes requested: %s", doc.Name),
-		fmt.Sprintf("<p>Changes have been requested for your document <strong>%s</strong>.</p><p>Note: %s</p>", doc.Name, body.Note),
+		fmt.Sprintf("<p>Changes have been requested for your document <strong>%s</strong>.</p><p>Note: %s</p>", doc.Name, note),
 	)
-
-	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
+	return &oapi.UpdateDocumentResponse{Document: documentToOAPI(doc)}, nil
 }
 
-// Resubmit transitions a document from changes_requested to in_review. Only the uploader.
-// @Summary      Resubmit document
-// @Tags         documents
-// @Produce      application/x-protobuf
-// @Param        id   path      int  true  "Document ID"
-// @Success      200  {object}  swagUpdateDocumentResponse  "Protobuf: documents.v1.UpdateDocumentResponse"
-// @Failure      403  {object}  swagErrorResponse
-// @Failure      422  {object}  swagErrorResponse
-// @Security     BearerAuth || CookieAuth
-// @Router       /documents/{id}/resubmit [post]
-func (h *DocumentHandler) Resubmit(c *gin.Context) {
-	userID, ok := mustGetUserID(c)
+// DocumentsAssignReviewer implements PUT /documents/{id}/reviewer.
+func (s *Server) DocumentsAssignReviewer(ctx context.Context, req *oapi.AssignReviewerRequest, params oapi.DocumentsAssignReviewerParams) (oapi.DocumentsAssignReviewerRes, error) {
+	uid, role, err := s.callerIDAndRole(ctx)
+	if err != nil {
+		return &oapi.DocumentsAssignReviewerUnauthorized{Error: "unauthorized"}, nil
+	}
+	if !role.CanManageWorkspaces() {
+		return &oapi.DocumentsAssignReviewerForbidden{Error: "only managers may assign reviewers"}, nil
+	}
+	docID, ok := parseUintID(params.ID)
 	if !ok {
-		return
+		return &oapi.DocumentsAssignReviewerNotFound{Error: "document not found"}, nil
 	}
-	docID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	reviewerID, ok := parseUintID(req.ReviewerId)
+	if !ok {
+		return &oapi.DocumentsAssignReviewerBadRequest{Error: "invalid reviewerId"}, nil
+	}
+	doc, err := s.DocumentRepo.FindByID(docID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid document id"})
-		return
+		return &oapi.DocumentsAssignReviewerNotFound{Error: "document not found"}, nil
 	}
-
-	doc, err := h.Repo.FindByID(uint(docID))
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "document not found"})
-		return
+	doc.ReviewerID = &reviewerID
+	if err := s.DocumentRepo.Update(doc); err != nil {
+		logErr("documents.assign_reviewer.update", err)
+		return &oapi.DocumentsAssignReviewerInternalServerError{Error: "failed to update document"}, nil
 	}
-
-	if doc.UploaderID != userID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "only the uploader may resubmit this document"})
-		return
-	}
-
-	if !doc.CanTransitionTo(models.DocumentStatusInReview) {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "document cannot be resubmitted from its current status"})
-		return
-	}
-
-	doc.Status = models.DocumentStatusInReview
-	doc.ReviewerNote = ""
-	if err := h.Repo.Update(doc); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update document"})
-		return
-	}
-
-	logAudit(h.Audit, models.AuditActionDocumentSubmitted, userID, uintPtr(doc.ID), "document", map[string]any{
-		"document_id": doc.ID,
-		"resubmit":    true,
+	logAudit(s.Audit, models.AuditActionDocumentReviewerAssigned, uid, uintPtr(doc.ID), "document", map[string]any{
+		"reviewer_id": reviewerID,
 	})
-
-	protobufResponse(c, http.StatusOK, &docsv1.UpdateDocumentResponse{Document: documentToProto(doc)})
+	notifyReviewerAssigned(s.Email, s.UserRepo, s.Hub, doc, reviewerID)
+	return &oapi.UpdateDocumentResponse{Document: documentToOAPI(doc)}, nil
 }
 
-// Delete removes a document.
-// @Summary      Delete document
-// @Tags         documents
-// @Produce      application/x-protobuf
-// @Param        id   path      int  true  "Document ID"
-// @Success      200  {object}  swagMessageResponse  "Protobuf: documents.v1.DeleteDocumentResponse"
-// @Failure      404  {object}  swagErrorResponse
-// @Security     BearerAuth || CookieAuth
-// @Router       /documents/{id} [delete]
-func (h *DocumentHandler) Delete(c *gin.Context) {
-	userID, ok := mustGetUserID(c)
+// DocumentsDelete implements DELETE /documents/{id}.
+func (s *Server) DocumentsDelete(ctx context.Context, params oapi.DocumentsDeleteParams) (oapi.DocumentsDeleteRes, error) {
+	uid, err := s.callerID(ctx)
+	if err != nil {
+		return &oapi.DocumentsDeleteUnauthorized{Error: "unauthorized"}, nil
+	}
+	docID, ok := parseUintID(params.ID)
 	if !ok {
-		return
+		return &oapi.DocumentsDeleteNotFound{Error: "document not found"}, nil
 	}
-	docID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	doc, err := s.DocumentRepo.FindByID(docID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid document id"})
-		return
+		return &oapi.DocumentsDeleteNotFound{Error: "document not found"}, nil
 	}
-
-	doc, err := h.Repo.FindByID(uint(docID))
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "document not found"})
-		return
+	if err := s.DocumentRepo.Delete(docID); err != nil {
+		logErr("documents.delete", err)
+		return &oapi.DocumentsDeleteInternalServerError{Error: "failed to delete document"}, nil
 	}
-
-	if err := h.Repo.Delete(uint(docID)); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete document"})
-		return
-	}
-
-	logAudit(h.Audit, models.AuditActionDocumentDeleted, userID, uintPtr(uint(docID)), "document", map[string]any{
+	logAudit(s.Audit, models.AuditActionDocumentDeleted, uid, uintPtr(docID), "document", map[string]any{
 		"name": doc.Name,
 	})
-
-	protobufResponse(c, http.StatusOK, &docsv1.DeleteDocumentResponse{
-		Message: "document deleted",
-	})
+	return &oapi.MessageResponse{Message: "document deleted"}, nil
 }
+

@@ -1,49 +1,35 @@
 package handlers
 
 import (
+	"context"
 	"errors"
-	"net/http"
 
-	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
-	"github.com/spburtsev/ex-files-backend/services"
+	"github.com/spburtsev/ex-files-backend/oapi"
 )
 
-type VerifyHandler struct {
-	Repo services.DocumentRepository
-}
-
-// Verify checks whether a document with the given hash exists.
-// @Summary      Verify document hash
-// @Tags         verify
-// @Produce      json
-// @Param        hash  query     string  true  "SHA-256 document hash"
-// @Success      200   {object}  swagVerifyResponse
-// @Failure      400   {object}  swagErrorResponse
-// @Router       /verify [get]
-func (h *VerifyHandler) Verify(c *gin.Context) {
-	hash := c.Query("hash")
-	if hash == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "hash query parameter is required"})
-		return
+// VerifyHash implements GET /verify.
+func (s *Server) VerifyHash(ctx context.Context, params oapi.VerifyHashParams) (oapi.VerifyHashRes, error) {
+	if params.Hash == "" {
+		return &oapi.VerifyHashBadRequest{Error: "hash query parameter is required"}, nil
 	}
 
-	doc, err := h.Repo.FindByHash(hash)
+	doc, err := s.DocumentRepo.FindByHash(params.Hash)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusOK, gin.H{"verified": false})
-			return
+			return &oapi.VerifyResponse{Verified: false}, nil
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to look up document"})
-		return
+		logErr("verify.lookup", err)
+		return &oapi.VerifyHashInternalServerError{Error: "failed to look up document"}, nil
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"verified":      true,
-		"document_name": doc.Name,
-		"status":        doc.Status,
-		"notarized_at":  doc.CreatedAt,
-		"hash":          doc.Hash,
-	})
+	resp := oapi.VerifyResponse{
+		Verified:     true,
+		DocumentName: oapi.NewOptString(doc.Name),
+		Status:       oapi.NewOptDocumentStatus(oapi.DocumentStatus(doc.Status)),
+		NotarizedAt:  oapi.NewOptDateTime(doc.CreatedAt),
+		Hash:         oapi.NewOptString(doc.Hash),
+	}
+	return &resp, nil
 }

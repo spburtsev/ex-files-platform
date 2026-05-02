@@ -1,44 +1,43 @@
-.PHONY: proto proto-lint proto-breaking \
+.PHONY: openapi-lint openapi-gen-go openapi-gen-ts openapi-gen openapi-docs \
         infra-up infra-down \
         backend-dev dev \
         test test-cover test-race test-e2e \
         build build-frontend build-backend \
         docker-build up down \
         logs-up logs-down \
-        docs docs-proto docs-swagger
+        docs
 
-PROTO_DIR    := protocol
-BACKEND_GEN  := ex-files-backend/gen
-FRONTEND_GEN := ex-files-frontend/src/lib/gen
+API_DIR      := api
+API_SPEC     := $(API_DIR)/openapi.yaml
+BACKEND_GEN  := ex-files-backend/oapi
+FRONTEND_GEN := ex-files-frontend/src/lib/api
 BACKEND_DIR  := ex-files-backend
 FRONTEND_DIR := ex-files-frontend
 E2E_DIR      := integration-testing
 
-# --- Proto ---
+# --- OpenAPI ---
 
-proto:
-	cd $(PROTO_DIR) && buf dep update && buf generate
-	@echo "Go $(BACKEND_GEN)"
-	@echo "TS $(FRONTEND_GEN)"
+openapi-lint:
+	bunx --bun @redocly/cli@latest lint $(API_SPEC)
 
-proto-lint:
-	cd $(PROTO_DIR) && buf lint
+openapi-gen-go:
+	ogen --target $(BACKEND_GEN) --package oapi --clean $(API_SPEC)
+	@echo "Go server skeleton -> $(BACKEND_GEN)"
 
-proto-breaking:
-	cd $(PROTO_DIR) && buf breaking --against '.git#subdir=$(PROTO_DIR)'
+openapi-gen-ts:
+	cd $(FRONTEND_DIR) && bun run gen:api
+	@echo "TS client -> $(FRONTEND_GEN)"
+
+openapi-gen: openapi-gen-go openapi-gen-ts
+
+openapi-docs:
+	mkdir -p docs/api
+	bunx --bun @redocly/cli@latest build-docs $(API_SPEC) -o docs/api/index.html
 
 # --- Documentation ---
 
-docs-proto:
-	mkdir -p docs/proto
-	cd $(PROTO_DIR) && buf dep update && buf generate
-
-docs-swagger:
-	cd $(BACKEND_DIR) && swag init --parseDependency --parseInternal
-
-docs: docs-proto docs-swagger
-	@echo "Proto docs docs/proto/index.md"
-	@echo "Swagger    $(BACKEND_DIR)/docs/"
+docs: openapi-docs
+	@echo "API docs -> docs/api/index.html"
 
 # --- Local development ---
 
@@ -76,7 +75,7 @@ build-frontend:
 build-backend:
 	cd $(BACKEND_DIR) && CGO_ENABLED=0 go build -o bin/server .
 
-build: proto build-frontend build-backend
+build: openapi-gen build-frontend build-backend
 
 # --- Docker ---
 

@@ -40,7 +40,7 @@ rectangle "Platform Infrastructure\n<i>Docker Compose</i>\n" as platform #e8f4fd
 
 ' User  Application
 browser -down-> frontend : "HTTP + SSE\n"
-frontend -right-> backend : "  HTTP  \n"
+frontend -right-> backend : "  HTTP/JSON (OpenAPI)  \n"
 
 ' Application  Data
 backend -down-> pg    : TCP

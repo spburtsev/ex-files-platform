@@ -1,258 +1,283 @@
 package handlers_test
 
 import (
-	"bytes"
+	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
 
-	issuesv1 "github.com/spburtsev/ex-files-backend/gen/issues/v1"
 	"github.com/spburtsev/ex-files-backend/handlers"
 	"github.com/spburtsev/ex-files-backend/models"
+	"github.com/spburtsev/ex-files-backend/oapi"
 )
 
-// ---------------------------------------------------------------------------
-// Mocks
-// ---------------------------------------------------------------------------
-
-type mockIssueRepo struct{ mock.Mock }
-
-func (m *mockIssueRepo) ListAll() ([]models.Issue, error) {
-	args := m.Called()
-	if v, ok := args.Get(0).([]models.Issue); ok {
-		return v, args.Error(1)
+func issuesServer(tokens *mockTokens, repo *mockIssueRepo, users *mockUserRepo) *handlers.Server {
+	return &handlers.Server{
+		UserRepo:  users,
+		Tokens:    tokens,
+		Hasher:    stubHasher{},
+		Audit:     &dummyAudit{},
+		IssueRepo: repo,
 	}
-	return nil, args.Error(1)
 }
 
-func (m *mockIssueRepo) ListByWorkspace(workspaceID uint) ([]models.Issue, error) {
-	args := m.Called(workspaceID)
-	if v, ok := args.Get(0).([]models.Issue); ok {
-		return v, args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-func (m *mockIssueRepo) FindByID(id uint) (*models.Issue, error) {
-	args := m.Called(id)
-	if v, ok := args.Get(0).(*models.Issue); ok {
-		return v, args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-func (m *mockIssueRepo) Create(a *models.Issue) error {
-	return m.Called(a).Error(0)
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-func serveIssue(handler gin.HandlerFunc, method, path, routePattern string) *httptest.ResponseRecorder {
-	w := httptest.NewRecorder()
-	_, r := gin.CreateTestContext(w)
-	r.Handle(method, routePattern, handler)
-	req := httptest.NewRequest(method, path, nil)
-	r.ServeHTTP(w, req)
-	return w
-}
-
-func newIssuesHandler(iRepo *mockIssueRepo, uRepo *mockRepo) *handlers.IssuesHandler {
-	return &handlers.IssuesHandler{Repo: iRepo, UserRepo: uRepo}
-}
-
-// Test fixtures
-var testIssueUser = models.User{Name: "Alex Johnson", Email: "a.johnson@acme.org", Role: models.RoleEmployee}
-var testIssue = models.Issue{
-	Title:       "Sorting Algorithms Report",
-	Description: "Implement and benchmark QuickSort.",
-	Resolved:    false,
-	Assignee:    testIssueUser,
-}
-
-func init() {
-	testIssueUser.ID = 2
-	testIssue.ID = 1
-	testIssue.WorkspaceID = 1
-	testIssue.CreatorID = 5
-	testIssue.AssigneeID = 2
-}
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-func TestGetUsers(t *testing.T) {
-	uRepo := &mockRepo{}
-	uRepo.On("ListAll").Return([]models.User{
-		{Name: "Alex Johnson", Email: "a.johnson@acme.org", Role: models.RoleEmployee},
-		{Name: "Maria Chen", Email: "m.chen@acme.org", Role: models.RoleEmployee},
+func TestIssuesListByWorkspace_HappyPath(t *testing.T) {
+	tokens := &mockTokens{}
+	stubTokenAccept(tokens, 1, models.RoleManager)
+	repo := &mockIssueRepo{}
+	repo.On("ListByWorkspace", uint(7)).Return([]models.Issue{
+		{Model: gormModelID(1), WorkspaceID: 7, CreatorID: 1, AssigneeID: 2, Title: "A"},
+		{Model: gormModelID(2), WorkspaceID: 7, CreatorID: 1, AssigneeID: 3, Title: "B"},
 	}, nil)
 
-	h := newIssuesHandler(&mockIssueRepo{}, uRepo)
-	w := serveIssue(h.GetUsers, http.MethodGet, "/users", "/users")
+	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}))
+	defer srv.Close()
 
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, "application/x-protobuf", w.Header().Get("Content-Type"))
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodGet, srv.URL+"/workspaces/7/issues", nil))
+	require.NoError(t, err)
+	defer res.Body.Close()
 
-	var resp issuesv1.GetUsersResponse
-	require.NoError(t, proto.Unmarshal(w.Body.Bytes(), &resp))
-	assert.Len(t, resp.Users, 2)
-	assert.Equal(t, "Alex Johnson", resp.Users[0].Name)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	var got oapi.GetIssuesResponse
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&got))
+	assert.Len(t, got.Issues, 2)
+	assert.Equal(t, "A", got.Issues[0].Title)
+	assert.Equal(t, "7", got.Issues[0].WorkspaceId)
 }
 
-func TestGetUsers_RepoError(t *testing.T) {
-	uRepo := &mockRepo{}
-	uRepo.On("ListAll").Return(nil, errors.New("db error"))
+func TestIssuesListByWorkspace_RequiresAuth(t *testing.T) {
+	srv := newTestServer(t, issuesServer(&mockTokens{}, &mockIssueRepo{}, &mockUserRepo{}))
+	defer srv.Close()
 
-	h := newIssuesHandler(&mockIssueRepo{}, uRepo)
-	w := serveIssue(h.GetUsers, http.MethodGet, "/users", "/users")
-
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	res, err := http.Get(srv.URL + "/workspaces/7/issues")
+	require.NoError(t, err)
+	defer res.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, res.StatusCode)
 }
 
-func TestGetIssues(t *testing.T) {
-	iRepo := &mockIssueRepo{}
-	iRepo.On("ListByWorkspace", uint(1)).Return([]models.Issue{
-		testIssue,
-		{Title: "Binary Search Trees", Resolved: true, Assignee: testIssueUser},
+func TestIssuesGet_HappyPath(t *testing.T) {
+	tokens := &mockTokens{}
+	stubTokenAccept(tokens, 1, models.RoleEmployee)
+	repo := &mockIssueRepo{}
+	deadline := time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC)
+	repo.On("FindByID", uint(42)).Return(&models.Issue{
+		Model:       gormModelID(42),
+		WorkspaceID: 7,
+		CreatorID:   1,
+		AssigneeID:  2,
+		Assignee:    models.User{Model: gormModelID(2), Email: "a@x", Name: "Assignee", Role: models.RoleEmployee},
+		Title:       "Review",
+		Description: "Quarterly review",
+		Deadline:    &deadline,
 	}, nil)
 
-	h := newIssuesHandler(iRepo, &mockRepo{})
-	w := serveIssue(h.ListByWorkspace, http.MethodGet, "/workspaces/1/issues", "/workspaces/:id/issues")
+	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}))
+	defer srv.Close()
 
-	assert.Equal(t, http.StatusOK, w.Code)
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodGet, srv.URL+"/issues/42", nil))
+	require.NoError(t, err)
+	defer res.Body.Close()
 
-	var resp issuesv1.GetIssuesResponse
-	require.NoError(t, proto.Unmarshal(w.Body.Bytes(), &resp))
-	assert.Len(t, resp.Issues, 2)
-	assert.Equal(t, "Sorting Algorithms Report", resp.Issues[0].Title)
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	var got oapi.GetIssueResponse
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&got))
+	assert.Equal(t, "42", got.Issue.ID)
+	assert.Equal(t, "Review", got.Issue.Title)
+	require.True(t, got.Issue.Deadline.IsSet())
+	dl, _ := got.Issue.Deadline.Get()
+	assert.Equal(t, deadline.Unix(), dl.Unix())
+	assert.Equal(t, "Assignee", got.User.Name)
 }
 
-func TestGetIssues_RepoError(t *testing.T) {
-	iRepo := &mockIssueRepo{}
-	iRepo.On("ListByWorkspace", uint(1)).Return(nil, errors.New("db error"))
+func TestIssuesGet_NotFound(t *testing.T) {
+	tokens := &mockTokens{}
+	stubTokenAccept(tokens, 1, models.RoleEmployee)
+	repo := &mockIssueRepo{}
+	repo.On("FindByID", uint(999)).Return(nil, errors.New("not found"))
 
-	h := newIssuesHandler(iRepo, &mockRepo{})
-	w := serveIssue(h.ListByWorkspace, http.MethodGet, "/workspaces/1/issues", "/workspaces/:id/issues")
+	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}))
+	defer srv.Close()
 
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodGet, srv.URL+"/issues/999", nil))
+	require.NoError(t, err)
+	defer res.Body.Close()
+	assert.Equal(t, http.StatusNotFound, res.StatusCode)
 }
 
-func TestGetIssue(t *testing.T) {
-	t.Run("valid id returns issue with assignee", func(t *testing.T) {
-		iRepo := &mockIssueRepo{}
-		iRepo.On("FindByID", uint(1)).Return(&testIssue, nil)
+func TestIssuesCreate_ManagerSucceeds(t *testing.T) {
+	tokens := &mockTokens{}
+	stubTokenAccept(tokens, 1, models.RoleManager)
+	repo := &mockIssueRepo{}
+	repo.On("Create", mock.AnythingOfType("*models.Issue")).Return(uint(11), nil)
 
-		h := newIssuesHandler(iRepo, &mockRepo{})
-		w := serveIssue(h.Get, http.MethodGet, "/issues/1", "/issues/:id")
+	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}))
+	defer srv.Close()
 
-		assert.Equal(t, http.StatusOK, w.Code)
+	body := strings.NewReader(`{"title":"Q4 audit","description":"Stuff","assigneeId":"2","deadline":"2026-12-31T23:59:59Z"}`)
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodPost, srv.URL+"/workspaces/7/issues", body))
+	require.NoError(t, err)
+	defer res.Body.Close()
 
-		var resp issuesv1.GetIssueResponse
-		require.NoError(t, proto.Unmarshal(w.Body.Bytes(), &resp))
-		assert.Equal(t, "1", resp.Issue.Id)
-		assert.Equal(t, "Sorting Algorithms Report", resp.Issue.Title)
-		assert.Equal(t, "Alex Johnson", resp.User.Name)
-	})
-
-	t.Run("non-numeric id returns 400", func(t *testing.T) {
-		h := newIssuesHandler(&mockIssueRepo{}, &mockRepo{})
-		w := serveIssue(h.Get, http.MethodGet, "/issues/abc", "/issues/:id")
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
-
-	t.Run("not found returns 404", func(t *testing.T) {
-		iRepo := &mockIssueRepo{}
-		iRepo.On("FindByID", uint(999)).Return(nil, errors.New("not found"))
-
-		h := newIssuesHandler(iRepo, &mockRepo{})
-		w := serveIssue(h.Get, http.MethodGet, "/issues/999", "/issues/:id")
-		assert.Equal(t, http.StatusNotFound, w.Code)
-	})
+	require.Equal(t, http.StatusCreated, res.StatusCode)
+	var got oapi.CreateIssueResponse
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&got))
+	assert.Equal(t, "11", got.Issue.ID)
+	assert.Equal(t, "Q4 audit", got.Issue.Title)
 }
 
-// --- TestCreateIssue ---
+func TestIssuesCreate_EmployeeForbidden(t *testing.T) {
+	tokens := &mockTokens{}
+	stubTokenAccept(tokens, 1, models.RoleEmployee)
 
-func issueRequest(handler gin.HandlerFunc, method, path, routePattern string, body *bytes.Buffer, userID uint, role string) *httptest.ResponseRecorder {
-	w := httptest.NewRecorder()
-	_, r := gin.CreateTestContext(w)
-	r.Handle(method, routePattern, func(c *gin.Context) {
-		c.Set("user_id", userID)
-		c.Set("role", role)
-		handler(c)
-	})
-	var req *http.Request
-	if body != nil {
-		req = httptest.NewRequest(method, path, body)
-		req.Header.Set("Content-Type", "application/json")
-	} else {
-		req = httptest.NewRequest(method, path, nil)
-	}
-	r.ServeHTTP(w, req)
-	return w
+	srv := newTestServer(t, issuesServer(tokens, &mockIssueRepo{}, &mockUserRepo{}))
+	defer srv.Close()
+
+	body := strings.NewReader(`{"title":"X","assigneeId":"2"}`)
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodPost, srv.URL+"/workspaces/7/issues", body))
+	require.NoError(t, err)
+	defer res.Body.Close()
+	assert.Equal(t, http.StatusForbidden, res.StatusCode)
 }
 
-func TestCreateIssue(t *testing.T) {
-	t.Run("employee_forbidden", func(t *testing.T) {
-		h := newIssuesHandler(&mockIssueRepo{}, &mockRepo{})
-		body := bytes.NewBufferString(`{"title":"Test","assignee_id":2}`)
-		w := issueRequest(h.Create, http.MethodPost, "/workspaces/1/issues", "/workspaces/:id/issues", body, 5, "employee")
+func TestIssuesCreate_BadAssigneeReturns400(t *testing.T) {
+	tokens := &mockTokens{}
+	stubTokenAccept(tokens, 1, models.RoleManager)
 
-		assert.Equal(t, http.StatusForbidden, w.Code)
-	})
+	srv := newTestServer(t, issuesServer(tokens, &mockIssueRepo{}, &mockUserRepo{}))
+	defer srv.Close()
 
-	t.Run("manager_success", func(t *testing.T) {
-		iRepo := &mockIssueRepo{}
-		iRepo.On("Create", mock.AnythingOfType("*models.Issue")).Run(func(args mock.Arguments) {
-			issue := args.Get(0).(*models.Issue)
-			issue.ID = 10
-		}).Return(nil)
+	body := strings.NewReader(`{"title":"X","assigneeId":"not-a-number"}`)
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodPost, srv.URL+"/workspaces/7/issues", body))
+	require.NoError(t, err)
+	defer res.Body.Close()
+	assert.Equal(t, http.StatusBadRequest, res.StatusCode)
+}
 
-		h := newIssuesHandler(iRepo, &mockRepo{})
-		body := bytes.NewBufferString(`{"title":"Report Q1","description":"Quarterly report","assignee_id":2}`)
-		w := issueRequest(h.Create, http.MethodPost, "/workspaces/1/issues", "/workspaces/:id/issues", body, 5, "manager")
+func TestIssuesUpdateAssignee_ManagerSucceeds(t *testing.T) {
+	tokens := &mockTokens{}
+	stubTokenAccept(tokens, 1, models.RoleManager)
+	repo := &mockIssueRepo{}
+	users := &mockUserRepo{}
+	repo.On("FindByID", uint(42)).Return(&models.Issue{
+		Model:       gormModelID(42),
+		WorkspaceID: 7,
+		CreatorID:   99,
+		AssigneeID:  2,
+		Title:       "Review",
+	}, nil).Once()
+	users.On("FindByID", uint(5)).Return(&models.User{Model: gormModelID(5), Name: "New Assignee"}, nil)
+	repo.On("Update", mock.MatchedBy(func(i *models.Issue) bool { return i.AssigneeID == 5 })).Return(nil)
+	repo.On("FindByID", uint(42)).Return(&models.Issue{
+		Model:       gormModelID(42),
+		WorkspaceID: 7,
+		CreatorID:   99,
+		AssigneeID:  5,
+		Assignee:    models.User{Model: gormModelID(5), Name: "New Assignee"},
+		Title:       "Review",
+	}, nil).Once()
 
-		assert.Equal(t, http.StatusCreated, w.Code)
-		assert.Equal(t, "application/x-protobuf", w.Header().Get("Content-Type"))
+	srv := newTestServer(t, issuesServer(tokens, repo, users))
+	defer srv.Close()
 
-		var resp issuesv1.CreateIssueResponse
-		require.NoError(t, proto.Unmarshal(w.Body.Bytes(), &resp))
-		require.NotNil(t, resp.Issue)
-		assert.Equal(t, "Report Q1", resp.Issue.Title)
-		assert.Equal(t, "Quarterly report", resp.Issue.Description)
-		assert.Equal(t, "1", resp.Issue.WorkspaceId)
-		assert.Equal(t, "5", resp.Issue.CreatorId)
-		assert.Equal(t, "2", resp.Issue.AssigneeId)
+	body := strings.NewReader(`{"assigneeId":"5"}`)
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodPut, srv.URL+"/issues/42/assignee", body))
+	require.NoError(t, err)
+	defer res.Body.Close()
 
-		iRepo.AssertExpectations(t)
-	})
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	var got oapi.GetIssueResponse
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&got))
+	assert.Equal(t, "5", got.Issue.AssigneeId)
+	assert.Equal(t, "New Assignee", got.User.Name)
+}
 
-	t.Run("missing_title", func(t *testing.T) {
-		h := newIssuesHandler(&mockIssueRepo{}, &mockRepo{})
-		body := bytes.NewBufferString(`{"description":"no title here","assignee_id":2}`)
-		w := issueRequest(h.Create, http.MethodPost, "/workspaces/1/issues", "/workspaces/:id/issues", body, 5, "manager")
+func TestIssuesUpdateAssignee_CreatorSucceeds(t *testing.T) {
+	tokens := &mockTokens{}
+	stubTokenAccept(tokens, 99, models.RoleEmployee)
+	repo := &mockIssueRepo{}
+	users := &mockUserRepo{}
+	repo.On("FindByID", uint(42)).Return(&models.Issue{
+		Model:      gormModelID(42),
+		CreatorID:  99,
+		AssigneeID: 2,
+	}, nil).Once()
+	users.On("FindByID", uint(5)).Return(&models.User{Model: gormModelID(5), Name: "New"}, nil)
+	repo.On("Update", mock.AnythingOfType("*models.Issue")).Return(nil)
+	repo.On("FindByID", uint(42)).Return(&models.Issue{
+		Model:      gormModelID(42),
+		CreatorID:  99,
+		AssigneeID: 5,
+		Assignee:   models.User{Model: gormModelID(5), Name: "New"},
+	}, nil).Once()
 
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
+	srv := newTestServer(t, issuesServer(tokens, repo, users))
+	defer srv.Close()
 
-	t.Run("repo_error", func(t *testing.T) {
-		iRepo := &mockIssueRepo{}
-		iRepo.On("Create", mock.AnythingOfType("*models.Issue")).Return(errors.New("db error"))
+	body := strings.NewReader(`{"assigneeId":"5"}`)
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodPut, srv.URL+"/issues/42/assignee", body))
+	require.NoError(t, err)
+	defer res.Body.Close()
+	assert.Equal(t, http.StatusOK, res.StatusCode)
+}
 
-		h := newIssuesHandler(iRepo, &mockRepo{})
-		body := bytes.NewBufferString(`{"title":"Report Q1","assignee_id":2}`)
-		w := issueRequest(h.Create, http.MethodPost, "/workspaces/1/issues", "/workspaces/:id/issues", body, 5, "manager")
+func TestIssuesUpdateAssignee_NonCreatorEmployeeForbidden(t *testing.T) {
+	tokens := &mockTokens{}
+	stubTokenAccept(tokens, 7, models.RoleEmployee)
+	repo := &mockIssueRepo{}
+	repo.On("FindByID", uint(42)).Return(&models.Issue{
+		Model:     gormModelID(42),
+		CreatorID: 99,
+	}, nil)
 
-		assert.Equal(t, http.StatusInternalServerError, w.Code)
-		iRepo.AssertExpectations(t)
-	})
+	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}))
+	defer srv.Close()
+
+	body := strings.NewReader(`{"assigneeId":"5"}`)
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodPut, srv.URL+"/issues/42/assignee", body))
+	require.NoError(t, err)
+	defer res.Body.Close()
+	assert.Equal(t, http.StatusForbidden, res.StatusCode)
+}
+
+func TestIssuesUpdateAssignee_ResolvedReturns422(t *testing.T) {
+	tokens := &mockTokens{}
+	stubTokenAccept(tokens, 1, models.RoleManager)
+	repo := &mockIssueRepo{}
+	repo.On("FindByID", uint(42)).Return(&models.Issue{
+		Model:    gormModelID(42),
+		Resolved: true,
+	}, nil)
+
+	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}))
+	defer srv.Close()
+
+	body := strings.NewReader(`{"assigneeId":"5"}`)
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodPut, srv.URL+"/issues/42/assignee", body))
+	require.NoError(t, err)
+	defer res.Body.Close()
+	assert.Equal(t, http.StatusUnprocessableEntity, res.StatusCode)
+}
+
+func TestIssuesUpdateAssignee_UnknownAssignee400(t *testing.T) {
+	tokens := &mockTokens{}
+	stubTokenAccept(tokens, 1, models.RoleManager)
+	repo := &mockIssueRepo{}
+	users := &mockUserRepo{}
+	repo.On("FindByID", uint(42)).Return(&models.Issue{Model: gormModelID(42)}, nil)
+	users.On("FindByID", uint(999)).Return(nil, errors.New("not found"))
+
+	srv := newTestServer(t, issuesServer(tokens, repo, users))
+	defer srv.Close()
+
+	body := strings.NewReader(`{"assigneeId":"999"}`)
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodPut, srv.URL+"/issues/42/assignee", body))
+	require.NoError(t, err)
+	defer res.Body.Close()
+	assert.Equal(t, http.StatusBadRequest, res.StatusCode)
 }

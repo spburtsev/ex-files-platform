@@ -1,10 +1,10 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import type { PDFDocumentProxy } from 'pdfjs-dist';
+	import type { Attachment } from 'svelte/attachments';
+	import { getPdfjs } from '$lib/pdf/pdfjs';
 	import type { Comment } from '$lib/stores/workbench.svelte';
 
 	interface Props {
-		data: Uint8Array;
 		comments: Comment[];
 		currentPage: number;
 		showMarkers: boolean;
@@ -14,7 +14,6 @@
 	}
 
 	let {
-		data,
 		comments,
 		currentPage,
 		showMarkers,
@@ -23,80 +22,75 @@
 		onpagecount
 	}: Props = $props();
 
-	let canvasEl = $state<HTMLCanvasElement>();
-	let containerEl = $state<HTMLDivElement>();
 	let pdfDoc = $state<PDFDocumentProxy | null>(null);
 	let error = $state<string | null>(null);
-	let renderedKey = $state('');
+	let canvasRef: HTMLCanvasElement | null = null;
+	let loadToken = 0;
 	let hoveredCommentId = $state<string | null>(null);
 
-	const pageComments = $derived(comments.filter((c) => c.page === currentPage));
-
-	onMount(() => {
-		// Polyfill Map.prototype.getOrInsertComputed for pdfjs-dist v5
-		// if (!("getOrInsertComputed" in Map.prototype)) {
-		// 	Map.prototype.getOrInsertComputed = function (key, callbackFn) {
-		// 		if (this.has(key)) return this.get(key);
-		// 		const value = callbackFn(key);
-		// 		this.set(key, value);
-		// 		return value;
-		// 	};
-		// }
-
-		loadPdf();
-
-		return () => {
-			pdfDoc?.destroy();
-		};
-	});
-
-	async function loadPdf() {
+	export async function load(data: Uint8Array) {
+		const myToken = ++loadToken;
+		error = null;
 		try {
-			const pdfjsLib = await import('pdfjs-dist');
-			pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-				'pdfjs-dist/build/pdf.worker.mjs',
-				import.meta.url
-			).href;
+			const pdfjsLib = await getPdfjs();
 			const doc = await pdfjsLib.getDocument({ data: data.slice() }).promise;
+			if (myToken !== loadToken) {
+				doc.destroy();
+				return;
+			}
+			pdfDoc?.destroy();
 			pdfDoc = doc;
 			onpagecount(doc.numPages);
 		} catch (e) {
-			console.error('Failed to load PDF:', e);
-			error = e instanceof Error ? e.message : 'Failed to load PDF';
+			if (myToken === loadToken) {
+				error = e instanceof Error ? e.message : 'Failed to load PDF';
+			}
 		}
 	}
 
 	$effect(() => {
-		const key = `${currentPage}-${scale}`;
-		if (pdfDoc && canvasEl && key !== renderedKey) {
-			renderPage(pdfDoc, currentPage, scale, canvasEl);
-		}
+		return () => {
+			pdfDoc?.destroy();
+			pdfDoc = null;
+		};
 	});
 
-	async function renderPage(
-		doc: PDFDocumentProxy,
-		pageNum: number,
-		renderScale: number,
-		canvas: HTMLCanvasElement
-	) {
-		const key = `${pageNum}-${renderScale}`;
-		try {
-			const page = await doc.getPage(pageNum + 1);
-			const viewport = page.getViewport({ scale: renderScale });
-			canvas.width = viewport.width;
-			canvas.height = viewport.height;
+	const pageComments = $derived(comments.filter((c) => c.page === currentPage));
 
-			await page.render({ canvas, viewport }).promise;
-			renderedKey = key;
-		} catch (e) {
-			console.error('Failed to render page:', e);
-			error = e instanceof Error ? e.message : 'Failed to render page';
-		}
+	function renderAttachment(doc: PDFDocumentProxy): Attachment<HTMLCanvasElement> {
+		return (canvas) => {
+			canvasRef = canvas;
+			$effect(() => {
+				const page = currentPage;
+				const s = scale;
+				let cancelled = false;
+				(async () => {
+					try {
+						const p = await doc.getPage(page + 1);
+						const viewport = p.getViewport({ scale: s });
+						if (cancelled) return;
+						canvas.width = viewport.width;
+						canvas.height = viewport.height;
+						await p.render({ canvas, viewport }).promise;
+					} catch (e) {
+						if (!cancelled) {
+							error = e instanceof Error ? e.message : 'Failed to render page';
+						}
+					}
+				})();
+				return () => {
+					cancelled = true;
+				};
+			});
+			return () => {
+				canvasRef = null;
+			};
+		};
 	}
 
 	function handleCanvasClick(e: MouseEvent) {
-		if (!canvasEl) return;
-		const rect = canvasEl.getBoundingClientRect();
+		if (!canvasRef) return;
+		const rect = canvasRef.getBoundingClientRect();
 		const x = ((e.clientX - rect.left) / rect.width) * 100;
 		const y = ((e.clientY - rect.top) / rect.height) * 100;
 		onpageclick(currentPage, x, y, e.clientX, e.clientY);
@@ -128,62 +122,64 @@
 		</div>
 	{/if}
 
-	<div bind:this={containerEl} class="relative flex justify-center overflow-auto bg-gray-100 p-6">
-		<!-- svelte-ignore a11y_click_events_have_key_events -->
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="relative inline-block cursor-crosshair shadow-lg" onclick={handleCanvasClick}>
-			<canvas bind:this={canvasEl}></canvas>
+	<div class="relative flex justify-center overflow-auto bg-gray-100 p-6">
+		{#if pdfDoc}
+			<!-- svelte-ignore a11y_click_events_have_key_events -->
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div class="relative inline-block cursor-crosshair shadow-lg" onclick={handleCanvasClick}>
+				<canvas {@attach renderAttachment(pdfDoc)}></canvas>
 
-			{#if showMarkers}
-				{#each pageComments as comment, i (comment.id)}
-					<div
-						class="absolute"
-						style="left: {comment.x}%; top: {comment.y}%"
-						onmouseenter={() => (hoveredCommentId = comment.id)}
-						onmouseleave={() => (hoveredCommentId = null)}
-					>
+				{#if showMarkers}
+					{#each pageComments as comment, i (comment.id)}
 						<div
-							class="flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-amber-400 text-xs font-bold text-white shadow-md ring-2 ring-white transition-transform hover:scale-125"
+							class="absolute"
+							style="left: {comment.x}%; top: {comment.y}%"
+							onmouseenter={() => (hoveredCommentId = comment.id)}
+							onmouseleave={() => (hoveredCommentId = null)}
 						>
-							{i + 1}
-						</div>
-
-						{#if hoveredCommentId === comment.id}
-							{@const showBelow = comment.y < 25}
 							<div
-								class="absolute left-1/2 z-20 w-56 -translate-x-1/2 rounded-lg border bg-card p-3 shadow-xl {showBelow
-									? 'top-full mt-2'
-									: 'bottom-full mb-2'}"
+								class="flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-amber-400 text-xs font-bold text-white shadow-md ring-2 ring-white transition-transform hover:scale-125"
 							>
-								<div class="flex items-center gap-2">
-									<div
-										class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white {avatarColor(
-											comment.author
-										)}"
-									>
-										{comment.author.charAt(0).toUpperCase()}
-									</div>
-									<div class="min-w-0">
-										<p class="truncate text-sm font-medium">{comment.author}</p>
-										<p class="text-xs text-muted-foreground">{formatTime(comment.createdAt)}</p>
-									</div>
-								</div>
-								<p class="mt-2 text-sm leading-snug text-muted-foreground">{comment.text}</p>
-								<!-- caret -->
-								{#if showBelow}
-									<div
-										class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-border"
-									></div>
-								{:else}
-									<div
-										class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-border"
-									></div>
-								{/if}
+								{i + 1}
 							</div>
-						{/if}
-					</div>
-				{/each}
-			{/if}
-		</div>
+
+							{#if hoveredCommentId === comment.id}
+								{@const showBelow = comment.y < 25}
+								<div
+									class="absolute left-1/2 z-20 w-56 -translate-x-1/2 rounded-lg border bg-card p-3 shadow-xl {showBelow
+										? 'top-full mt-2'
+										: 'bottom-full mb-2'}"
+								>
+									<div class="flex items-center gap-2">
+										<div
+											class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white {avatarColor(
+												comment.author
+											)}"
+										>
+											{comment.author.charAt(0).toUpperCase()}
+										</div>
+										<div class="min-w-0">
+											<p class="truncate text-sm font-medium">{comment.author}</p>
+											<p class="text-xs text-muted-foreground">{formatTime(comment.createdAt)}</p>
+										</div>
+									</div>
+									<p class="mt-2 text-sm leading-snug text-muted-foreground">{comment.text}</p>
+									<!-- caret -->
+									{#if showBelow}
+										<div
+											class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-border"
+										></div>
+									{:else}
+										<div
+											class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-border"
+										></div>
+									{/if}
+								</div>
+							{/if}
+						</div>
+					{/each}
+				{/if}
+			</div>
+		{/if}
 	</div>
 </div>

@@ -160,7 +160,7 @@ func TestGormWorkspaceRepo_AssignableUsers(t *testing.T) {
 	ws := &models.Workspace{Name: "WS", ManagerID: manager.ID}
 	wsRepo.Create(ws)
 
-	// Add emp1 as member — emp2 should be assignable
+	// Add emp1 as member - emp2 should be assignable
 	wsRepo.AddMember(&models.WorkspaceMember{WorkspaceID: ws.ID, UserID: emp1.ID})
 
 	assignable, err := wsRepo.GetAssignableUsers(ws.ID)
@@ -388,4 +388,49 @@ func TestGormAuditRepo_ListWithFilters(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), total4)
 	assert.Len(t, entries4, 2)
+}
+
+func TestGormDocumentRepo_ListByIssue_ApprovedFirst(t *testing.T) {
+	db := setupTestDB(t)
+	docRepo := &GormDocumentRepository{DB: db}
+	userRepo := &GormUserRepository{DB: db}
+
+	user := &models.User{Email: "u@t.com", Name: "U", PasswordHash: "h"}
+	require.NoError(t, userRepo.Create(user))
+
+	issue := &models.Issue{Title: "I", CreatorID: user.ID, AssigneeID: user.ID, WorkspaceID: 1}
+	require.NoError(t, db.Create(issue).Error)
+
+	// Approved doc was uploaded *first* (oldest CreatedAt). Pending docs come after.
+	approved := &models.Document{
+		Name: "approved.pdf", MimeType: "application/pdf", Size: 1, Hash: "h-approved",
+		Status: models.DocumentStatusApproved, UploaderID: user.ID, IssueID: issue.ID,
+	}
+	require.NoError(t, docRepo.Create(approved))
+	// Force the approved doc to be older than the pending ones.
+	require.NoError(t, db.Model(approved).Update("created_at", time.Now().Add(-1*time.Hour)).Error)
+
+	pending1 := &models.Document{
+		Name: "pending-1.pdf", MimeType: "application/pdf", Size: 1, Hash: "h-pending-1",
+		Status: models.DocumentStatusPending, UploaderID: user.ID, IssueID: issue.ID,
+	}
+	require.NoError(t, docRepo.Create(pending1))
+	pending2 := &models.Document{
+		Name: "pending-2.pdf", MimeType: "application/pdf", Size: 1, Hash: "h-pending-2",
+		Status: models.DocumentStatusPending, UploaderID: user.ID, IssueID: issue.ID,
+	}
+	require.NoError(t, docRepo.Create(pending2))
+
+	docs, total, err := docRepo.ListByIssue(issue.ID, "", "", 10, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), total)
+	require.Len(t, docs, 3)
+	// Approved must be first regardless of upload time.
+	assert.Equal(t, models.DocumentStatusApproved, docs[0].Status)
+	assert.Equal(t, "approved.pdf", docs[0].Name)
+	// Remaining two are pending, ordered by created_at DESC.
+	assert.Equal(t, models.DocumentStatusPending, docs[1].Status)
+	assert.Equal(t, models.DocumentStatusPending, docs[2].Status)
+	assert.Equal(t, "pending-2.pdf", docs[1].Name)
+	assert.Equal(t, "pending-1.pdf", docs[2].Name)
 }

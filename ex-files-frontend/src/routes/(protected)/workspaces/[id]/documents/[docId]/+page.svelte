@@ -86,7 +86,7 @@
 
 	let uploadingVersion = $state(false);
 	let uploadVersionError = $state('');
-	let downloadingId = $state<bigint | null>(null);
+	let downloadingId = $state<string | null>(null);
 
 	let rejectOpen = $state(false);
 	let rejectNote = $state('');
@@ -97,7 +97,7 @@
 	let requestingChanges = $state(false);
 
 	let assignReviewerOpen = $state(false);
-	let selectedReviewerId = $state<bigint | null>(null);
+	let selectedReviewerId = $state<string | null>(null);
 	let assigningReviewer = $state(false);
 	let assignReviewerError = $state('');
 
@@ -213,7 +213,7 @@
 		try {
 			const result = await assignDocumentReviewer({
 				id: docId,
-				reviewerId: Number(selectedReviewerId)
+				reviewerId: selectedReviewerId
 			});
 			if (!result.ok) {
 				assignReviewerError = result.error ?? m.doc_assign_error();
@@ -227,10 +227,10 @@
 		}
 	}
 
-	async function handleDownload(versionId: bigint) {
+	async function handleDownload(versionId: string) {
 		downloadingId = versionId;
 		try {
-			const { url } = await getDocumentDownloadUrl({ docId, versionId: Number(versionId) });
+			const { url } = await getDocumentDownloadUrl({ docId, versionId });
 			if (!url) {
 				toast.error(m.error_download_failed());
 				return;

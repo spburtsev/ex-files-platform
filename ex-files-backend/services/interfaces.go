@@ -78,6 +78,7 @@ type IssueRepository interface {
 	ListByWorkspace(workspaceID uint) ([]models.Issue, error)
 	FindByID(id uint) (*models.Issue, error)
 	Create(issue *models.Issue) error
+	Update(issue *models.Issue) error
 }
 
 type EmailService interface {

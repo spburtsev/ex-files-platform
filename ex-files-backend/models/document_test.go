@@ -24,13 +24,19 @@ func TestCanTransitionTo(t *testing.T) {
 			name:    "pending_to_approved",
 			current: DocumentStatusPending,
 			next:    DocumentStatusApproved,
-			want:    false,
+			want:    true,
 		},
 		{
 			name:    "pending_to_rejected",
 			current: DocumentStatusPending,
 			next:    DocumentStatusRejected,
-			want:    false,
+			want:    true,
+		},
+		{
+			name:    "pending_to_changes_requested",
+			current: DocumentStatusPending,
+			next:    DocumentStatusChangesRequested,
+			want:    true,
 		},
 
 		// From in_review
@@ -70,7 +76,13 @@ func TestCanTransitionTo(t *testing.T) {
 			name:    "changes_requested_to_approved",
 			current: DocumentStatusChangesRequested,
 			next:    DocumentStatusApproved,
-			want:    false,
+			want:    true,
+		},
+		{
+			name:    "changes_requested_to_rejected",
+			current: DocumentStatusChangesRequested,
+			next:    DocumentStatusRejected,
+			want:    true,
 		},
 
 		// Terminal states

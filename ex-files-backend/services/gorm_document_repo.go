@@ -54,7 +54,10 @@ func (r *GormDocumentRepository) ListByIssue(issueID uint, search, status string
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	if err := q.Preload("Uploader").Order("created_at DESC").Limit(limit).Offset(offset).Find(&docs).Error; err != nil {
+	if err := q.Preload("Uploader").
+		Order("(status = 'approved') DESC").
+		Order("created_at DESC").
+		Limit(limit).Offset(offset).Find(&docs).Error; err != nil {
 		return nil, 0, err
 	}
 

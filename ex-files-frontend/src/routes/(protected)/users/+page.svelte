@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { getUsers } from '$lib/data.remote';
-	import { Role } from '$lib/gen/issues/v1/issues_pb';
 	import { m } from '$lib/paraglide/messages.js';
 	import * as Card from '$lib/components/ui/card/index.js';
 	import * as Avatar from '$lib/components/ui/avatar/index.js';
@@ -81,7 +80,7 @@
 							</div>
 						</Card.Header>
 						<Card.Content>
-							{#if user.role === Role.MANAGER}
+							{#if user.role === 'manager' || user.role === 'root'}
 								<Badge variant="secondary" class="text-violet-700">{m.role_manager()}</Badge>
 							{:else}
 								<Badge variant="outline">{m.role_employee()}</Badge>

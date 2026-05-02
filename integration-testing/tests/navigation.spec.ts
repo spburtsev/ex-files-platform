@@ -15,7 +15,7 @@ test.describe('Sidebar navigation', () => {
 	test('employee sees dashboard, workspaces, users', async ({ page }) => {
 		await login(page, EMPLOYEE.email, EMPLOYEE.password);
 
-		const sidebar = page.locator('[data-sidebar="root"]');
+		const sidebar = page.locator('[data-sidebar="sidebar"]');
 		await expect(sidebar.getByRole('link', { name: /dashboard/i })).toBeVisible();
 		await expect(sidebar.getByRole('link', { name: /workspaces/i })).toBeVisible();
 		await expect(sidebar.getByRole('link', { name: /users/i })).toBeVisible();
@@ -24,14 +24,14 @@ test.describe('Sidebar navigation', () => {
 	test('manager also sees audit log', async ({ page }) => {
 		await login(page, MANAGER.email, MANAGER.password);
 
-		const sidebar = page.locator('[data-sidebar="root"]');
+		const sidebar = page.locator('[data-sidebar="sidebar"]');
 		await expect(sidebar.getByRole('link', { name: /audit/i })).toBeVisible();
 	});
 
 	test('navigate to workspaces page', async ({ page }) => {
 		await login(page, EMPLOYEE.email, EMPLOYEE.password);
 
-		await page.locator('[data-sidebar="root"]').getByRole('link', { name: /workspaces/i }).click();
+		await page.locator('[data-sidebar="sidebar"]').getByRole('link', { name: /workspaces/i }).click();
 		await expect(page).toHaveURL(/\/workspaces/);
 	});
 });

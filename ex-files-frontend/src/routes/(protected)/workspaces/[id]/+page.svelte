@@ -151,7 +151,7 @@
 		addingId = userId;
 		addError = '';
 		try {
-			const result = await addWorkspaceMember({ workspaceId: wsId, userId: Number(userId) });
+			const result = await addWorkspaceMember({ workspaceId: wsId, userId });
 			if (!result.ok) {
 				addError = result.error ?? m.ws_add_member_error();
 				return;
@@ -174,7 +174,7 @@
 				workspaceId: wsId,
 				title: newIssueTitle.trim(),
 				description: newIssueDesc.trim() || undefined,
-				assigneeId: Number(newIssueAssignee),
+				assigneeId: newIssueAssignee,
 				deadline: newIssueDeadline || undefined
 			});
 			if (!result.ok) {
@@ -194,7 +194,7 @@
 		}
 	}
 
-	async function handleRemoveMember(userId: bigint) {
+	async function handleRemoveMember(userId: string) {
 		try {
 			const result = await removeWorkspaceMember({ workspaceId: wsId, userId });
 			if (!result.ok) {

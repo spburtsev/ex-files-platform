@@ -43,3 +43,7 @@ func (r *GormIssueRepository) FindByID(id uint) (*models.Issue, error) {
 func (r *GormIssueRepository) Create(issue *models.Issue) error {
 	return r.DB.Create(issue).Error
 }
+
+func (r *GormIssueRepository) Update(issue *models.Issue) error {
+	return r.DB.Save(issue).Error
+}

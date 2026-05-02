@@ -35,7 +35,7 @@
 		charts.forEach((c) => c.destroy());
 		charts = [];
 
-		// Actions by Type — bar chart
+		// Actions by Type - bar chart
 		if (actionsCanvas && stats.actions_by_type?.length) {
 			charts.push(
 				new Chart(actionsCanvas, {
@@ -60,7 +60,7 @@
 			);
 		}
 
-		// Daily Activity — line chart
+		// Daily Activity - line chart
 		if (dailyCanvas && stats.daily_activity?.length) {
 			charts.push(
 				new Chart(dailyCanvas, {
@@ -87,7 +87,7 @@
 			);
 		}
 
-		// Documents by Status — doughnut chart
+		// Documents by Status - doughnut chart
 		if (statusCanvas && stats.documents_by_status?.length) {
 			const colors = ['#f59e0b', '#3b82f6', '#10b981', '#ef4444', '#8b5cf6'];
 			charts.push(

@@ -1,175 +1,174 @@
-import { query, getRequestEvent } from '$app/server';
-import { env } from '$env/dynamic/private';
-import { fromBinary } from '@bufbuild/protobuf';
-import {
-    GetIssuesResponseSchema,
-    GetUsersResponseSchema,
-    GetIssueResponseSchema
-} from '$lib/gen/issues/v1/issues_pb';
-import { MeResponseSchema } from '$lib/gen/auth/v1/auth_pb';
-import {
-    GetWorkspacesResponseSchema,
-    GetWorkspaceResponseSchema,
-    GetAssignableMembersResponseSchema
-} from '$lib/gen/workspaces/v1/workspaces_pb';
-import {
-    ListDocumentsResponseSchema,
-    GetDocumentResponseSchema
-} from '$lib/gen/documents/v1/documents_pb';
-import { GetAuditLogResponseSchema } from '$lib/gen/audit/v1/audit_pb';
+import { query } from '$app/server';
 
-const BACKEND = env.BACKEND_URL ?? 'http://localhost:8080';
+import { apiOpts } from '$lib/api-client';
+import {
+	auditList,
+	auditStats,
+	authListUsers,
+	authMe,
+	commentsList,
+	documentsGet,
+	documentsGetFile,
+	documentsList,
+	issuesGet,
+	issuesListByWorkspace,
+	workspacesAssignableMembers,
+	workspacesGet,
+	workspacesList
+} from '$lib/api';
 
-async function fetchProto(url: string, fetchFn: typeof fetch) {
-    const res = await fetchFn(url);
-    if (!res.ok) {
-        throw new Error(`${res.status} ${res.statusText}`);
-    }
-    return new Uint8Array(await res.arrayBuffer());
+function paginationFromHeaders(res: Response | undefined) {
+	const h = res?.headers;
+	return {
+		total: Number(h?.get('X-Total-Count') ?? 0),
+		totalPages: Number(h?.get('X-Total-Pages') ?? 1),
+		page: Number(h?.get('X-Page') ?? 1),
+		perPage: Number(h?.get('X-Per-Page') ?? 20)
+	};
 }
 
-function paginationFromHeaders(res: Response) {
-    return {
-        total: Number(res.headers.get('X-Total-Count') ?? 0),
-        totalPages: Number(res.headers.get('X-Total-Pages') ?? 1),
-        page: Number(res.headers.get('X-Page') ?? 1),
-        perPage: Number(res.headers.get('X-Per-Page') ?? 20)
-    };
-}
+// ---------------------------------------------------------------------------
+// Auth
+// ---------------------------------------------------------------------------
 
 export const getMe = query(async () => {
-    try {
-        const { fetch } = getRequestEvent();
-        const bytes = await fetchProto(`${BACKEND}/auth/me`, fetch);
-        const r = fromBinary(MeResponseSchema, bytes);
-        return r.user ?? null;
-    } catch (err: unknown) {
-        console.error('Failed to fetch /auth/me', err);
-        return null;
-    }
+	try {
+		const r = await authMe(apiOpts());
+		return r.data?.user ?? null;
+	} catch (err) {
+		console.error('Failed to fetch /auth/me', err);
+		return null;
+	}
 });
 
 export const getUsers = query(async () => {
-    const { fetch } = getRequestEvent();
-    const bytes = await fetchProto(`${BACKEND}/auth/users`, fetch);
-    const r = fromBinary(GetUsersResponseSchema, bytes);
-    return r.users;
-});
-
-export const getAssignableMembers = query('unchecked', async (workspaceId: string) => {
-    const { fetch } = getRequestEvent();
-    const bytes = await fetchProto(`${BACKEND}/workspaces/${workspaceId}/assignable-members`, fetch);
-    const r = fromBinary(GetAssignableMembersResponseSchema, bytes);
-    return r.users;
-});
-
-export const getIssues = query('unchecked', async (workspaceId: string) => {
-    const { fetch } = getRequestEvent();
-    const bytes = await fetchProto(`${BACKEND}/workspaces/${workspaceId}/issues`, fetch);
-    const r = fromBinary(GetIssuesResponseSchema, bytes);
-    return r.issues;
-});
-
-export const getIssue = query('unchecked', async (id: string) => {
-    const { fetch } = getRequestEvent();
-    const bytes = await fetchProto(`${BACKEND}/issues/${id}`, fetch);
-    return fromBinary(GetIssueResponseSchema, bytes);
+	const r = await authListUsers(apiOpts());
+	return r.data?.users ?? [];
 });
 
 // ---------------------------------------------------------------------------
-// Workspace queries
+// Workspaces
 // ---------------------------------------------------------------------------
 
 export const getWorkspaces = query('unchecked', async (page: number = 1) => {
-    const { fetch } = getRequestEvent();
-    const res = await fetch(`${BACKEND}/workspaces?page=${page}&per_page=20`);
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    const r = fromBinary(GetWorkspacesResponseSchema, bytes);
-    return { workspaces: r.workspaces, ...paginationFromHeaders(res) };
+	const r = await workspacesList({ ...apiOpts(), query: { page, perPage: 20 } });
+	return {
+		workspaces: r.data?.workspaces ?? [],
+		...paginationFromHeaders(r.response)
+	};
 });
 
 export const getWorkspaceDetail = query('unchecked', async (id: string) => {
-    const { fetch } = getRequestEvent();
-    const bytes = await fetchProto(`${BACKEND}/workspaces/${id}`, fetch);
-    const r = fromBinary(GetWorkspaceResponseSchema, bytes);
-    return r.workspace ?? null;
+	const r = await workspacesGet({ ...apiOpts(), path: { id } });
+	return r.data?.workspace ?? null;
+});
+
+export const getAssignableMembers = query('unchecked', async (workspaceId: string) => {
+	const r = await workspacesAssignableMembers({ ...apiOpts(), path: { id: workspaceId } });
+	return r.data?.users ?? [];
 });
 
 // ---------------------------------------------------------------------------
-// Document queries
+// Issues
+// ---------------------------------------------------------------------------
+
+export const getIssues = query('unchecked', async (workspaceId: string) => {
+	const r = await issuesListByWorkspace({ ...apiOpts(), path: { id: workspaceId } });
+	return r.data?.issues ?? [];
+});
+
+export const getIssue = query('unchecked', async (id: string) => {
+	const r = await issuesGet({ ...apiOpts(), path: { id } });
+	return r.data ?? null;
+});
+
+// ---------------------------------------------------------------------------
+// Documents
 // ---------------------------------------------------------------------------
 
 export const getDocuments = query('unchecked', async (queryStr: string) => {
-    const sep = queryStr.indexOf('?');
-    const issueId = sep === -1 ? queryStr : queryStr.slice(0, sep);
-    const qs = sep === -1 ? '' : queryStr.slice(sep + 1);
-    const sp = new URLSearchParams(qs);
-    if (!sp.has('page')) sp.set('page', '1');
-    if (!sp.has('per_page')) sp.set('per_page', '20');
-    const { fetch } = getRequestEvent();
-    const res = await fetch(`${BACKEND}/issues/${issueId}/documents?${sp}`);
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    const r = fromBinary(ListDocumentsResponseSchema, bytes);
-    return { documents: r.documents, ...paginationFromHeaders(res) };
+	const sep = queryStr.indexOf('?');
+	const issueId = sep === -1 ? queryStr : queryStr.slice(0, sep);
+	const params = new URLSearchParams(sep === -1 ? '' : queryStr.slice(sep + 1));
+	const r = await documentsList({
+		...apiOpts(),
+		path: { id: issueId },
+		query: {
+			page: Number(params.get('page') ?? 1),
+			perPage: Number(params.get('per_page') ?? 20),
+			search: params.get('search') ?? undefined,
+			status: (params.get('status') as never) ?? undefined
+		}
+	});
+	return {
+		documents: r.data?.documents ?? [],
+		...paginationFromHeaders(r.response)
+	};
 });
 
 export const getDocumentDetail = query('unchecked', async (docId: string) => {
-    const { fetch } = getRequestEvent();
-    const bytes = await fetchProto(`${BACKEND}/documents/${docId}`, fetch);
-    const r = fromBinary(GetDocumentResponseSchema, bytes);
-    return r.document ?? null;
+	const r = await documentsGet({ ...apiOpts(), path: { id: docId } });
+	return r.data?.document ?? null;
 });
 
 export const getDocumentBytes = query(
-    'unchecked',
-    async (arg: { docId: string; versionId: number }) => {
-        const { fetch } = getRequestEvent();
-        const res = await fetch(
-            `${BACKEND}/documents/${arg.docId}/versions/${arg.versionId}/file`
-        );
-        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-        return new Uint8Array(await res.arrayBuffer());
-    }
+	'unchecked',
+	async (arg: { docId: string; versionId: string }) => {
+		const r = await documentsGetFile({
+			...apiOpts(),
+			path: { id: arg.docId, versionId: arg.versionId },
+			parseAs: 'blob'
+		});
+		if (!r.data) return new Uint8Array();
+		const blob = r.data as unknown as Blob;
+		return new Uint8Array(await blob.arrayBuffer());
+	}
 );
 
 // ---------------------------------------------------------------------------
-// Audit query
+// Comments
 // ---------------------------------------------------------------------------
 
-export interface AuditStats {
-    actions_by_type: { action: string; count: number }[];
-    daily_activity: { date: string; count: number }[];
-    documents_by_status: { status: string; count: number }[];
-    top_actors: { actor_id: number; actor_name: string; count: number }[];
-}
+export const getComments = query('unchecked', async (docId: string) => {
+	const r = await commentsList({ ...apiOpts(), path: { id: docId } });
+	return r.data?.comments ?? [];
+});
+
+// ---------------------------------------------------------------------------
+// Audit
+// ---------------------------------------------------------------------------
 
 export const getAuditStats = query(async () => {
-    const { fetch } = getRequestEvent();
-    const res = await fetch(`${BACKEND}/audit/stats`);
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-    return (await res.json()) as AuditStats;
+	const r = await auditStats(apiOpts());
+	return r.data ?? null;
 });
 
 export const getAuditLog = query('unchecked', async (queryStr: string = '') => {
-    const sp = new URLSearchParams(queryStr);
-    if (!sp.has('page')) sp.set('page', '1');
-    if (!sp.has('per_page')) sp.set('per_page', '25');
-
-    const from = sp.get('from');
-    const to = sp.get('to');
-    if (from) sp.set('from', new Date(from).toISOString());
-    if (to) {
-        const d = new Date(to);
-        d.setHours(23, 59, 59, 999);
-        sp.set('to', d.toISOString());
-    }
-
-    const { fetch } = getRequestEvent();
-    const res = await fetch(`${BACKEND}/audit?${sp}`);
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    const r = fromBinary(GetAuditLogResponseSchema, bytes);
-    return { entries: r.entries, ...paginationFromHeaders(res) };
+	const sp = new URLSearchParams(queryStr);
+	const from = sp.get('from');
+	const to = sp.get('to');
+	const fromIso = from ? new Date(from).toISOString() : undefined;
+	let toIso: string | undefined;
+	if (to) {
+		const d = new Date(to);
+		d.setHours(23, 59, 59, 999);
+		toIso = d.toISOString();
+	}
+	const r = await auditList({
+		...apiOpts(),
+		query: {
+			page: Number(sp.get('page') ?? 1),
+			perPage: Number(sp.get('per_page') ?? 25),
+			action: sp.get('action') ?? undefined,
+			targetType: sp.get('target_type') ?? undefined,
+			actorId: sp.get('actor_id') ?? undefined,
+			targetId: sp.get('target_id') ?? undefined,
+			from: fromIso,
+			to: toIso
+		}
+	});
+	return {
+		entries: r.data?.entries ?? [],
+		...paginationFromHeaders(r.response)
+	};
 });

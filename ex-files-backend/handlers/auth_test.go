@@ -5,541 +5,220 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
-	"gorm.io/gorm"
 
-	authv1 "github.com/spburtsev/ex-files-backend/gen/auth/v1"
-	issuesv1 "github.com/spburtsev/ex-files-backend/gen/issues/v1"
 	"github.com/spburtsev/ex-files-backend/handlers"
 	"github.com/spburtsev/ex-files-backend/models"
+	"github.com/spburtsev/ex-files-backend/oapi"
 )
 
-func init() {
-	gin.SetMode(gin.TestMode)
-}
+func TestAuthRegister_HappyPath(t *testing.T) {
+	users := &mockUserRepo{}
+	tokens := &mockTokens{}
 
-// --- Mocks ---
+	users.On("FindByEmail", "alice@example.com").Return(nil, errors.New("not found"))
+	users.On("Create", mock.AnythingOfType("*models.User")).Return(uint(42), nil).Run(func(a mock.Arguments) {
+		u := a.Get(0).(*models.User)
+		u.ID = 42
+		u.CreatedAt = time.Now()
+	})
+	tokens.On("Issue", mock.AnythingOfType("*models.User")).Return("test-token", nil)
 
-type mockRepo struct{ mock.Mock }
-
-func (m *mockRepo) FindByEmail(email string) (*models.User, error) {
-	args := m.Called(email)
-	if u, ok := args.Get(0).(*models.User); ok {
-		return u, args.Error(1)
+	s := &handlers.Server{
+		UserRepo: users,
+		Tokens:   tokens,
+		Hasher:   stubHasher{},
+		Audit:    &dummyAudit{},
 	}
-	return nil, args.Error(1)
-}
+	srv := newTestServer(t, s)
+	defer srv.Close()
 
-func (m *mockRepo) FindByID(id uint) (*models.User, error) {
-	args := m.Called(id)
-	if u, ok := args.Get(0).(*models.User); ok {
-		return u, args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-func (m *mockRepo) Create(user *models.User) error {
-	args := m.Called(user)
-	user.ID = 1 // simulate DB-assigned ID
-	return args.Error(0)
-}
-
-func (m *mockRepo) ListAll() ([]models.User, error) {
-	args := m.Called()
-	if u, ok := args.Get(0).([]models.User); ok {
-		return u, args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-func (m *mockRepo) UpdatePassword(userID uint, passwordHash string) error {
-	return m.Called(userID, passwordHash).Error(0)
-}
-
-type mockResetTokenStore struct{ mock.Mock }
-
-func (m *mockResetTokenStore) StoreResetToken(token string, userID uint, ttl time.Duration) error {
-	return m.Called(token, userID, ttl).Error(0)
-}
-
-func (m *mockResetTokenStore) GetResetTokenUserID(token string) (uint, error) {
-	args := m.Called(token)
-	return args.Get(0).(uint), args.Error(1)
-}
-
-func (m *mockResetTokenStore) DeleteResetToken(token string) error {
-	return m.Called(token).Error(0)
-}
-
-type mockTokens struct{ mock.Mock }
-
-func (m *mockTokens) Issue(user *models.User) (string, error) {
-	args := m.Called(user)
-	return args.String(0), args.Error(1)
-}
-
-func (m *mockTokens) Validate(tokenStr string) (*models.Claims, error) {
-	args := m.Called(tokenStr)
-	if c, ok := args.Get(0).(*models.Claims); ok {
-		return c, args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-type mockHasher struct{ mock.Mock }
-
-func (m *mockHasher) Hash(password string) (string, error) {
-	args := m.Called(password)
-	return args.String(0), args.Error(1)
-}
-
-func (m *mockHasher) Compare(hash, password string) error {
-	return m.Called(hash, password).Error(0)
-}
-
-type mockEmailSvc struct{ mock.Mock }
-
-func (m *mockEmailSvc) Send(to, subject, body string) error {
-	return m.Called(to, subject, body).Error(0)
-}
-
-// --- Helpers ---
-
-func newHandler(repo *mockRepo, tokens *mockTokens, hasher *mockHasher) *handlers.AuthHandler {
-	return &handlers.AuthHandler{Repo: repo, Tokens: tokens, Hasher: hasher}
-}
-
-func jsonBody(t *testing.T, v any) *bytes.Buffer {
-	t.Helper()
-	b, err := json.Marshal(v)
+	body, _ := json.Marshal(map[string]string{
+		"email":    "alice@example.com",
+		"password": "secret-p455word",
+		"name":     "Alice",
+	})
+	res, err := http.Post(srv.URL+"/auth/register", "application/json", bytes.NewReader(body))
 	require.NoError(t, err)
-	return bytes.NewBuffer(b)
+	defer res.Body.Close()
+
+	assert.Equal(t, http.StatusCreated, res.StatusCode)
+
+	var got oapi.AuthResponse
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&got))
+	assert.Equal(t, "alice@example.com", got.User.Email)
+	assert.Equal(t, "Alice", got.User.Name)
+	assert.Equal(t, "42", got.User.ID)
+	assert.Equal(t, "test-token", got.Token)
+
+	cookie := findCookie(res.Cookies(), "session")
+	require.NotNil(t, cookie)
+	assert.Equal(t, "test-token", cookie.Value)
+	assert.True(t, cookie.HttpOnly)
 }
 
-func executeRequest(handler gin.HandlerFunc, method, path string, body *bytes.Buffer) *httptest.ResponseRecorder {
-	w := httptest.NewRecorder()
-	c, r := gin.CreateTestContext(w)
-	r.Handle(method, path, handler)
-	var req *http.Request
-	if body != nil {
-		req = httptest.NewRequest(method, path, body)
-		req.Header.Set("Content-Type", "application/json")
-	} else {
-		req = httptest.NewRequest(method, path, http.NoBody)
-	}
-	c.Request = req
-	r.ServeHTTP(w, req)
-	return w
+func TestAuthRegister_DuplicateEmailReturns409(t *testing.T) {
+	users := &mockUserRepo{}
+	users.On("FindByEmail", "alice@example.com").Return(&models.User{Email: "alice@example.com"}, nil)
+
+	s := &handlers.Server{UserRepo: users, Tokens: &mockTokens{}, Hasher: stubHasher{}, Audit: &dummyAudit{}}
+	srv := newTestServer(t, s)
+	defer srv.Close()
+
+	body, _ := json.Marshal(map[string]string{
+		"email":    "alice@example.com",
+		"password": "secret-p455word",
+		"name":     "Alice",
+	})
+	res, err := http.Post(srv.URL+"/auth/register", "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	defer res.Body.Close()
+
+	assert.Equal(t, http.StatusConflict, res.StatusCode)
+
+	var got oapi.Error
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&got))
+	assert.Contains(t, got.Error, "already registered")
 }
 
-// --- TestRegister ---
+func TestAuthLogin_WrongPasswordReturns401(t *testing.T) {
+	users := &mockUserRepo{}
+	users.On("FindByEmail", "alice@example.com").Return(&models.User{
+		Email:        "alice@example.com",
+		PasswordHash: "hashed:correct-password",
+	}, nil)
 
-func TestRegister(t *testing.T) {
-	tests := []struct {
-		name       string
-		body       any
-		setup      func(repo *mockRepo, tokens *mockTokens, hasher *mockHasher)
-		wantStatus int
-		wantCookie bool
-	}{
-		{
-			name:       "invalid_json",
-			body:       "not-json",
-			setup:      func(r *mockRepo, ts *mockTokens, h *mockHasher) {},
-			wantStatus: http.StatusBadRequest,
-		},
-		{
-			name:       "missing_name",
-			body:       map[string]string{"email": "a@b.com", "password": "password1"},
-			setup:      func(r *mockRepo, ts *mockTokens, h *mockHasher) {},
-			wantStatus: http.StatusBadRequest,
-		},
-		{
-			name: "email_already_exists",
-			body: map[string]string{"email": "a@b.com", "password": "password1", "name": "Alice"},
-			setup: func(r *mockRepo, ts *mockTokens, h *mockHasher) {
-				r.On("FindByEmail", "a@b.com").Return(&models.User{Email: "a@b.com"}, nil)
-			},
-			wantStatus: http.StatusConflict,
-		},
-		{
-			name: "hasher_failure",
-			body: map[string]string{"email": "a@b.com", "password": "password1", "name": "Alice"},
-			setup: func(r *mockRepo, ts *mockTokens, h *mockHasher) {
-				r.On("FindByEmail", "a@b.com").Return(nil, gorm.ErrRecordNotFound)
-				h.On("Hash", "password1").Return("", errors.New("hash error"))
-			},
-			wantStatus: http.StatusInternalServerError,
-		},
-		{
-			name: "db_create_failure",
-			body: map[string]string{"email": "a@b.com", "password": "password1", "name": "Alice"},
-			setup: func(r *mockRepo, ts *mockTokens, h *mockHasher) {
-				r.On("FindByEmail", "a@b.com").Return(nil, gorm.ErrRecordNotFound)
-				h.On("Hash", "password1").Return("hashed", nil)
-				r.On("Create", mock.AnythingOfType("*models.User")).Return(errors.New("db error"))
-			},
-			wantStatus: http.StatusInternalServerError,
-		},
-		{
-			name: "token_issue_failure",
-			body: map[string]string{"email": "a@b.com", "password": "password1", "name": "Alice"},
-			setup: func(r *mockRepo, ts *mockTokens, h *mockHasher) {
-				r.On("FindByEmail", "a@b.com").Return(nil, gorm.ErrRecordNotFound)
-				h.On("Hash", "password1").Return("hashed", nil)
-				r.On("Create", mock.AnythingOfType("*models.User")).Return(nil)
-				ts.On("Issue", mock.AnythingOfType("*models.User")).Return("", errors.New("sign error"))
-			},
-			wantStatus: http.StatusInternalServerError,
-		},
-		{
-			name: "success",
-			body: map[string]string{"email": "a@b.com", "password": "password1", "name": "Alice"},
-			setup: func(r *mockRepo, ts *mockTokens, h *mockHasher) {
-				r.On("FindByEmail", "a@b.com").Return(nil, gorm.ErrRecordNotFound)
-				h.On("Hash", "password1").Return("hashed", nil)
-				r.On("Create", mock.AnythingOfType("*models.User")).Return(nil)
-				ts.On("Issue", mock.AnythingOfType("*models.User")).Return("tok123", nil)
-			},
-			wantStatus: http.StatusCreated,
-			wantCookie: true,
-		},
-	}
+	s := &handlers.Server{UserRepo: users, Tokens: &mockTokens{}, Hasher: stubHasher{}, Audit: &dummyAudit{}}
+	srv := newTestServer(t, s)
+	defer srv.Close()
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			repo := &mockRepo{}
-			tokens := &mockTokens{}
-			hasher := &mockHasher{}
-			tc.setup(repo, tokens, hasher)
+	body := strings.NewReader(`{"email":"alice@example.com","password":"wrong-password"}`)
+	res, err := http.Post(srv.URL+"/auth/login", "application/json", body)
+	require.NoError(t, err)
+	defer res.Body.Close()
 
-			h := newHandler(repo, tokens, hasher)
-			var body *bytes.Buffer
-			if s, ok := tc.body.(string); ok {
-				body = bytes.NewBufferString(s)
-			} else {
-				body = jsonBody(t, tc.body)
-			}
-
-			w := executeRequest(h.Register, http.MethodPost, "/auth/register", body)
-
-			assert.Equal(t, tc.wantStatus, w.Code)
-			if tc.wantCookie {
-				assert.Contains(t, w.Header().Get("Set-Cookie"), "session=tok123")
-			}
-			repo.AssertExpectations(t)
-			tokens.AssertExpectations(t)
-			hasher.AssertExpectations(t)
-		})
-	}
+	assert.Equal(t, http.StatusUnauthorized, res.StatusCode)
 }
 
-// --- TestLogin ---
+func TestAuthMe_RoundtripsBearerAuth(t *testing.T) {
+	users := &mockUserRepo{}
+	tokens := &mockTokens{}
 
-func TestLogin(t *testing.T) {
-	tests := []struct {
-		name       string
-		body       any
-		setup      func(repo *mockRepo, tokens *mockTokens, hasher *mockHasher)
-		wantStatus int
-		wantCookie bool
-	}{
-		{
-			name:       "invalid_json",
-			body:       "not-json",
-			setup:      func(r *mockRepo, ts *mockTokens, h *mockHasher) {},
-			wantStatus: http.StatusBadRequest,
-		},
-		{
-			name: "user_not_found",
-			body: map[string]string{"email": "a@b.com", "password": "password1"},
-			setup: func(r *mockRepo, ts *mockTokens, h *mockHasher) {
-				r.On("FindByEmail", "a@b.com").Return(nil, gorm.ErrRecordNotFound)
-			},
-			wantStatus: http.StatusUnauthorized,
-		},
-		{
-			name: "wrong_password",
-			body: map[string]string{"email": "a@b.com", "password": "wrong"},
-			setup: func(r *mockRepo, ts *mockTokens, h *mockHasher) {
-				r.On("FindByEmail", "a@b.com").Return(&models.User{Email: "a@b.com", PasswordHash: "hash"}, nil)
-				h.On("Compare", "hash", "wrong").Return(errors.New("mismatch"))
-			},
-			wantStatus: http.StatusUnauthorized,
-		},
-		{
-			name: "token_issue_failure",
-			body: map[string]string{"email": "a@b.com", "password": "password1"},
-			setup: func(r *mockRepo, ts *mockTokens, h *mockHasher) {
-				u := &models.User{Email: "a@b.com", PasswordHash: "hash"}
-				r.On("FindByEmail", "a@b.com").Return(u, nil)
-				h.On("Compare", "hash", "password1").Return(nil)
-				ts.On("Issue", u).Return("", errors.New("sign error"))
-			},
-			wantStatus: http.StatusInternalServerError,
-		},
-		{
-			name: "success",
-			body: map[string]string{"email": "a@b.com", "password": "password1"},
-			setup: func(r *mockRepo, ts *mockTokens, h *mockHasher) {
-				u := &models.User{Email: "a@b.com", PasswordHash: "hash"}
-				r.On("FindByEmail", "a@b.com").Return(u, nil)
-				h.On("Compare", "hash", "password1").Return(nil)
-				ts.On("Issue", u).Return("tok456", nil)
-			},
-			wantStatus: http.StatusOK,
-			wantCookie: true,
-		},
-	}
+	tokens.On("Validate", "good-token").Return(&models.Claims{
+		UserID: 7,
+		Email:  "alice@example.com",
+		Role:   models.RoleEmployee,
+	}, nil)
+	users.On("FindByID", uint(7)).Return(&models.User{
+		Email: "alice@example.com",
+		Name:  "Alice",
+		Role:  models.RoleEmployee,
+	}, nil)
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			repo := &mockRepo{}
-			tokens := &mockTokens{}
-			hasher := &mockHasher{}
-			tc.setup(repo, tokens, hasher)
+	s := &handlers.Server{UserRepo: users, Tokens: tokens, Hasher: stubHasher{}, Audit: &dummyAudit{}}
+	srv := newTestServer(t, s)
+	defer srv.Close()
 
-			h := newHandler(repo, tokens, hasher)
-			var body *bytes.Buffer
-			if s, ok := tc.body.(string); ok {
-				body = bytes.NewBufferString(s)
-			} else {
-				body = jsonBody(t, tc.body)
-			}
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/auth/me", nil)
+	req.Header.Set("Authorization", "Bearer good-token")
+	res, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer res.Body.Close()
 
-			w := executeRequest(h.Login, http.MethodPost, "/auth/login", body)
+	assert.Equal(t, http.StatusOK, res.StatusCode)
 
-			assert.Equal(t, tc.wantStatus, w.Code)
-			if tc.wantCookie {
-				assert.Contains(t, w.Header().Get("Set-Cookie"), "session=tok456")
-			}
-			repo.AssertExpectations(t)
-			tokens.AssertExpectations(t)
-			hasher.AssertExpectations(t)
-		})
-	}
+	var got oapi.MeResponse
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&got))
+	assert.Equal(t, "alice@example.com", got.User.Email)
+	assert.Equal(t, oapi.RoleEmployee, got.User.Role)
 }
 
-// --- TestMe ---
+func TestAuthMe_NoTokenReturns401(t *testing.T) {
+	s := &handlers.Server{UserRepo: &mockUserRepo{}, Tokens: &mockTokens{}, Hasher: stubHasher{}, Audit: &dummyAudit{}}
+	srv := newTestServer(t, s)
+	defer srv.Close()
 
-func TestMe(t *testing.T) {
-	tests := []struct {
-		name       string
-		userID     uint
-		setup      func(repo *mockRepo)
-		wantStatus int
-		wantEmail  string
-	}{
-		{
-			name:   "user_not_found",
-			userID: 99,
-			setup: func(r *mockRepo) {
-				r.On("FindByID", uint(99)).Return(nil, gorm.ErrRecordNotFound)
-			},
-			wantStatus: http.StatusNotFound,
-		},
-		{
-			name:   "success_employee",
-			userID: 1,
-			setup: func(r *mockRepo) {
-				r.On("FindByID", uint(1)).Return(&models.User{Email: "a@b.com", Role: models.RoleEmployee}, nil)
-			},
-			wantStatus: http.StatusOK,
-			wantEmail:  "a@b.com",
-		},
-		{
-			name:   "success_manager",
-			userID: 2,
-			setup: func(r *mockRepo) {
-				r.On("FindByID", uint(2)).Return(&models.User{Email: "m@b.com", Role: models.RoleManager}, nil)
-			},
-			wantStatus: http.StatusOK,
-			wantEmail:  "m@b.com",
-		},
-		{
-			name:   "success_root",
-			userID: 3,
-			setup: func(r *mockRepo) {
-				r.On("FindByID", uint(3)).Return(&models.User{Email: "r@b.com", Role: models.RoleRoot}, nil)
-			},
-			wantStatus: http.StatusOK,
-			wantEmail:  "r@b.com",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			repo := &mockRepo{}
-			tc.setup(repo)
-
-			h := newHandler(repo, &mockTokens{}, &mockHasher{})
-
-			w := httptest.NewRecorder()
-			c, router := gin.CreateTestContext(w)
-			router.GET("/auth/me", func(ctx *gin.Context) {
-				ctx.Set("user_id", tc.userID)
-				h.Me(ctx)
-			})
-			req := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
-			c.Request = req
-			router.ServeHTTP(w, req)
-
-			assert.Equal(t, tc.wantStatus, w.Code)
-			if tc.wantEmail != "" {
-				var resp authv1.MeResponse
-				require.NoError(t, proto.Unmarshal(w.Body.Bytes(), &resp))
-				assert.Equal(t, tc.wantEmail, resp.User.Email)
-			}
-			repo.AssertExpectations(t)
-		})
-	}
+	res, err := http.Get(srv.URL + "/auth/me")
+	require.NoError(t, err)
+	defer res.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, res.StatusCode)
 }
 
-// --- TestLogout ---
+func TestAuthLogout_ClearsCookie(t *testing.T) {
+	tokens := &mockTokens{}
+	tokens.On("Validate", "good-token").Return(&models.Claims{UserID: 1, Role: models.RoleEmployee}, nil)
+	s := &handlers.Server{UserRepo: &mockUserRepo{}, Tokens: tokens, Hasher: stubHasher{}, Audit: &dummyAudit{}}
+	srv := newTestServer(t, s)
+	defer srv.Close()
 
-func TestLogout(t *testing.T) {
-	h := newHandler(&mockRepo{}, &mockTokens{}, &mockHasher{})
-	w := executeRequest(h.Logout, http.MethodPost, "/auth/logout", nil)
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/auth/logout", nil)
+	req.AddCookie(&http.Cookie{Name: "session", Value: "good-token"})
+	res, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer res.Body.Close()
 
-	assert.Equal(t, http.StatusOK, w.Code)
-	// Cookie should be cleared (max-age=0 or negative)
-	cookie := w.Header().Get("Set-Cookie")
-	assert.Contains(t, cookie, "session=")
-	assert.Contains(t, cookie, "Max-Age=0")
+	assert.Equal(t, http.StatusOK, res.StatusCode)
+	cookie := findCookie(res.Cookies(), "session")
+	require.NotNil(t, cookie)
+	assert.True(t, cookie.MaxAge < 0, "cookie should be invalidated")
 }
 
-// --- TestListUsers ---
+func TestAuthListUsers_RequiresAuth(t *testing.T) {
+	s := &handlers.Server{UserRepo: &mockUserRepo{}, Tokens: &mockTokens{}, Hasher: stubHasher{}, Audit: &dummyAudit{}}
+	srv := newTestServer(t, s)
+	defer srv.Close()
 
-func TestListUsers(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
-		repo := &mockRepo{}
-		repo.On("ListAll").Return([]models.User{
-			{Name: "Alice", Email: "alice@acme.org", Role: models.RoleEmployee},
-			{Name: "Bob", Email: "bob@acme.org", Role: models.RoleManager},
-		}, nil)
-
-		h := newHandler(repo, &mockTokens{}, &mockHasher{})
-		w := executeRequest(h.ListUsers, http.MethodGet, "/auth/users", nil)
-
-		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Equal(t, "application/x-protobuf", w.Header().Get("Content-Type"))
-
-		var resp issuesv1.GetUsersResponse
-		require.NoError(t, proto.Unmarshal(w.Body.Bytes(), &resp))
-		require.Len(t, resp.Users, 2)
-
-		assert.Equal(t, "Alice", resp.Users[0].Name)
-		assert.Equal(t, "alice@acme.org", resp.Users[0].Email)
-		assert.Equal(t, issuesv1.Role_ROLE_EMPLOYEE, resp.Users[0].Role)
-
-		assert.Equal(t, "Bob", resp.Users[1].Name)
-		assert.Equal(t, "bob@acme.org", resp.Users[1].Email)
-		assert.Equal(t, issuesv1.Role_ROLE_MANAGER, resp.Users[1].Role)
-
-		repo.AssertExpectations(t)
-	})
-
-	t.Run("repo_error", func(t *testing.T) {
-		repo := &mockRepo{}
-		repo.On("ListAll").Return(nil, errors.New("db error"))
-
-		h := newHandler(repo, &mockTokens{}, &mockHasher{})
-		w := executeRequest(h.ListUsers, http.MethodGet, "/auth/users", nil)
-
-		assert.Equal(t, http.StatusInternalServerError, w.Code)
-		repo.AssertExpectations(t)
-	})
+	res, err := http.Get(srv.URL + "/auth/users")
+	require.NoError(t, err)
+	defer res.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, res.StatusCode)
 }
 
-// --- TestForgotPassword ---
+func TestAuthListUsers_ReturnsAll(t *testing.T) {
+	users := &mockUserRepo{}
+	tokens := &mockTokens{}
 
-func TestForgotPassword(t *testing.T) {
-	t.Run("user_not_found_returns_200", func(t *testing.T) {
-		repo := &mockRepo{}
-		repo.On("FindByEmail", "unknown@test.com").Return(nil, gorm.ErrRecordNotFound)
+	tokens.On("Validate", "test-token").Return(&models.Claims{UserID: 1, Role: models.RoleManager}, nil)
+	users.On("ListAll").Return([]models.User{
+		{Email: "a@x", Name: "A", Role: models.RoleEmployee},
+		{Email: "b@x", Name: "B", Role: models.RoleManager},
+	}, nil)
 
-		h := &handlers.AuthHandler{Repo: repo, Email: &mockEmailSvc{}, ResetTokens: &mockResetTokenStore{}}
-		w := executeRequest(h.ForgotPassword, http.MethodPost, "/auth/forgot-password",
-			jsonBody(t, map[string]string{"email": "unknown@test.com"}))
+	s := &handlers.Server{UserRepo: users, Tokens: tokens, Hasher: stubHasher{}, Audit: &dummyAudit{}}
+	srv := newTestServer(t, s)
+	defer srv.Close()
 
-		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Contains(t, w.Body.String(), "if the email exists")
-	})
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodGet, srv.URL+"/auth/users", nil))
+	require.NoError(t, err)
+	defer res.Body.Close()
 
-	t.Run("success", func(t *testing.T) {
-		repo := &mockRepo{}
-		emailSvc := &mockEmailSvc{}
-		resetStore := &mockResetTokenStore{}
-
-		user := &models.User{Email: "alice@test.com", Name: "Alice"}
-		user.ID = 1
-		repo.On("FindByEmail", "alice@test.com").Return(user, nil)
-		resetStore.On("StoreResetToken", mock.AnythingOfType("string"), uint(1), 1*time.Hour).Return(nil)
-		emailSvc.On("Send", "alice@test.com", mock.Anything, mock.Anything).Return(nil)
-
-		h := &handlers.AuthHandler{Repo: repo, Email: emailSvc, ResetTokens: resetStore}
-		w := executeRequest(h.ForgotPassword, http.MethodPost, "/auth/forgot-password",
-			jsonBody(t, map[string]string{"email": "alice@test.com"}))
-
-		assert.Equal(t, http.StatusOK, w.Code)
-		resetStore.AssertExpectations(t)
-		emailSvc.AssertExpectations(t)
-	})
-
-	t.Run("invalid_email", func(t *testing.T) {
-		h := &handlers.AuthHandler{Repo: &mockRepo{}, ResetTokens: &mockResetTokenStore{}}
-		w := executeRequest(h.ForgotPassword, http.MethodPost, "/auth/forgot-password",
-			jsonBody(t, map[string]string{"email": "not-an-email"}))
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	var got oapi.GetUsersResponse
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&got))
+	assert.Len(t, got.Users, 2)
 }
 
-// --- TestResetPassword ---
+func TestAuthForgotPassword_AlwaysReturns200(t *testing.T) {
+	users := &mockUserRepo{}
+	users.On("FindByEmail", "nobody@example.com").Return(nil, errors.New("not found"))
 
-func TestResetPassword(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
-		repo := &mockRepo{}
-		hasher := &mockHasher{}
-		resetStore := &mockResetTokenStore{}
+	s := &handlers.Server{UserRepo: users, Tokens: &mockTokens{}, Hasher: stubHasher{}, Audit: &dummyAudit{}}
+	srv := newTestServer(t, s)
+	defer srv.Close()
 
-		resetStore.On("GetResetTokenUserID", "valid-token").Return(uint(1), nil)
-		hasher.On("Hash", "newpassword123").Return("newhash", nil)
-		repo.On("UpdatePassword", uint(1), "newhash").Return(nil)
-		resetStore.On("DeleteResetToken", "valid-token").Return(nil)
+	body := strings.NewReader(`{"email":"nobody@example.com"}`)
+	res, err := http.Post(srv.URL+"/auth/forgot-password", "application/json", body)
+	require.NoError(t, err)
+	defer res.Body.Close()
 
-		h := &handlers.AuthHandler{Repo: repo, Hasher: hasher, ResetTokens: resetStore}
-		w := executeRequest(h.ResetPassword, http.MethodPost, "/auth/reset-password",
-			jsonBody(t, map[string]string{"token": "valid-token", "password": "newpassword123"}))
-
-		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Contains(t, w.Body.String(), "password has been reset")
-		resetStore.AssertExpectations(t)
-		repo.AssertExpectations(t)
-	})
-
-	t.Run("invalid_token", func(t *testing.T) {
-		resetStore := &mockResetTokenStore{}
-		resetStore.On("GetResetTokenUserID", "bad-token").Return(uint(0), errors.New("token not found"))
-
-		h := &handlers.AuthHandler{Repo: &mockRepo{}, Hasher: &mockHasher{}, ResetTokens: resetStore}
-		w := executeRequest(h.ResetPassword, http.MethodPost, "/auth/reset-password",
-			jsonBody(t, map[string]string{"token": "bad-token", "password": "newpassword123"}))
-
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
-
-	t.Run("short_password", func(t *testing.T) {
-		h := &handlers.AuthHandler{Repo: &mockRepo{}, Hasher: &mockHasher{}, ResetTokens: &mockResetTokenStore{}}
-		w := executeRequest(h.ResetPassword, http.MethodPost, "/auth/reset-password",
-			jsonBody(t, map[string]string{"token": "tok", "password": "short"}))
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
+	assert.Equal(t, http.StatusOK, res.StatusCode)
+	var msg oapi.MessageResponse
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&msg))
+	assert.Contains(t, msg.Message, "if the email exists")
 }

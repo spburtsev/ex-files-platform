@@ -1,9 +1,12 @@
+import type { DocumentStatus as ApiDocumentStatus } from '$lib/api';
+
 export type DocumentStatus = 'draft' | 'saving' | 'saved' | 'error';
+export type ReviewStatus = ApiDocumentStatus;
 
 export interface Document {
 	id: string;
 	serverId?: string;
-	versionId?: number;
+	versionId?: string;
 	name: string;
 	size: number;
 	data: Uint8Array | null;
@@ -12,6 +15,8 @@ export interface Document {
 	status: DocumentStatus;
 	error?: string;
 	mimeType: string;
+	uploaderName?: string;
+	reviewStatus?: ReviewStatus;
 }
 
 export interface HydratedDocument {
@@ -19,6 +24,8 @@ export interface HydratedDocument {
 	name: string;
 	size: number;
 	mimeType: string;
+	uploaderName?: string;
+	reviewStatus?: ReviewStatus;
 }
 
 export interface Comment {
@@ -114,7 +121,7 @@ function createWorkbenchStore() {
 		doc.error = error;
 	}
 
-	function setDocumentSaved(id: string, serverId: string, versionId: number) {
+	function setDocumentSaved(id: string, serverId: string, versionId: string) {
 		if (!currentIssueId) return;
 		const doc = slots[currentIssueId].documents.find((d) => d.id === id);
 		if (!doc) return;
@@ -130,6 +137,13 @@ function createWorkbenchStore() {
 		if (!doc) return;
 		doc.data = data;
 		doc.pageCount = pageCount;
+	}
+
+	function setDocumentReviewStatus(id: string, reviewStatus: ReviewStatus) {
+		if (!currentIssueId) return;
+		const doc = slots[currentIssueId].documents.find((d) => d.id === id);
+		if (!doc) return;
+		doc.reviewStatus = reviewStatus;
 	}
 
 	function hydrate(docs: HydratedDocument[]) {
@@ -149,7 +163,9 @@ function createWorkbenchStore() {
 				uploadedAt: new Date(),
 				pageCount: 0,
 				status: 'saved',
-				mimeType: d.mimeType
+				mimeType: d.mimeType,
+				uploaderName: d.uploaderName,
+				reviewStatus: d.reviewStatus
 			});
 		}
 		s.hydrated = true;
@@ -245,6 +261,7 @@ function createWorkbenchStore() {
 		setDocumentStatus,
 		setDocumentSaved,
 		setDocumentData,
+		setDocumentReviewStatus,
 		hydrate,
 		setActiveDocument,
 		addComment,
