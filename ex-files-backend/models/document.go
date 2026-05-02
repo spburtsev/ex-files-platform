@@ -13,10 +13,28 @@ const (
 )
 
 // validTransitions defines allowed status transitions.
+//
+// Reviewers (managers / assigned reviewers) may short-circuit from pending or
+// changes_requested directly to a terminal review status without an explicit
+// submit step. Caller-role authorisation is still enforced at the handler
+// layer; this map only declares what the document state machine permits.
 var validTransitions = map[DocumentStatus][]DocumentStatus{
-	DocumentStatusPending:          {DocumentStatusInReview},
-	DocumentStatusInReview:         {DocumentStatusApproved, DocumentStatusRejected, DocumentStatusChangesRequested},
-	DocumentStatusChangesRequested: {DocumentStatusInReview},
+	DocumentStatusPending: {
+		DocumentStatusInReview,
+		DocumentStatusApproved,
+		DocumentStatusRejected,
+		DocumentStatusChangesRequested,
+	},
+	DocumentStatusInReview: {
+		DocumentStatusApproved,
+		DocumentStatusRejected,
+		DocumentStatusChangesRequested,
+	},
+	DocumentStatusChangesRequested: {
+		DocumentStatusInReview,
+		DocumentStatusApproved,
+		DocumentStatusRejected,
+	},
 }
 
 // CanTransitionTo reports whether transitioning from the current status to next is valid.
@@ -42,8 +60,8 @@ type Document struct {
 	Status       DocumentStatus `gorm:"type:varchar(30);default:pending;not null"`
 	UploaderID   uint           `gorm:"not null;index"`
 	Uploader     User           `gorm:"foreignKey:UploaderID"`
-	WorkspaceID  uint           `gorm:"not null;index"`
-	Workspace    Workspace      `gorm:"foreignKey:WorkspaceID"`
+	IssueID      uint           `gorm:"not null;index"`
+	Issue        Issue          `gorm:"foreignKey:IssueID"`
 	ReviewerID   *uint          `gorm:"index"`
 	Reviewer     User           `gorm:"foreignKey:ReviewerID"`
 	ReviewerNote string         `gorm:"type:text"`

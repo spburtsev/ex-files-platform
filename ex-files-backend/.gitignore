@@ -5,6 +5,7 @@ cover.out
 coverage.out
 
 /ex-files-backend
+/bin
 
 # air hot-reload build artefacts
 tmp/

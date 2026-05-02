@@ -1,41 +1,142 @@
 services:
   ex-files-pg:
-    image: postgres
+    image: postgres:17
     restart: always
     ports:
-      - 5432:5432
+      - ${PG_PORT:-5433}:5432
     environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: admin
-      POSTGRES_DB: exfiles
+      POSTGRES_USER: ${PG_USER:-admin}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-admin}
+      POSTGRES_DB: ${PG_DB:-exfiles}
     volumes:
-      - pgdata:/var/lib/postgresql
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-admin} -d ${PG_DB:-exfiles}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    ports:
+      - ${REDIS_PORT:-6380}:6379
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   ex-files-minio:
     image: minio/minio
     restart: always
     ports:
-      - 9000:9000
-      - 9001:9001
+      - ${MINIO_PORT:-9002}:9000
+      - ${MINIO_CONSOLE_PORT:-9003}:9001
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${MINIO_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:-minioadmin}
     volumes:
       - miniodata:/data
     command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   ex-files-minio-init:
     image: minio/mc
     depends_on:
-      - ex-files-minio
+      ex-files-minio:
+        condition: service_healthy
     entrypoint: >
       /bin/sh -c "
-      sleep 3;
-      mc alias set local http://ex-files-minio:9000 minioadmin minioadmin;
+      mc alias set local http://ex-files-minio:9000 ${MINIO_USER:-minioadmin} ${MINIO_PASSWORD:-minioadmin};
       mc mb --ignore-existing local/documents;
       exit 0;
       "
 
+  ex-files-backend:
+    build: ./ex-files-backend
+    restart: always
+    ports:
+      - ${BACKEND_PORT:-8080}:8080
+    environment:
+      DB_DSN: host=ex-files-pg user=${PG_USER:-admin} password=${PG_PASSWORD:-admin} dbname=${PG_DB:-exfiles} port=5432 sslmode=disable TimeZone=UTC
+      JWT_SECRET: ${JWT_SECRET:-change-me-to-a-long-random-string}
+      MINIO_ENDPOINT: ex-files-minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_PASSWORD:-minioadmin}
+      MINIO_BUCKET: documents
+      REDIS_ADDR: redis:6379
+      CORS_ORIGINS: http://localhost:${FRONTEND_PORT:-3003},http://localhost:5173,http://localhost:4173
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-noreply@ex-files.local}
+      GIN_MODE: release
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+    depends_on:
+      ex-files-pg:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ex-files-minio-init:
+        condition: service_completed_successfully
+
+  ex-files-frontend:
+    build: ./ex-files-frontend
+    restart: always
+    ports:
+      - ${FRONTEND_PORT:-3003}:3000
+    environment:
+      BACKEND_URL: http://ex-files-backend:8080
+      ORIGIN: http://localhost:${FRONTEND_PORT:-3003}
+    depends_on:
+      - ex-files-backend
+
+  loki:
+    image: grafana/loki:3.4
+    restart: always
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki-data:/loki
+
+  promtail:
+    image: grafana/promtail:3.4
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./infra/promtail/config.yml:/etc/promtail/config.yml:ro
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    restart: always
+    ports:
+      - ${GRAFANA_PORT:-3200}:3000
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - loki
+
 volumes:
   pgdata:
   miniodata:
+  redisdata:
+  loki-data:
+  grafana-data:

@@ -1,54 +1,29 @@
 package handlers
 
 import (
-	"net/http"
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"log/slog"
 	"time"
 
-	"github.com/gin-gonic/gin"
-
-	authv1 "github.com/spburtsev/ex-files-backend/gen/auth/v1"
+	"github.com/spburtsev/ex-files-backend/middleware"
 	"github.com/spburtsev/ex-files-backend/models"
-	"github.com/spburtsev/ex-files-backend/services"
+	"github.com/spburtsev/ex-files-backend/oapi"
 )
 
-type AuthHandler struct {
-	Repo   services.UserRepository
-	Tokens services.TokenService
-	Hasher services.Hasher
-	Audit  services.AuditRepository
-}
-
-type registerRequest struct {
-	Email    string `json:"email"    binding:"required,email"`
-	Password string `json:"password" binding:"required,min=8"`
-	Name     string `json:"name"     binding:"required"`
-}
-
-type loginRequest struct {
-	Email    string `json:"email"    binding:"required,email"`
-	Password string `json:"password" binding:"required"`
-}
-
-func setSessionCookie(c *gin.Context, token string) {
-	c.SetCookie("session", token, int((8 * time.Hour).Seconds()), "/", "", false, true)
-}
-
-func (h *AuthHandler) Register(c *gin.Context) {
-	var req registerRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+// AuthRegister implements POST /auth/register.
+func (s *Server) AuthRegister(ctx context.Context, req *oapi.RegisterRequest) (oapi.AuthRegisterRes, error) {
+	if _, err := s.UserRepo.FindByEmail(req.Email); err == nil {
+		return &oapi.AuthRegisterConflict{Error: "email already registered"}, nil
 	}
 
-	if _, err := h.Repo.FindByEmail(req.Email); err == nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "email already registered"})
-		return
-	}
-
-	hash, err := h.Hasher.Hash(req.Password)
+	hash, err := s.Hasher.Hash(req.Password)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
-		return
+		logErr("auth.register.hash", err)
+		return &oapi.AuthRegisterInternalServerError{Error: "internal error"}, nil
 	}
 
 	user := models.User{
@@ -56,87 +31,168 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		Name:         req.Name,
 		PasswordHash: hash,
 	}
-	if err := h.Repo.Create(&user); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create user"})
-		return
+	if err := s.UserRepo.Create(&user); err != nil {
+		logErr("auth.register.create", err)
+		return &oapi.AuthRegisterInternalServerError{Error: "failed to create user"}, nil
 	}
 
-	token, err := h.Tokens.Issue(&user)
+	token, err := s.Tokens.Issue(&user)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue token"})
-		return
+		logErr("auth.register.issue", err)
+		return &oapi.AuthRegisterInternalServerError{Error: "failed to issue token"}, nil
 	}
 
-	logAudit(h.Audit, models.AuditActionUserRegistered, user.ID, uintPtr(user.ID), "user", map[string]any{
+	logAudit(s.Audit, models.AuditActionUserRegistered, user.ID, uintPtr(user.ID), "user", map[string]any{
 		"email": user.Email,
 	})
 
-	setSessionCookie(c, token)
-	protobufResponse(c, http.StatusCreated, &authv1.RegisterResponse{
-		User:  userToProto(&user),
+	middleware.SetSessionCookie(ctx, token)
+	return &oapi.AuthResponse{
+		User:  userToOAPI(&user),
 		Token: token,
-	})
+	}, nil
 }
 
-func (h *AuthHandler) Login(c *gin.Context) {
-	var req loginRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	user, err := h.Repo.FindByEmail(req.Email)
+// AuthLogin implements POST /auth/login.
+func (s *Server) AuthLogin(ctx context.Context, req *oapi.LoginRequest) (oapi.AuthLoginRes, error) {
+	user, err := s.UserRepo.FindByEmail(req.Email)
 	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
-		return
+		slog.Debug("login failed: user not found", "email", req.Email)
+		return &oapi.AuthLoginUnauthorized{Error: "invalid credentials"}, nil
+	}
+	if err := s.Hasher.Compare(user.PasswordHash, req.Password); err != nil {
+		slog.Debug("login failed: wrong password", "email", req.Email)
+		return &oapi.AuthLoginUnauthorized{Error: "invalid credentials"}, nil
 	}
 
-	if err := h.Hasher.Compare(user.PasswordHash, req.Password); err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
-		return
-	}
-
-	token, err := h.Tokens.Issue(user)
+	token, err := s.Tokens.Issue(user)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue token"})
-		return
+		logErr("auth.login.issue", err)
+		return &oapi.AuthLoginInternalServerError{Error: "failed to issue token"}, nil
 	}
 
-	logAudit(h.Audit, models.AuditActionUserLoggedIn, user.ID, uintPtr(user.ID), "user", map[string]any{
+	logAudit(s.Audit, models.AuditActionUserLoggedIn, user.ID, uintPtr(user.ID), "user", map[string]any{
 		"email": user.Email,
 	})
 
-	setSessionCookie(c, token)
-	protobufResponse(c, http.StatusOK, &authv1.LoginResponse{
-		User:  userToProto(user),
+	middleware.SetSessionCookie(ctx, token)
+	return &oapi.AuthResponse{
+		User:  userToOAPI(user),
 		Token: token,
-	})
+	}, nil
 }
 
-func (h *AuthHandler) Me(c *gin.Context) {
-	userID, _ := c.Get("user_id")
-	user, err := h.Repo.FindByID(userID.(uint))
+// AuthLogout implements POST /auth/logout.
+func (s *Server) AuthLogout(ctx context.Context) (oapi.AuthLogoutRes, error) {
+	middleware.ClearSessionCookie(ctx)
+	return &oapi.MessageResponse{Message: "logged out"}, nil
+}
+
+// AuthMe implements GET /auth/me.
+func (s *Server) AuthMe(ctx context.Context) (oapi.AuthMeRes, error) {
+	uid, err := s.callerID(ctx)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
-		return
+		return &oapi.AuthMeUnauthorized{Error: "unauthorized"}, nil
 	}
-	protobufResponse(c, http.StatusOK, &authv1.MeResponse{User: userToProto(user)})
-}
 
-func (h *AuthHandler) Logout(c *gin.Context) {
-	c.SetCookie("session", "", -1, "/", "", false, true)
-	protobufResponse(c, http.StatusOK, &authv1.LogoutResponse{Message: "logged out"})
-}
+	cacheKey := fmt.Sprintf("user:%d", uid)
+	if s.Cache != nil {
+		if cached, hit := s.Cache.Get(cacheKey); hit {
+			var u models.User
+			if err := json.Unmarshal(cached, &u); err == nil {
+				resp := oapi.MeResponse{User: userToOAPI(&u)}
+				return &resp, nil
+			}
+		}
+	}
 
-func (h *AuthHandler) ListUsers(c *gin.Context) {
-	users, err := h.Repo.ListAll()
+	user, err := s.UserRepo.FindByID(uid)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list users"})
-		return
+		return &oapi.AuthMeNotFound{Error: "user not found"}, nil
 	}
-	pb := make([]*authv1.User, len(users))
+
+	if s.Cache != nil {
+		if data, err := json.Marshal(user); err == nil {
+			s.Cache.Set(cacheKey, data, 30*time.Second)
+		}
+	}
+	resp := oapi.MeResponse{User: userToOAPI(user)}
+	return &resp, nil
+}
+
+// AuthListUsers implements GET /auth/users.
+func (s *Server) AuthListUsers(ctx context.Context) (oapi.AuthListUsersRes, error) {
+	if _, err := s.callerID(ctx); err != nil {
+		return &oapi.AuthListUsersUnauthorized{Error: "unauthorized"}, nil
+	}
+	users, err := s.UserRepo.ListAll()
+	if err != nil {
+		logErr("auth.users.list", err)
+		return &oapi.AuthListUsersInternalServerError{Error: "failed to list users"}, nil
+	}
+	out := make([]oapi.User, len(users))
 	for i := range users {
-		pb[i] = userToProto(&users[i])
+		out[i] = userToOAPI(&users[i])
 	}
-	c.JSON(http.StatusOK, gin.H{"users": pb})
+	return &oapi.GetUsersResponse{Users: out}, nil
+}
+
+// AuthForgotPassword implements POST /auth/forgot-password.
+// Always returns 200 to prevent email enumeration.
+func (s *Server) AuthForgotPassword(ctx context.Context, req *oapi.ForgotPasswordRequest) (oapi.AuthForgotPasswordRes, error) {
+	const stockMessage = "if the email exists, a reset link has been sent"
+
+	user, err := s.UserRepo.FindByEmail(req.Email)
+	if err != nil {
+		return &oapi.MessageResponse{Message: stockMessage}, nil
+	}
+
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		logErr("auth.forgot.rand", err)
+		return &oapi.AuthForgotPasswordInternalServerError{Error: "internal error"}, nil
+	}
+	tokenStr := hex.EncodeToString(tokenBytes)
+
+	if err := s.ResetTokens.StoreResetToken(tokenStr, user.ID, time.Hour); err != nil {
+		logErr("auth.forgot.store", err)
+		return &oapi.AuthForgotPasswordInternalServerError{Error: "internal error"}, nil
+	}
+
+	if s.Email != nil {
+		subject := "Password Reset - Ex-Files"
+		body := fmt.Sprintf(
+			"<p>Hello %s,</p>"+
+				"<p>You requested a password reset. Use the following token to reset your password:</p>"+
+				"<p><strong>%s</strong></p>"+
+				"<p>This token expires in 1 hour. If you did not request this, ignore this email.</p>",
+			user.Name, tokenStr,
+		)
+		if err := s.Email.Send(user.Email, subject, body); err != nil {
+			slog.Error("forgot-password: email send failed", "error", err)
+		}
+	}
+
+	return &oapi.MessageResponse{Message: stockMessage}, nil
+}
+
+// AuthResetPassword implements POST /auth/reset-password.
+func (s *Server) AuthResetPassword(ctx context.Context, req *oapi.ResetPasswordRequest) (oapi.AuthResetPasswordRes, error) {
+	uid, err := s.ResetTokens.GetResetTokenUserID(req.Token)
+	if err != nil {
+		return &oapi.AuthResetPasswordBadRequest{Error: "invalid or expired token"}, nil
+	}
+	hash, err := s.Hasher.Hash(req.Password)
+	if err != nil {
+		logErr("auth.reset.hash", err)
+		return &oapi.AuthResetPasswordInternalServerError{Error: "internal error"}, nil
+	}
+	if err := s.UserRepo.UpdatePassword(uid, hash); err != nil {
+		logErr("auth.reset.update", err)
+		return &oapi.AuthResetPasswordInternalServerError{Error: "internal error"}, nil
+	}
+	if err := s.ResetTokens.DeleteResetToken(req.Token); err != nil {
+		slog.Error("reset-password: failed to delete token", "error", err)
+	}
+	return &oapi.MessageResponse{Message: "password has been reset"}, nil
 }

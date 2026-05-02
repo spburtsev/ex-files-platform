@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"log"
+	"log/slog"
 
 	"gorm.io/datatypes"
 
@@ -21,7 +21,7 @@ func logAudit(repo services.AuditRepository, action models.AuditAction, actorID 
 		Metadata:   datatypes.JSONMap(metadata),
 	}
 	if err := repo.Append(entry); err != nil {
-		log.Printf("audit: failed to log %s: %v", action, err)
+		slog.Error("failed to log audit entry", "component", "audit", "action", string(action), "error", err)
 	}
 }
 

@@ -1,10 +1,31 @@
+import type { DocumentStatus as ApiDocumentStatus } from '$lib/api';
+
+export type DocumentStatus = 'draft' | 'saving' | 'saved' | 'error';
+export type ReviewStatus = ApiDocumentStatus;
+
 export interface Document {
 	id: string;
+	serverId?: string;
+	versionId?: string;
 	name: string;
 	size: number;
-	data: Uint8Array;
+	data: Uint8Array | null;
 	uploadedAt: Date;
 	pageCount: number;
+	status: DocumentStatus;
+	error?: string;
+	mimeType: string;
+	uploaderName?: string;
+	reviewStatus?: ReviewStatus;
+}
+
+export interface HydratedDocument {
+	serverId: string;
+	name: string;
+	size: number;
+	mimeType: string;
+	uploaderName?: string;
+	reviewStatus?: ReviewStatus;
 }
 
 export interface Comment {
@@ -25,17 +46,48 @@ export interface ActivityEntry {
 	timestamp: Date;
 }
 
-function createWorkbenchStore() {
-	const documents = $state<Document[]>([]);
-	const comments = $state<Comment[]>([]);
-	const activityLog = $state<ActivityEntry[]>([]);
-	let activeDocumentId = $state<string | null>(null);
+interface IssueSlot {
+	documents: Document[];
+	comments: Comment[];
+	activityLog: ActivityEntry[];
+	activeDocumentId: string | null;
+	hydrated: boolean;
+}
 
-	const activeDocument = $derived(documents.find((d) => d.id === activeDocumentId) ?? null);
-	const activeComments = $derived(comments.filter((c) => c.documentId === activeDocumentId));
+function emptySlot(): IssueSlot {
+	return {
+		documents: [],
+		comments: [],
+		activityLog: [],
+		activeDocumentId: null,
+		hydrated: false
+	};
+}
+
+function createWorkbenchStore() {
+	const slots = $state<Record<string, IssueSlot>>({});
+	let currentIssueId = $state<string | null>(null);
+
+	const slot = $derived<IssueSlot>(
+		currentIssueId && slots[currentIssueId] ? slots[currentIssueId] : emptySlot()
+	);
+	const activeDocument = $derived(
+		slot.documents.find((d) => d.id === slot.activeDocumentId) ?? null
+	);
+	const activeComments = $derived(
+		slot.comments.filter((c) => c.documentId === slot.activeDocumentId)
+	);
+
+	function setIssue(issueId: string) {
+		if (!slots[issueId]) {
+			slots[issueId] = emptySlot();
+		}
+		currentIssueId = issueId;
+	}
 
 	function addActivity(action: ActivityEntry['action'], description: string) {
-		activityLog.unshift({
+		if (!currentIssueId) return;
+		slots[currentIssueId].activityLog.unshift({
 			id: crypto.randomUUID(),
 			action,
 			description,
@@ -44,33 +96,100 @@ function createWorkbenchStore() {
 	}
 
 	function uploadDocument(file: File, data: Uint8Array, pageCount: number) {
+		if (!currentIssueId) return;
 		const doc: Document = {
 			id: crypto.randomUUID(),
 			name: file.name,
 			size: file.size,
 			data,
 			uploadedAt: new Date(),
-			pageCount
+			pageCount,
+			status: 'draft',
+			mimeType: file.type || 'application/pdf'
 		};
-		documents.push(doc);
-		activeDocumentId = doc.id;
-		addActivity('upload', `Uploaded "${file.name}" (${pageCount} pages)`);
+		slots[currentIssueId].documents.push(doc);
+		slots[currentIssueId].activeDocumentId = doc.id;
+		addActivity('upload', `Added draft "${file.name}" (${pageCount} pages)`);
 		return doc;
 	}
 
+	function setDocumentStatus(id: string, status: DocumentStatus, error?: string) {
+		if (!currentIssueId) return;
+		const doc = slots[currentIssueId].documents.find((d) => d.id === id);
+		if (!doc) return;
+		doc.status = status;
+		doc.error = error;
+	}
+
+	function setDocumentSaved(id: string, serverId: string, versionId: string) {
+		if (!currentIssueId) return;
+		const doc = slots[currentIssueId].documents.find((d) => d.id === id);
+		if (!doc) return;
+		doc.status = 'saved';
+		doc.error = undefined;
+		doc.serverId = serverId;
+		doc.versionId = versionId;
+	}
+
+	function setDocumentData(id: string, data: Uint8Array, pageCount: number) {
+		if (!currentIssueId) return;
+		const doc = slots[currentIssueId].documents.find((d) => d.id === id);
+		if (!doc) return;
+		doc.data = data;
+		doc.pageCount = pageCount;
+	}
+
+	function setDocumentReviewStatus(id: string, reviewStatus: ReviewStatus) {
+		if (!currentIssueId) return;
+		const doc = slots[currentIssueId].documents.find((d) => d.id === id);
+		if (!doc) return;
+		doc.reviewStatus = reviewStatus;
+	}
+
+	function hydrate(docs: HydratedDocument[]) {
+		if (!currentIssueId) return;
+		const s = slots[currentIssueId];
+		const existingServerIds = new Set(
+			s.documents.map((d) => d.serverId).filter((x): x is string => !!x)
+		);
+		for (const d of docs) {
+			if (existingServerIds.has(d.serverId)) continue;
+			s.documents.push({
+				id: crypto.randomUUID(),
+				serverId: d.serverId,
+				name: d.name,
+				size: d.size,
+				data: null,
+				uploadedAt: new Date(),
+				pageCount: 0,
+				status: 'saved',
+				mimeType: d.mimeType,
+				uploaderName: d.uploaderName,
+				reviewStatus: d.reviewStatus
+			});
+		}
+		s.hydrated = true;
+		if (!s.activeDocumentId && s.documents.length > 0) {
+			s.activeDocumentId = s.documents[0].id;
+		}
+	}
+
 	function setActiveDocument(id: string) {
-		activeDocumentId = id;
-		const doc = documents.find((d) => d.id === id);
+		if (!currentIssueId) return;
+		slots[currentIssueId].activeDocumentId = id;
+		const doc = slots[currentIssueId].documents.find((d) => d.id === id);
 		if (doc) {
 			addActivity('view', `Opened "${doc.name}"`);
 		}
 	}
 
 	function addComment(page: number, x: number, y: number, text: string, author: string) {
-		if (!activeDocumentId) return;
+		if (!currentIssueId) return;
+		const activeId = slots[currentIssueId].activeDocumentId;
+		if (!activeId) return;
 		const comment: Comment = {
 			id: crypto.randomUUID(),
-			documentId: activeDocumentId,
+			documentId: activeId,
 			page,
 			x,
 			y,
@@ -78,7 +197,7 @@ function createWorkbenchStore() {
 			author,
 			createdAt: new Date()
 		};
-		comments.push(comment);
+		slots[currentIssueId].comments.push(comment);
 		addActivity(
 			'comment',
 			`${author} commented on page ${page + 1}: "${text.slice(0, 50)}${text.length > 50 ? '...' : ''}"`
@@ -87,36 +206,67 @@ function createWorkbenchStore() {
 	}
 
 	function deleteComment(id: string) {
-		const idx = comments.findIndex((c) => c.id === id);
+		if (!currentIssueId) return;
+		const list = slots[currentIssueId].comments;
+		const idx = list.findIndex((c) => c.id === id);
 		if (idx === -1) return;
-		const comment = comments[idx];
-		comments.splice(idx, 1);
+		const comment = list[idx];
+		list.splice(idx, 1);
 		addActivity('delete_comment', `Deleted comment on page ${comment.page + 1}`);
 	}
 
+	function discardDocument(id: string) {
+		if (!currentIssueId) return;
+		const s = slots[currentIssueId];
+		const idx = s.documents.findIndex((d) => d.id === id);
+		if (idx === -1) return;
+		const doc = s.documents[idx];
+		s.documents.splice(idx, 1);
+		for (let i = s.comments.length - 1; i >= 0; i--) {
+			if (s.comments[i].documentId === id) s.comments.splice(i, 1);
+		}
+		if (s.activeDocumentId === id) {
+			s.activeDocumentId = s.documents[0]?.id ?? null;
+		}
+		addActivity('delete_comment', `Discarded draft "${doc.name}"`);
+	}
+
 	return {
+		get currentIssueId() {
+			return currentIssueId;
+		},
 		get documents() {
-			return documents;
+			return slot.documents;
 		},
 		get comments() {
-			return comments;
+			return slot.comments;
 		},
 		get activityLog() {
-			return activityLog;
+			return slot.activityLog;
 		},
 		get activeDocument() {
 			return activeDocument;
 		},
 		get activeDocumentId() {
-			return activeDocumentId;
+			return slot.activeDocumentId;
 		},
 		get activeComments() {
 			return activeComments;
 		},
+		get hydrated() {
+			return slot.hydrated;
+		},
+		setIssue,
 		uploadDocument,
+		setDocumentStatus,
+		setDocumentSaved,
+		setDocumentData,
+		setDocumentReviewStatus,
+		hydrate,
 		setActiveDocument,
 		addComment,
-		deleteComment
+		deleteComment,
+		discardDocument
 	};
 }
 

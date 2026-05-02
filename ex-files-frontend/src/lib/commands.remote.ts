@@ -1,27 +1,50 @@
 import { command, getRequestEvent } from '$app/server';
-import { env } from '$env/dynamic/private';
-import { fromBinary } from '@bufbuild/protobuf';
-import { LoginResponseSchema, RegisterResponseSchema } from '$lib/gen/auth/v1/auth_pb';
-import { CreateWorkspaceResponseSchema } from '$lib/gen/workspaces/v1/workspaces_pb';
-import { GetDownloadURLResponseSchema } from '$lib/gen/documents/v1/documents_pb';
 
-const BACKEND = env.BACKEND_URL ?? 'http://localhost:8080';
+import { apiOpts } from '$lib/api-client';
+import {
+	authForgotPassword,
+	authLogin,
+	authLogout,
+	authRegister,
+	authResetPassword,
+	commentsCreate,
+	documentsApprove,
+	documentsAssignReviewer,
+	documentsDelete,
+	documentsGetDownloadUrl,
+	documentsReject,
+	documentsRequestChanges,
+	documentsResubmit,
+	documentsSubmit,
+	documentsUpload,
+	documentsUploadVersion,
+	issuesCreate,
+	issuesUpdateAssignee,
+	workspacesAddMember,
+	workspacesCreate,
+	workspacesDelete,
+	workspacesRemoveMember,
+	workspacesUpdate
+} from '$lib/api';
 
 const NETWORK_ERROR = 'Unable to reach the server. Please try again later.';
 
-async function parseJsonError(res: Response, fallback: string) {
-	const data = await res.json().catch(() => ({}));
-	return (data as Record<string, string>).error ?? fallback;
+function errorMessage(error: unknown, fallback: string): string {
+	if (error && typeof error === 'object' && 'error' in error) {
+		const e = (error as { error: unknown }).error;
+		if (typeof e === 'string') return e;
+	}
+	return fallback;
 }
 
-/** Wrapper around event.fetch that returns null instead of throwing on network failure. */
-async function safeFetch(url: string, init?: RequestInit) {
-	try {
-		const event = getRequestEvent();
-		return await event.fetch(url, init);
-	} catch {
-		return null;
-	}
+function setSessionCookie(token: string) {
+	const event = getRequestEvent();
+	event.cookies.set('session', token, {
+		path: '/',
+		httpOnly: true,
+		maxAge: 8 * 60 * 60,
+		sameSite: 'lax'
+	});
 }
 
 // ---------------------------------------------------------------------------
@@ -31,61 +54,79 @@ async function safeFetch(url: string, init?: RequestInit) {
 export const login = command(
 	'unchecked',
 	async (credentials: { email: string; password: string }) => {
-		const res = await safeFetch(`${BACKEND}/auth/login`, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(credentials)
-		});
-		if (!res) return { ok: false as const, error: NETWORK_ERROR };
-		if (!res.ok) {
-			return { ok: false as const, error: await parseJsonError(res, 'Invalid email or password') };
+		try {
+			const r = await authLogin({ ...apiOpts(), body: credentials });
+			if (r.error || !r.data) {
+				return {
+					ok: false as const,
+					error: errorMessage(r.error, 'Invalid email or password')
+				};
+			}
+			setSessionCookie(r.data.token);
+			return { ok: true as const };
+		} catch (err) {
+			console.error('login failed', err);
+			return { ok: false as const, error: NETWORK_ERROR };
 		}
-		const r = fromBinary(LoginResponseSchema, new Uint8Array(await res.arrayBuffer()));
-		const event = getRequestEvent();
-		event.cookies.set('session', r.token, {
-			path: '/',
-			httpOnly: true,
-			maxAge: 8 * 60 * 60,
-			sameSite: 'lax'
-		});
-		return { ok: true as const };
 	}
 );
 
 export const register = command(
 	'unchecked',
 	async (details: { name: string; email: string; password: string }) => {
-		const res = await safeFetch(`${BACKEND}/auth/register`, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(details)
-		});
-		if (!res) return { ok: false as const, error: NETWORK_ERROR };
-		if (!res.ok) {
-			return {
-				ok: false as const,
-				error: await parseJsonError(res, 'Registration failed. Please try again.')
-			};
+		try {
+			const r = await authRegister({ ...apiOpts(), body: details });
+			if (r.error || !r.data) {
+				return {
+					ok: false as const,
+					error: errorMessage(r.error, 'Registration failed. Please try again.')
+				};
+			}
+			setSessionCookie(r.data.token);
+			return { ok: true as const };
+		} catch {
+			return { ok: false as const, error: NETWORK_ERROR };
 		}
-		const r = fromBinary(RegisterResponseSchema, new Uint8Array(await res.arrayBuffer()));
-		const event = getRequestEvent();
-		event.cookies.set('session', r.token, {
-			path: '/',
-			httpOnly: true,
-			maxAge: 8 * 60 * 60,
-			sameSite: 'lax'
-		});
+	}
+);
+
+export const forgotPassword = command('unchecked', async (email: string) => {
+	try {
+		const r = await authForgotPassword({ ...apiOpts(), body: { email } });
+		if (r.error) {
+			return { ok: false as const, error: errorMessage(r.error, 'Request failed') };
+		}
 		return { ok: true as const };
+	} catch {
+		return { ok: false as const, error: NETWORK_ERROR };
+	}
+});
+
+export const resetPassword = command(
+	'unchecked',
+	async (data: { token: string; password: string }) => {
+		try {
+			const r = await authResetPassword({ ...apiOpts(), body: data });
+			if (r.error) {
+				return {
+					ok: false as const,
+					error: errorMessage(r.error, 'Reset failed. Token may be invalid or expired.')
+				};
+			}
+			return { ok: true as const };
+		} catch {
+			return { ok: false as const, error: NETWORK_ERROR };
+		}
 	}
 );
 
 export const logout = command(async () => {
-	const event = getRequestEvent();
 	try {
-		await event.fetch(`${BACKEND}/auth/logout`, { method: 'POST' });
+		await authLogout(apiOpts());
 	} catch {
-		// Even if backend is down, clear the local session cookie
+		// Even if backend is down, clear the local session cookie below.
 	}
+	const event = getRequestEvent();
 	event.cookies.delete('session', { path: '/' });
 });
 
@@ -94,51 +135,39 @@ export const logout = command(async () => {
 // ---------------------------------------------------------------------------
 
 export const createWorkspace = command('unchecked', async (name: string) => {
-	const res = await safeFetch(`${BACKEND}/workspaces`, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ name })
-	});
-	if (!res) return { ok: false as const, error: NETWORK_ERROR };
-	if (!res.ok) {
-		return { ok: false as const, error: await parseJsonError(res, 'Failed to create workspace') };
+	const r = await workspacesCreate({ ...apiOpts(), body: { name } });
+	if (r.error || !r.data) {
+		return { ok: false as const, error: errorMessage(r.error, 'Failed to create workspace') };
 	}
-	const r = fromBinary(CreateWorkspaceResponseSchema, new Uint8Array(await res.arrayBuffer()));
-	return { ok: true as const, workspace: { id: r.workspace!.id } };
+	return { ok: true as const, workspace: { id: r.data.workspace.id } };
 });
 
 export const updateWorkspace = command(
 	'unchecked',
 	async ({ id, name }: { id: string; name: string }) => {
-		const res = await safeFetch(`${BACKEND}/workspaces/${id}`, {
-			method: 'PUT',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ name })
-		});
-		if (!res) return { ok: false as const, error: NETWORK_ERROR };
-		if (!res.ok) {
-			return { ok: false as const, error: await parseJsonError(res, 'Failed to update workspace') };
+		const r = await workspacesUpdate({ ...apiOpts(), path: { id }, body: { name } });
+		if (r.error) {
+			return { ok: false as const, error: errorMessage(r.error, 'Failed to update workspace') };
 		}
 		return { ok: true as const };
 	}
 );
 
 export const deleteWorkspace = command('unchecked', async (id: string) => {
-	const res = await safeFetch(`${BACKEND}/workspaces/${id}`, { method: 'DELETE' });
-	return { ok: res?.ok ?? false };
+	const r = await workspacesDelete({ ...apiOpts(), path: { id } });
+	return { ok: !r.error };
 });
 
 export const addWorkspaceMember = command(
 	'unchecked',
-	async ({ workspaceId, userId }: { workspaceId: string; userId: number }) => {
-		const res = await safeFetch(`${BACKEND}/workspaces/${workspaceId}/members`, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ user_id: userId })
+	async ({ workspaceId, userId }: { workspaceId: string; userId: string }) => {
+		const r = await workspacesAddMember({
+			...apiOpts(),
+			path: { id: workspaceId },
+			body: { userId }
 		});
-		if (!res) return { ok: false as const, error: NETWORK_ERROR };
-		if (!res.ok) {
-			return { ok: false as const, error: await parseJsonError(res, 'Failed to add member') };
+		if (r.error) {
+			return { ok: false as const, error: errorMessage(r.error, 'Failed to add member') };
 		}
 		return { ok: true as const };
 	}
@@ -146,11 +175,48 @@ export const addWorkspaceMember = command(
 
 export const removeWorkspaceMember = command(
 	'unchecked',
-	async ({ workspaceId, userId }: { workspaceId: string; userId: bigint }) => {
-		const res = await safeFetch(`${BACKEND}/workspaces/${workspaceId}/members/${userId}`, {
-			method: 'DELETE'
+	async ({ workspaceId, userId }: { workspaceId: string; userId: string }) => {
+		const r = await workspacesRemoveMember({
+			...apiOpts(),
+			path: { id: workspaceId, userId }
 		});
-		return { ok: res?.ok ?? false };
+		return { ok: !r.error };
+	}
+);
+
+// ---------------------------------------------------------------------------
+// Issues
+// ---------------------------------------------------------------------------
+
+export const createIssue = command(
+	'unchecked',
+	async ({
+		workspaceId,
+		title,
+		description,
+		assigneeId,
+		deadline
+	}: {
+		workspaceId: string;
+		title: string;
+		description?: string;
+		assigneeId: string;
+		deadline?: string;
+	}) => {
+		const r = await issuesCreate({
+			...apiOpts(),
+			path: { id: workspaceId },
+			body: {
+				title,
+				description,
+				assigneeId,
+				deadline: deadline ? new Date(deadline).toISOString() : null
+			}
+		});
+		if (r.error) {
+			return { ok: false as const, error: errorMessage(r.error, 'Failed to create issue') };
+		}
+		return { ok: true as const };
 	}
 );
 
@@ -160,38 +226,49 @@ export const removeWorkspaceMember = command(
 
 export const uploadDocument = command(
 	'unchecked',
-	async ({ workspaceId, file }: { workspaceId: string; file: File }) => {
-		const form = new FormData();
-		form.append('file', file);
-		const res = await safeFetch(`${BACKEND}/workspaces/${workspaceId}/documents`, {
-			method: 'POST',
-			body: form
+	async ({
+		issueId,
+		name,
+		mimeType,
+		data
+	}: {
+		issueId: string;
+		name: string;
+		mimeType: string;
+		data: Uint8Array;
+	}) => {
+		const file = new File([data.slice()], name, { type: mimeType });
+		const r = await documentsUpload({
+			...apiOpts(),
+			path: { id: issueId },
+			body: { file }
 		});
-		if (!res) return { ok: false as const, error: NETWORK_ERROR };
-		if (!res.ok) {
-			return { ok: false as const, error: await parseJsonError(res, 'Upload failed') };
+		if (r.error || !r.data) {
+			return { ok: false as const, error: errorMessage(r.error, 'Upload failed') };
 		}
-		return { ok: true as const };
+		return {
+			ok: true as const,
+			docId: r.data.document.id,
+			versionId: r.data.version.id
+		};
 	}
 );
 
 export const deleteDocument = command('unchecked', async (id: string) => {
-	const res = await safeFetch(`${BACKEND}/documents/${id}`, { method: 'DELETE' });
-	return { ok: res?.ok ?? false };
+	const r = await documentsDelete({ ...apiOpts(), path: { id } });
+	return { ok: !r.error };
 });
 
 export const uploadDocumentVersion = command(
 	'unchecked',
 	async ({ docId, file }: { docId: string; file: File }) => {
-		const form = new FormData();
-		form.append('file', file);
-		const res = await safeFetch(`${BACKEND}/documents/${docId}/versions`, {
-			method: 'POST',
-			body: form
+		const r = await documentsUploadVersion({
+			...apiOpts(),
+			path: { id: docId },
+			body: { file }
 		});
-		if (!res) return { ok: false as const, error: NETWORK_ERROR };
-		if (!res.ok) {
-			return { ok: false as const, error: await parseJsonError(res, 'Upload failed') };
+		if (r.error) {
+			return { ok: false as const, error: errorMessage(r.error, 'Upload failed') };
 		}
 		return { ok: true as const };
 	}
@@ -199,11 +276,13 @@ export const uploadDocumentVersion = command(
 
 export const getDocumentDownloadUrl = command(
 	'unchecked',
-	async ({ docId, versionId }: { docId: string; versionId: number }) => {
-		const res = await safeFetch(`${BACKEND}/documents/${docId}/versions/${versionId}/download`);
-		if (!res || !res.ok) return { url: null };
-		const r = fromBinary(GetDownloadURLResponseSchema, new Uint8Array(await res.arrayBuffer()));
-		return { url: r.url };
+	async ({ docId, versionId }: { docId: string; versionId: string }) => {
+		const r = await documentsGetDownloadUrl({
+			...apiOpts(),
+			path: { id: docId, versionId }
+		});
+		if (r.error || !r.data) return { url: null };
+		return { url: r.data.url };
 	}
 );
 
@@ -212,44 +291,28 @@ export const getDocumentDownloadUrl = command(
 // ---------------------------------------------------------------------------
 
 export const submitDocument = command('unchecked', async (id: string) => {
-	const res = await safeFetch(`${BACKEND}/documents/${id}/submit`, { method: 'POST' });
-	if (!res) return { ok: false as const, error: NETWORK_ERROR };
-	if (!res.ok) {
-		return { ok: false as const, error: await parseJsonError(res, 'Action failed') };
-	}
+	const r = await documentsSubmit({ ...apiOpts(), path: { id } });
+	if (r.error) return { ok: false as const, error: errorMessage(r.error, 'Action failed') };
 	return { ok: true as const };
 });
 
 export const resubmitDocument = command('unchecked', async (id: string) => {
-	const res = await safeFetch(`${BACKEND}/documents/${id}/resubmit`, { method: 'POST' });
-	if (!res) return { ok: false as const, error: NETWORK_ERROR };
-	if (!res.ok) {
-		return { ok: false as const, error: await parseJsonError(res, 'Action failed') };
-	}
+	const r = await documentsResubmit({ ...apiOpts(), path: { id } });
+	if (r.error) return { ok: false as const, error: errorMessage(r.error, 'Action failed') };
 	return { ok: true as const };
 });
 
 export const approveDocument = command('unchecked', async (id: string) => {
-	const res = await safeFetch(`${BACKEND}/documents/${id}/approve`, { method: 'POST' });
-	if (!res) return { ok: false as const, error: NETWORK_ERROR };
-	if (!res.ok) {
-		return { ok: false as const, error: await parseJsonError(res, 'Action failed') };
-	}
+	const r = await documentsApprove({ ...apiOpts(), path: { id } });
+	if (r.error) return { ok: false as const, error: errorMessage(r.error, 'Action failed') };
 	return { ok: true as const };
 });
 
 export const rejectDocument = command(
 	'unchecked',
 	async ({ id, note }: { id: string; note: string }) => {
-		const res = await safeFetch(`${BACKEND}/documents/${id}/reject`, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ note })
-		});
-		if (!res) return { ok: false as const, error: NETWORK_ERROR };
-		if (!res.ok) {
-			return { ok: false as const, error: await parseJsonError(res, 'Action failed') };
-		}
+		const r = await documentsReject({ ...apiOpts(), path: { id }, body: { note } });
+		if (r.error) return { ok: false as const, error: errorMessage(r.error, 'Action failed') };
 		return { ok: true as const };
 	}
 );
@@ -257,31 +320,51 @@ export const rejectDocument = command(
 export const requestDocumentChanges = command(
 	'unchecked',
 	async ({ id, note }: { id: string; note: string }) => {
-		const res = await safeFetch(`${BACKEND}/documents/${id}/request-changes`, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ note })
-		});
-		if (!res) return { ok: false as const, error: NETWORK_ERROR };
-		if (!res.ok) {
-			return { ok: false as const, error: await parseJsonError(res, 'Action failed') };
-		}
+		const r = await documentsRequestChanges({ ...apiOpts(), path: { id }, body: { note } });
+		if (r.error) return { ok: false as const, error: errorMessage(r.error, 'Action failed') };
 		return { ok: true as const };
 	}
 );
 
 export const assignDocumentReviewer = command(
 	'unchecked',
-	async ({ id, reviewerId }: { id: string; reviewerId: number }) => {
-		const res = await safeFetch(`${BACKEND}/documents/${id}/reviewer`, {
-			method: 'PUT',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ reviewer_id: reviewerId })
+	async ({ id, reviewerId }: { id: string; reviewerId: string }) => {
+		const r = await documentsAssignReviewer({
+			...apiOpts(),
+			path: { id },
+			body: { reviewerId }
 		});
-		if (!res) return { ok: false as const, error: NETWORK_ERROR };
-		if (!res.ok) {
-			return { ok: false as const, error: await parseJsonError(res, 'Failed to assign reviewer') };
+		if (r.error) {
+			return { ok: false as const, error: errorMessage(r.error, 'Failed to assign reviewer') };
 		}
+		return { ok: true as const };
+	}
+);
+
+export const updateIssueAssignee = command(
+	'unchecked',
+	async ({ id, assigneeId }: { id: string; assigneeId: string }) => {
+		const r = await issuesUpdateAssignee({
+			...apiOpts(),
+			path: { id },
+			body: { assigneeId }
+		});
+		if (r.error) {
+			return { ok: false as const, error: errorMessage(r.error, 'Failed to change assignee') };
+		}
+		return { ok: true as const };
+	}
+);
+
+// ---------------------------------------------------------------------------
+// Comments
+// ---------------------------------------------------------------------------
+
+export const createComment = command(
+	'unchecked',
+	async ({ docId, body }: { docId: string; body: string }) => {
+		const r = await commentsCreate({ ...apiOpts(), path: { id: docId }, body: { body } });
+		if (r.error) return { ok: false as const, error: errorMessage(r.error, 'Failed to comment') };
 		return { ok: true as const };
 	}
 );

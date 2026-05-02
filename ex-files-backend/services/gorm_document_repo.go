@@ -22,11 +22,27 @@ func (r *GormDocumentRepository) FindByID(id uint) (*models.Document, error) {
 	return &doc, nil
 }
 
-func (r *GormDocumentRepository) ListByWorkspace(workspaceID uint, search, status string, limit, offset int) ([]models.Document, int64, error) {
+func (r *GormDocumentRepository) FindByHash(hash string) (*models.Document, error) {
+	var doc models.Document
+	if err := r.DB.Where("hash = ?", hash).First(&doc).Error; err != nil {
+		return nil, err
+	}
+	return &doc, nil
+}
+
+func (r *GormDocumentRepository) FindByIssueAndHash(issueID uint, hash string) (*models.Document, error) {
+	var doc models.Document
+	if err := r.DB.Where("issue_id = ? AND hash = ?", issueID, hash).First(&doc).Error; err != nil {
+		return nil, err
+	}
+	return &doc, nil
+}
+
+func (r *GormDocumentRepository) ListByIssue(issueID uint, search, status string, limit, offset int) ([]models.Document, int64, error) {
 	var docs []models.Document
 	var total int64
 
-	q := r.DB.Model(&models.Document{}).Where("workspace_id = ?", workspaceID)
+	q := r.DB.Model(&models.Document{}).Where("issue_id = ?", issueID)
 
 	if search != "" {
 		q = q.Where("name ILIKE ?", "%"+search+"%")
@@ -38,7 +54,10 @@ func (r *GormDocumentRepository) ListByWorkspace(workspaceID uint, search, statu
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	if err := q.Preload("Uploader").Order("created_at DESC").Limit(limit).Offset(offset).Find(&docs).Error; err != nil {
+	if err := q.Preload("Uploader").
+		Order("(status = 'approved') DESC").
+		Order("created_at DESC").
+		Limit(limit).Offset(offset).Find(&docs).Error; err != nil {
 		return nil, 0, err
 	}
 

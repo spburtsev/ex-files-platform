@@ -1,3 +1,4 @@
-# Proto generated files (rebuild with: make proto)
-ex-files-backend/gen/
-ex-files-frontend/src/lib/gen/
+# OpenAPI generated outputs (rebuild with: make openapi-gen)
+ex-files-backend/oapi/
+ex-files-frontend/src/lib/api/
+docs/api/

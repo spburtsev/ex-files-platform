@@ -3,42 +3,63 @@ package handlers
 import (
 	"fmt"
 	"math"
-	"net/http"
-	"strconv"
+	"time"
 
-	"github.com/gin-gonic/gin"
-	"google.golang.org/protobuf/proto"
+	"github.com/spburtsev/ex-files-backend/oapi"
 )
 
-const defaultPageSize = 20
+const (
+	defaultPage    = 1
+	defaultPerPage = 20
+	maxPerPage     = 100
+)
 
-func parsePagination(c *gin.Context) (page, perPage int) {
-	page = 1
-	perPage = defaultPageSize
-
-	if v, err := strconv.Atoi(c.Query("page")); err == nil && v > 0 {
-		page = v
+// resolvePagination clamps the optional page/per_page parameters to the
+// project-wide defaults and returns the (page, perPage, offset) triple.
+func resolvePagination(page, perPage oapi.OptInt32) (int, int, int) {
+	p := defaultPage
+	pp := defaultPerPage
+	if page.IsSet() && page.Value > 0 {
+		p = int(page.Value)
 	}
-	if v, err := strconv.Atoi(c.Query("per_page")); err == nil && v > 0 && v <= 100 {
-		perPage = v
+	if perPage.IsSet() {
+		v := int(perPage.Value)
+		if v > 0 && v <= maxPerPage {
+			pp = v
+		}
 	}
-	return
+	return p, pp, (p - 1) * pp
 }
 
-func setPaginationHeaders(c *gin.Context, page, perPage int, total int64) {
-	totalPages := int(math.Ceil(float64(total) / float64(perPage)))
-
-	c.Header("X-Total-Count", fmt.Sprintf("%d", total))
-	c.Header("X-Page", fmt.Sprintf("%d", page))
-	c.Header("X-Per-Page", fmt.Sprintf("%d", perPage))
-	c.Header("X-Total-Pages", fmt.Sprintf("%d", totalPages))
+// totalPages returns the number of pages for total items at the given size.
+// At least one page is reported even when total is zero so callers can render
+// a consistent paginator.
+func totalPages(total int64, perPage int) int {
+	if perPage <= 0 {
+		return 0
+	}
+	if total == 0 {
+		return 1
+	}
+	return int(math.Ceil(float64(total) / float64(perPage)))
 }
 
-func protobufResponse(c *gin.Context, status int, msg proto.Message) {
-	b, err := proto.Marshal(msg)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "serialization failed"})
-		return
+// optInt64 wraps an int64 in an OptInt64.
+func optInt64(v int64) oapi.OptInt64 {
+	return oapi.NewOptInt64(v)
+}
+
+// optInt32 wraps an int from a clamped int (e.g. page) into OptInt32.
+func optInt32(v int) oapi.OptInt32 {
+	return oapi.NewOptInt32(int32(v))
+}
+
+// parseTime tolerates a few common shapes for incoming date strings.
+func parseTime(s string) (time.Time, error) {
+	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04:05", "2006-01-02"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, nil
+		}
 	}
-	c.Data(status, "application/x-protobuf", b)
+	return time.Time{}, fmt.Errorf("unrecognised time format: %s", s)
 }

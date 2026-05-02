@@ -2,6 +2,7 @@
 	import type { Comment } from '$lib/stores/workbench.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { X } from '@lucide/svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		comments: Comment[];
@@ -29,8 +30,7 @@
 </script>
 
 <div class="flex h-full flex-col">
-	<div class="flex items-center justify-between border-b px-4 py-3">
-		<h3 class="text-sm font-semibold">Comments ({comments.length})</h3>
+	<div class="flex items-center justify-end border-b px-3 py-2">
 		<div class="flex gap-1 rounded-md bg-muted p-0.5 text-xs">
 			<button
 				class="rounded px-2 py-1 {filter === 'page'
@@ -38,7 +38,7 @@
 					: 'text-muted-foreground hover:text-foreground'}"
 				onclick={() => (filter = 'page')}
 			>
-				This page
+				{m.pdf_this_page()}
 			</button>
 			<button
 				class="rounded px-2 py-1 {filter === 'all'
@@ -46,7 +46,7 @@
 					: 'text-muted-foreground hover:text-foreground'}"
 				onclick={() => (filter = 'all')}
 			>
-				All
+				{m.pdf_all()}
 			</button>
 		</div>
 	</div>
@@ -54,8 +54,8 @@
 	<div class="flex-1 overflow-y-auto">
 		{#if visibleComments.length === 0}
 			<div class="px-4 py-8 text-center text-sm text-muted-foreground">
-				{filter === 'page' ? 'No comments on this page' : 'No comments yet'}
-				<p class="mt-1 text-xs">Click on the PDF to add one</p>
+				{filter === 'page' ? m.pdf_no_comments_page() : m.pdf_no_comments()}
+				<p class="mt-1 text-xs">{m.pdf_click_to_add()}</p>
 			</div>
 		{:else}
 			<div class="divide-y">
@@ -87,7 +87,7 @@
 									class="text-primary hover:underline"
 									onclick={() => ongotopage(comment.page)}
 								>
-									Page {comment.page + 1}
+									{m.pdf_page_label({ page: String(comment.page + 1) })}
 								</button>
 							{/if}
 						</div>

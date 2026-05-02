@@ -1,296 +1,263 @@
 package handlers
 
 import (
-	"net/http"
-	"strconv"
+	"context"
 
-	"github.com/gin-gonic/gin"
-	"google.golang.org/protobuf/types/known/timestamppb"
-
-	authv1 "github.com/spburtsev/ex-files-backend/gen/auth/v1"
-	workspacesv1 "github.com/spburtsev/ex-files-backend/gen/workspaces/v1"
 	"github.com/spburtsev/ex-files-backend/models"
-	"github.com/spburtsev/ex-files-backend/services"
+	"github.com/spburtsev/ex-files-backend/oapi"
 )
 
-type WorkspaceHandler struct {
-	Repo     services.WorkspaceRepository
-	UserRepo services.UserRepository
-	Audit    services.AuditRepository
-}
-
-func workspaceToProto(ws *models.Workspace) *workspacesv1.Workspace {
-	return &workspacesv1.Workspace{
-		Id:        uint64(ws.ID),
+func workspaceToOAPI(ws *models.Workspace) oapi.Workspace {
+	return oapi.Workspace{
+		ID:        formatID(ws.ID),
 		Name:      ws.Name,
-		ManagerId: uint64(ws.ManagerID),
-		CreatedAt: timestamppb.New(ws.CreatedAt),
-		UpdatedAt: timestamppb.New(ws.UpdatedAt),
+		ManagerId: formatID(ws.ManagerID),
+		CreatedAt: ws.CreatedAt,
+		UpdatedAt: ws.UpdatedAt,
 	}
 }
 
-func (h *WorkspaceHandler) Create(c *gin.Context) {
-	userID, _ := c.Get("user_id")
-	role, _ := c.Get("role")
-
-	if !models.Role(role.(string)).CanManageWorkspaces() {
-		c.JSON(http.StatusForbidden, gin.H{"error": "only managers can create workspaces"})
-		return
+// WorkspacesCreate implements POST /workspaces.
+func (s *Server) WorkspacesCreate(ctx context.Context, req *oapi.CreateWorkspaceRequest) (oapi.WorkspacesCreateRes, error) {
+	uid, role, err := s.callerIDAndRole(ctx)
+	if err != nil {
+		return &oapi.WorkspacesCreateUnauthorized{Error: "unauthorized"}, nil
+	}
+	if !role.CanManageWorkspaces() {
+		return &oapi.WorkspacesCreateForbidden{Error: "only managers can create workspaces"}, nil
 	}
 
-	var req workspacesv1.CreateWorkspaceRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+	ws := models.Workspace{Name: req.Name, ManagerID: uid}
+	if err := s.WorkspaceRepo.Create(&ws); err != nil {
+		logErr("workspaces.create", err)
+		return &oapi.WorkspacesCreateInternalServerError{Error: "failed to create workspace"}, nil
 	}
 
-	ws := models.Workspace{
-		Name:      req.Name,
-		ManagerID: userID.(uint),
-	}
-	if err := h.Repo.Create(&ws); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create workspace"})
-		return
-	}
-
-	logAudit(h.Audit, models.AuditActionWorkspaceCreated, userID.(uint), uintPtr(ws.ID), "workspace", map[string]any{
+	logAudit(s.Audit, models.AuditActionWorkspaceCreated, uid, uintPtr(ws.ID), "workspace", map[string]any{
 		"name": ws.Name,
 	})
 
-	protobufResponse(c, http.StatusCreated, &workspacesv1.CreateWorkspaceResponse{
-		Workspace: workspaceToProto(&ws),
-	})
+	return &oapi.CreateWorkspaceResponse{Workspace: workspaceToOAPI(&ws)}, nil
 }
 
-func (h *WorkspaceHandler) List(c *gin.Context) {
-	userID, _ := c.Get("user_id")
-	role, _ := c.Get("role")
+// WorkspacesList implements GET /workspaces.
+func (s *Server) WorkspacesList(ctx context.Context, params oapi.WorkspacesListParams) (oapi.WorkspacesListRes, error) {
+	uid, role, err := s.callerIDAndRole(ctx)
+	if err != nil {
+		return &oapi.WorkspacesListUnauthorized{Error: "unauthorized"}, nil
+	}
 
-	page, perPage := parsePagination(c)
-	offset := (page - 1) * perPage
+	page, perPage, offset := resolvePagination(params.Page, params.PerPage)
 
-	var workspaces []models.Workspace
-	var total int64
-	var err error
-
-	if models.Role(role.(string)).CanManageWorkspaces() {
-		workspaces, total, err = h.Repo.FindByManager(userID.(uint), perPage, offset)
+	var (
+		ws    []models.Workspace
+		total int64
+	)
+	if role.CanManageWorkspaces() {
+		ws, total, err = s.WorkspaceRepo.FindByManager(uid, perPage, offset)
 	} else {
-		workspaces, total, err = h.Repo.FindByMember(userID.(uint), perPage, offset)
+		ws, total, err = s.WorkspaceRepo.FindByMember(uid, perPage, offset)
 	}
-
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch workspaces"})
-		return
+		logErr("workspaces.list", err)
+		return &oapi.WorkspacesListInternalServerError{Error: "failed to fetch workspaces"}, nil
 	}
 
-	setPaginationHeaders(c, page, perPage, total)
-
-	pbWorkspaces := make([]*workspacesv1.Workspace, len(workspaces))
-	for i := range workspaces {
-		pbWorkspaces[i] = workspaceToProto(&workspaces[i])
+	out := make([]oapi.Workspace, len(ws))
+	for i := range ws {
+		out[i] = workspaceToOAPI(&ws[i])
 	}
 
-	protobufResponse(c, http.StatusOK, &workspacesv1.GetWorkspacesResponse{
-		Workspaces: pbWorkspaces,
-	})
+	return &oapi.GetWorkspacesResponseHeaders{
+		XPage:       optInt32(page),
+		XPerPage:    optInt32(perPage),
+		XTotalCount: optInt64(total),
+		XTotalPages: optInt32(totalPages(total, perPage)),
+		Response:    oapi.GetWorkspacesResponse{Workspaces: out},
+	}, nil
 }
 
-func (h *WorkspaceHandler) Get(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid workspace id"})
-		return
+// WorkspacesGet implements GET /workspaces/{id}.
+func (s *Server) WorkspacesGet(ctx context.Context, params oapi.WorkspacesGetParams) (oapi.WorkspacesGetRes, error) {
+	if _, err := s.callerID(ctx); err != nil {
+		return &oapi.WorkspacesGetUnauthorized{Error: "unauthorized"}, nil
 	}
-
-	ws, err := h.Repo.FindByID(uint(id))
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
-		return
+	id, ok := parseUintID(params.ID)
+	if !ok {
+		return &oapi.WorkspacesGetNotFound{Error: "workspace not found"}, nil
 	}
-
-	manager, err := h.UserRepo.FindByID(ws.ManagerID)
+	ws, err := s.WorkspaceRepo.FindByID(id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch manager"})
-		return
+		return &oapi.WorkspacesGetNotFound{Error: "workspace not found"}, nil
 	}
-
-	members, err := h.Repo.GetMembers(uint(id))
+	manager, err := s.UserRepo.FindByID(ws.ManagerID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch members"})
-		return
+		logErr("workspaces.get.manager", err)
+		return &oapi.WorkspacesGetInternalServerError{Error: "failed to fetch manager"}, nil
 	}
-
-	pbMembers := make([]*authv1.User, len(members))
+	members, err := s.WorkspaceRepo.GetMembers(id)
+	if err != nil {
+		logErr("workspaces.get.members", err)
+		return &oapi.WorkspacesGetInternalServerError{Error: "failed to fetch members"}, nil
+	}
+	pbMembers := make([]oapi.User, len(members))
 	for i := range members {
-		pbMembers[i] = userToProto(&members[i])
+		pbMembers[i] = userToOAPI(&members[i])
 	}
-
-	protobufResponse(c, http.StatusOK, &workspacesv1.GetWorkspaceResponse{
-		Workspace: &workspacesv1.WorkspaceDetail{
-			Workspace: workspaceToProto(ws),
-			Manager:   userToProto(manager),
+	return &oapi.GetWorkspaceResponse{
+		Workspace: oapi.WorkspaceDetail{
+			Workspace: workspaceToOAPI(ws),
+			Manager:   userToOAPI(manager),
 			Members:   pbMembers,
 		},
-	})
+	}, nil
 }
 
-func (h *WorkspaceHandler) Update(c *gin.Context) {
-	userID, _ := c.Get("user_id")
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+// WorkspacesAssignableMembers implements GET /workspaces/{id}/assignable-members.
+func (s *Server) WorkspacesAssignableMembers(ctx context.Context, params oapi.WorkspacesAssignableMembersParams) (oapi.WorkspacesAssignableMembersRes, error) {
+	if _, err := s.callerID(ctx); err != nil {
+		return &oapi.WorkspacesAssignableMembersUnauthorized{Error: "unauthorized"}, nil
+	}
+	id, ok := parseUintID(params.ID)
+	if !ok {
+		return &oapi.WorkspacesAssignableMembersInternalServerError{Error: "invalid workspace id"}, nil
+	}
+	users, err := s.WorkspaceRepo.GetAssignableUsers(id)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid workspace id"})
-		return
+		logErr("workspaces.assignable", err)
+		return &oapi.WorkspacesAssignableMembersInternalServerError{Error: "failed to fetch assignable users"}, nil
 	}
+	out := make([]oapi.User, len(users))
+	for i := range users {
+		out[i] = userToOAPI(&users[i])
+	}
+	return &oapi.AssignableMembersResponse{Users: out}, nil
+}
 
-	ws, err := h.Repo.FindByID(uint(id))
+// WorkspacesUpdate implements PUT /workspaces/{id}.
+func (s *Server) WorkspacesUpdate(ctx context.Context, req *oapi.UpdateWorkspaceRequest, params oapi.WorkspacesUpdateParams) (oapi.WorkspacesUpdateRes, error) {
+	uid, err := s.callerID(ctx)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
-		return
+		return &oapi.WorkspacesUpdateUnauthorized{Error: "unauthorized"}, nil
 	}
-
-	if !ws.IsOwnedBy(userID.(uint)) {
-		c.JSON(http.StatusForbidden, gin.H{"error": "only the workspace manager can update it"})
-		return
+	id, ok := parseUintID(params.ID)
+	if !ok {
+		return &oapi.WorkspacesUpdateNotFound{Error: "workspace not found"}, nil
 	}
-
-	var req workspacesv1.UpdateWorkspaceRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+	ws, err := s.WorkspaceRepo.FindByID(id)
+	if err != nil {
+		return &oapi.WorkspacesUpdateNotFound{Error: "workspace not found"}, nil
 	}
-
+	if !ws.IsOwnedBy(uid) {
+		return &oapi.WorkspacesUpdateForbidden{Error: "only the workspace manager can update it"}, nil
+	}
 	ws.Name = req.Name
-	if err := h.Repo.Update(ws); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update workspace"})
-		return
+	if err := s.WorkspaceRepo.Update(ws); err != nil {
+		logErr("workspaces.update", err)
+		return &oapi.WorkspacesUpdateInternalServerError{Error: "failed to update workspace"}, nil
 	}
-
-	logAudit(h.Audit, models.AuditActionWorkspaceUpdated, userID.(uint), uintPtr(ws.ID), "workspace", map[string]any{
+	logAudit(s.Audit, models.AuditActionWorkspaceUpdated, uid, uintPtr(ws.ID), "workspace", map[string]any{
 		"name": ws.Name,
 	})
-
-	protobufResponse(c, http.StatusOK, &workspacesv1.UpdateWorkspaceResponse{
-		Workspace: workspaceToProto(ws),
-	})
+	return &oapi.UpdateWorkspaceResponse{Workspace: workspaceToOAPI(ws)}, nil
 }
 
-func (h *WorkspaceHandler) Delete(c *gin.Context) {
-	userID, _ := c.Get("user_id")
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+// WorkspacesDelete implements DELETE /workspaces/{id}.
+func (s *Server) WorkspacesDelete(ctx context.Context, params oapi.WorkspacesDeleteParams) (oapi.WorkspacesDeleteRes, error) {
+	uid, err := s.callerID(ctx)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid workspace id"})
-		return
+		return &oapi.WorkspacesDeleteUnauthorized{Error: "unauthorized"}, nil
 	}
-
-	ws, err := h.Repo.FindByID(uint(id))
+	id, ok := parseUintID(params.ID)
+	if !ok {
+		return &oapi.WorkspacesDeleteNotFound{Error: "workspace not found"}, nil
+	}
+	ws, err := s.WorkspaceRepo.FindByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
-		return
+		return &oapi.WorkspacesDeleteNotFound{Error: "workspace not found"}, nil
 	}
-
-	if !ws.IsOwnedBy(userID.(uint)) {
-		c.JSON(http.StatusForbidden, gin.H{"error": "only the workspace manager can delete it"})
-		return
+	if !ws.IsOwnedBy(uid) {
+		return &oapi.WorkspacesDeleteForbidden{Error: "only the workspace manager can delete it"}, nil
 	}
-
-	if err := h.Repo.Delete(uint(id)); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete workspace"})
-		return
+	if err := s.WorkspaceRepo.Delete(id); err != nil {
+		logErr("workspaces.delete", err)
+		return &oapi.WorkspacesDeleteInternalServerError{Error: "failed to delete workspace"}, nil
 	}
-
-	logAudit(h.Audit, models.AuditActionWorkspaceDeleted, userID.(uint), uintPtr(uint(id)), "workspace", map[string]any{
+	logAudit(s.Audit, models.AuditActionWorkspaceDeleted, uid, uintPtr(id), "workspace", map[string]any{
 		"name": ws.Name,
 	})
-
-	protobufResponse(c, http.StatusOK, &workspacesv1.DeleteWorkspaceResponse{
-		Message: "workspace deleted",
-	})
+	return &oapi.MessageResponse{Message: "workspace deleted"}, nil
 }
 
-func (h *WorkspaceHandler) AddMember(c *gin.Context) {
-	userID, _ := c.Get("user_id")
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+// WorkspacesAddMember implements POST /workspaces/{id}/members.
+func (s *Server) WorkspacesAddMember(ctx context.Context, req *oapi.AddMemberRequest, params oapi.WorkspacesAddMemberParams) (oapi.WorkspacesAddMemberRes, error) {
+	uid, err := s.callerID(ctx)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid workspace id"})
-		return
+		return &oapi.WorkspacesAddMemberUnauthorized{Error: "unauthorized"}, nil
 	}
-
-	ws, err := h.Repo.FindByID(uint(id))
+	id, ok := parseUintID(params.ID)
+	if !ok {
+		return &oapi.WorkspacesAddMemberNotFound{Error: "workspace not found"}, nil
+	}
+	ws, err := s.WorkspaceRepo.FindByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
-		return
+		return &oapi.WorkspacesAddMemberNotFound{Error: "workspace not found"}, nil
 	}
-
-	if !ws.IsOwnedBy(userID.(uint)) {
-		c.JSON(http.StatusForbidden, gin.H{"error": "only the workspace manager can add members"})
-		return
+	if !ws.IsOwnedBy(uid) {
+		return &oapi.WorkspacesAddMemberForbidden{Error: "only the workspace manager can add members"}, nil
 	}
-
-	var req workspacesv1.AddMemberRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+	memberID, ok := parseUintID(req.UserId)
+	if !ok {
+		return &oapi.WorkspacesAddMemberBadRequest{Error: "invalid userId"}, nil
 	}
-
 	member := models.WorkspaceMember{
-		WorkspaceID: uint(id),
-		UserID:      uint(req.UserId),
+		WorkspaceID: id,
+		UserID:      memberID,
 	}
-	if err := h.Repo.AddMember(&member); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to add member"})
-		return
+	if err := s.WorkspaceRepo.AddMember(&member); err != nil {
+		logErr("workspaces.add_member", err)
+		return &oapi.WorkspacesAddMemberInternalServerError{Error: "failed to add member"}, nil
 	}
-
-	logAudit(h.Audit, models.AuditActionMemberAdded, userID.(uint), uintPtr(uint(id)), "workspace", map[string]any{
-		"member_user_id": req.UserId,
+	logAudit(s.Audit, models.AuditActionMemberAdded, uid, uintPtr(id), "workspace", map[string]any{
+		"member_user_id": memberID,
 	})
-
-	protobufResponse(c, http.StatusCreated, &workspacesv1.AddMemberResponse{
-		Member: &workspacesv1.WorkspaceMember{
-			Id:          uint64(member.ID),
-			WorkspaceId: uint64(member.WorkspaceID),
-			UserId:      uint64(member.UserID),
-			CreatedAt:   timestamppb.New(member.CreatedAt),
+	return &oapi.AddMemberResponse{
+		Member: oapi.WorkspaceMember{
+			ID:          formatID(member.ID),
+			WorkspaceId: formatID(member.WorkspaceID),
+			UserId:      formatID(member.UserID),
+			CreatedAt:   member.CreatedAt,
 		},
-	})
+	}, nil
 }
 
-func (h *WorkspaceHandler) RemoveMember(c *gin.Context) {
-	userID, _ := c.Get("user_id")
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+// WorkspacesRemoveMember implements DELETE /workspaces/{id}/members/{userId}.
+func (s *Server) WorkspacesRemoveMember(ctx context.Context, params oapi.WorkspacesRemoveMemberParams) (oapi.WorkspacesRemoveMemberRes, error) {
+	uid, err := s.callerID(ctx)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid workspace id"})
-		return
+		return &oapi.WorkspacesRemoveMemberUnauthorized{Error: "unauthorized"}, nil
 	}
-
-	ws, err := h.Repo.FindByID(uint(id))
+	id, ok := parseUintID(params.ID)
+	if !ok {
+		return &oapi.WorkspacesRemoveMemberNotFound{Error: "workspace not found"}, nil
+	}
+	ws, err := s.WorkspaceRepo.FindByID(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
-		return
+		return &oapi.WorkspacesRemoveMemberNotFound{Error: "workspace not found"}, nil
 	}
-
-	if !ws.IsOwnedBy(userID.(uint)) {
-		c.JSON(http.StatusForbidden, gin.H{"error": "only the workspace manager can remove members"})
-		return
+	if !ws.IsOwnedBy(uid) {
+		return &oapi.WorkspacesRemoveMemberForbidden{Error: "only the workspace manager can remove members"}, nil
 	}
-
-	memberUserID, err := strconv.ParseUint(c.Param("userId"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user id"})
-		return
+	memberID, ok := parseUintID(params.UserId)
+	if !ok {
+		return &oapi.WorkspacesRemoveMemberNotFound{Error: "member not found"}, nil
 	}
-
-	if err := h.Repo.RemoveMember(uint(id), uint(memberUserID)); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to remove member"})
-		return
+	if err := s.WorkspaceRepo.RemoveMember(id, memberID); err != nil {
+		logErr("workspaces.remove_member", err)
+		return &oapi.WorkspacesRemoveMemberInternalServerError{Error: "failed to remove member"}, nil
 	}
-
-	logAudit(h.Audit, models.AuditActionMemberRemoved, userID.(uint), uintPtr(uint(id)), "workspace", map[string]any{
-		"member_user_id": memberUserID,
+	logAudit(s.Audit, models.AuditActionMemberRemoved, uid, uintPtr(id), "workspace", map[string]any{
+		"member_user_id": memberID,
 	})
-
-	protobufResponse(c, http.StatusOK, &workspacesv1.RemoveMemberResponse{
-		Message: "member removed",
-	})
+	return &oapi.MessageResponse{Message: "member removed"}, nil
 }

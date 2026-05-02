@@ -37,3 +37,7 @@ func (r *GormUserRepository) ListAll() ([]models.User, error) {
 	}
 	return users, nil
 }
+
+func (r *GormUserRepository) UpdatePassword(userID uint, passwordHash string) error {
+	return r.DB.Model(&models.User{}).Where("id = ?", userID).Update("password_hash", passwordHash).Error
+}

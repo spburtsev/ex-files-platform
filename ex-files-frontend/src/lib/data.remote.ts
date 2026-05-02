@@ -1,178 +1,174 @@
-import { query, getRequestEvent } from '$app/server';
-import { env } from '$env/dynamic/private';
-import { fromBinary } from '@bufbuild/protobuf';
+import { query } from '$app/server';
+
+import { apiOpts } from '$lib/api-client';
 import {
-	GetAssignmentsResponseSchema,
-	GetUsersResponseSchema,
-	GetAssignmentResponseSchema
-} from '$lib/gen/assignments/v1/assignments_pb';
-import { MeResponseSchema } from '$lib/gen/auth/v1/auth_pb';
-import {
-	GetWorkspacesResponseSchema,
-	GetWorkspaceResponseSchema
-} from '$lib/gen/workspaces/v1/workspaces_pb';
-import {
-	ListDocumentsResponseSchema,
-	GetDocumentResponseSchema
-} from '$lib/gen/documents/v1/documents_pb';
-import { GetAuditLogResponseSchema } from '$lib/gen/audit/v1/audit_pb';
+	auditList,
+	auditStats,
+	authListUsers,
+	authMe,
+	commentsList,
+	documentsGet,
+	documentsGetFile,
+	documentsList,
+	issuesGet,
+	issuesListByWorkspace,
+	workspacesAssignableMembers,
+	workspacesGet,
+	workspacesList
+} from '$lib/api';
 
-const BACKEND = env.BACKEND_URL ?? 'http://localhost:8080';
-
-/** Fetch a URL and return the raw bytes, or null on any failure (network error, non-2xx). */
-async function fetchProto(url: string, fetchFn: typeof fetch) {
-	try {
-		const res = await fetchFn(url);
-		if (!res.ok) return null;
-		return new Uint8Array(await res.arrayBuffer());
-	} catch {
-		return null;
-	}
-}
-
-/** Fetch a URL and return the Response, or null on network error. */
-async function safeFetch(url: string, fetchFn: typeof fetch, init?: RequestInit) {
-	try {
-		return await fetchFn(url, init);
-	} catch {
-		return null;
-	}
-}
-
-function paginationFromHeaders(res: Response | null) {
-	if (!res) return { total: 0, totalPages: 0, page: 1, perPage: 20 };
+function paginationFromHeaders(res: Response | undefined) {
+	const h = res?.headers;
 	return {
-		total: Number(res.headers.get('X-Total-Count') ?? 0),
-		totalPages: Number(res.headers.get('X-Total-Pages') ?? 1),
-		page: Number(res.headers.get('X-Page') ?? 1),
-		perPage: Number(res.headers.get('X-Per-Page') ?? 20)
+		total: Number(h?.get('X-Total-Count') ?? 0),
+		totalPages: Number(h?.get('X-Total-Pages') ?? 1),
+		page: Number(h?.get('X-Page') ?? 1),
+		perPage: Number(h?.get('X-Per-Page') ?? 20)
 	};
 }
 
+// ---------------------------------------------------------------------------
+// Auth
+// ---------------------------------------------------------------------------
+
 export const getMe = query(async () => {
-	const { fetch } = getRequestEvent();
-	const res = await safeFetch(`${BACKEND}/auth/me`, fetch);
-	if (!res) return { user: null, error: 'Unable to reach the server' as const };
-	if (!res.ok) return { user: null, error: null };
-	const bytes = new Uint8Array(await res.arrayBuffer());
-	const r = fromBinary(MeResponseSchema, bytes);
-	return { user: r.user ?? null, error: null };
+	try {
+		const r = await authMe(apiOpts());
+		return r.data?.user ?? null;
+	} catch (err) {
+		console.error('Failed to fetch /auth/me', err);
+		return null;
+	}
 });
 
 export const getUsers = query(async () => {
-	const { fetch } = getRequestEvent();
-	const bytes = await fetchProto(`${BACKEND}/users`, fetch);
-	if (!bytes) return [];
-	const r = fromBinary(GetUsersResponseSchema, bytes);
-	return r.users;
-});
-
-export const getAssignments = query(async () => {
-	const { fetch } = getRequestEvent();
-	const bytes = await fetchProto(`${BACKEND}/assignments`, fetch);
-	if (!bytes) return [];
-	const r = fromBinary(GetAssignmentsResponseSchema, bytes);
-	return r.assignments;
-});
-
-export const getAssignment = query('unchecked', async (id: string) => {
-	const { fetch } = getRequestEvent();
-	const bytes = await fetchProto(`${BACKEND}/assignments/${id}`, fetch);
-	if (!bytes) return null;
-	return fromBinary(GetAssignmentResponseSchema, bytes);
+	const r = await authListUsers(apiOpts());
+	return r.data?.users ?? [];
 });
 
 // ---------------------------------------------------------------------------
-// Workspace queries
+// Workspaces
 // ---------------------------------------------------------------------------
 
 export const getWorkspaces = query('unchecked', async (page: number = 1) => {
-	const { fetch } = getRequestEvent();
-	const res = await safeFetch(`${BACKEND}/workspaces?page=${page}&per_page=20`, fetch);
-	if (!res || !res.ok) return { workspaces: [] as never[], ...paginationFromHeaders(res) };
-	const bytes = new Uint8Array(await res.arrayBuffer());
-	const r = fromBinary(GetWorkspacesResponseSchema, bytes);
+	const r = await workspacesList({ ...apiOpts(), query: { page, perPage: 20 } });
 	return {
-		workspaces: r.workspaces,
-		...paginationFromHeaders(res)
+		workspaces: r.data?.workspaces ?? [],
+		...paginationFromHeaders(r.response)
 	};
 });
 
 export const getWorkspaceDetail = query('unchecked', async (id: string) => {
-	const { fetch } = getRequestEvent();
-	const res = await safeFetch(`${BACKEND}/workspaces/${id}`, fetch);
-	if (!res || !res.ok) return null;
-	const bytes = new Uint8Array(await res.arrayBuffer());
-	const r = fromBinary(GetWorkspaceResponseSchema, bytes);
-	return r.workspace ?? null;
+	const r = await workspacesGet({ ...apiOpts(), path: { id } });
+	return r.data?.workspace ?? null;
 });
 
-// getSystemUsers: auth endpoint still returns JSON (no ListUsersResponse proto)
-export const getSystemUsers = query(async () => {
-	const { fetch } = getRequestEvent();
-	const res = await safeFetch(`${BACKEND}/auth/users`, fetch);
-	if (!res || !res.ok) return [];
-	const data = await res.json();
-	return (data.users ?? []) as Array<{ id: number; name: string; email: string; role: number }>;
+export const getAssignableMembers = query('unchecked', async (workspaceId: string) => {
+	const r = await workspacesAssignableMembers({ ...apiOpts(), path: { id: workspaceId } });
+	return r.data?.users ?? [];
 });
 
 // ---------------------------------------------------------------------------
-// Document queries
+// Issues
+// ---------------------------------------------------------------------------
+
+export const getIssues = query('unchecked', async (workspaceId: string) => {
+	const r = await issuesListByWorkspace({ ...apiOpts(), path: { id: workspaceId } });
+	return r.data?.issues ?? [];
+});
+
+export const getIssue = query('unchecked', async (id: string) => {
+	const r = await issuesGet({ ...apiOpts(), path: { id } });
+	return r.data ?? null;
+});
+
+// ---------------------------------------------------------------------------
+// Documents
 // ---------------------------------------------------------------------------
 
 export const getDocuments = query('unchecked', async (queryStr: string) => {
 	const sep = queryStr.indexOf('?');
-	const wsId = sep === -1 ? queryStr : queryStr.slice(0, sep);
-	const qs = sep === -1 ? '' : queryStr.slice(sep + 1);
-	const sp = new URLSearchParams(qs);
-	if (!sp.has('page')) sp.set('page', '1');
-	if (!sp.has('per_page')) sp.set('per_page', '20');
-	const { fetch } = getRequestEvent();
-	const res = await safeFetch(`${BACKEND}/workspaces/${wsId}/documents?${sp}`, fetch);
-	if (!res || !res.ok) return { documents: [] as never[], ...paginationFromHeaders(res) };
-	const bytes = new Uint8Array(await res.arrayBuffer());
-	const r = fromBinary(ListDocumentsResponseSchema, bytes);
+	const issueId = sep === -1 ? queryStr : queryStr.slice(0, sep);
+	const params = new URLSearchParams(sep === -1 ? '' : queryStr.slice(sep + 1));
+	const r = await documentsList({
+		...apiOpts(),
+		path: { id: issueId },
+		query: {
+			page: Number(params.get('page') ?? 1),
+			perPage: Number(params.get('per_page') ?? 20),
+			search: params.get('search') ?? undefined,
+			status: (params.get('status') as never) ?? undefined
+		}
+	});
 	return {
-		documents: r.documents,
-		...paginationFromHeaders(res)
+		documents: r.data?.documents ?? [],
+		...paginationFromHeaders(r.response)
 	};
 });
 
 export const getDocumentDetail = query('unchecked', async (docId: string) => {
-	const { fetch } = getRequestEvent();
-	const res = await safeFetch(`${BACKEND}/documents/${docId}`, fetch);
-	if (!res || !res.ok) return null;
-	const bytes = new Uint8Array(await res.arrayBuffer());
-	const r = fromBinary(GetDocumentResponseSchema, bytes);
-	return r.document ?? null;
+	const r = await documentsGet({ ...apiOpts(), path: { id: docId } });
+	return r.data?.document ?? null;
+});
+
+export const getDocumentBytes = query(
+	'unchecked',
+	async (arg: { docId: string; versionId: string }) => {
+		const r = await documentsGetFile({
+			...apiOpts(),
+			path: { id: arg.docId, versionId: arg.versionId },
+			parseAs: 'blob'
+		});
+		if (!r.data) return new Uint8Array();
+		const blob = r.data as unknown as Blob;
+		return new Uint8Array(await blob.arrayBuffer());
+	}
+);
+
+// ---------------------------------------------------------------------------
+// Comments
+// ---------------------------------------------------------------------------
+
+export const getComments = query('unchecked', async (docId: string) => {
+	const r = await commentsList({ ...apiOpts(), path: { id: docId } });
+	return r.data?.comments ?? [];
 });
 
 // ---------------------------------------------------------------------------
-// Audit query
+// Audit
 // ---------------------------------------------------------------------------
+
+export const getAuditStats = query(async () => {
+	const r = await auditStats(apiOpts());
+	return r.data ?? null;
+});
 
 export const getAuditLog = query('unchecked', async (queryStr: string = '') => {
 	const sp = new URLSearchParams(queryStr);
-	if (!sp.has('page')) sp.set('page', '1');
-	if (!sp.has('per_page')) sp.set('per_page', '25');
-
 	const from = sp.get('from');
 	const to = sp.get('to');
-	if (from) sp.set('from', new Date(from).toISOString());
+	const fromIso = from ? new Date(from).toISOString() : undefined;
+	let toIso: string | undefined;
 	if (to) {
 		const d = new Date(to);
 		d.setHours(23, 59, 59, 999);
-		sp.set('to', d.toISOString());
+		toIso = d.toISOString();
 	}
-
-	const { fetch } = getRequestEvent();
-	const res = await safeFetch(`${BACKEND}/audit?${sp}`, fetch);
-	if (!res || !res.ok)
-		return { entries: [] as never[], total: 0, totalPages: 0, page: 1, perPage: 25 };
-	const bytes = new Uint8Array(await res.arrayBuffer());
-	const r = fromBinary(GetAuditLogResponseSchema, bytes);
+	const r = await auditList({
+		...apiOpts(),
+		query: {
+			page: Number(sp.get('page') ?? 1),
+			perPage: Number(sp.get('per_page') ?? 25),
+			action: sp.get('action') ?? undefined,
+			targetType: sp.get('target_type') ?? undefined,
+			actorId: sp.get('actor_id') ?? undefined,
+			targetId: sp.get('target_id') ?? undefined,
+			from: fromIso,
+			to: toIso
+		}
+	});
 	return {
-		entries: r.entries,
-		...paginationFromHeaders(res)
+		entries: r.data?.entries ?? [],
+		...paginationFromHeaders(r.response)
 	};
 });

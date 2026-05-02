@@ -1,135 +1,142 @@
 package main
 
 import (
-	"log"
+	"encoding/json"
+	"log/slog"
+	"net/http"
 	"os"
+	"strings"
 
-	"github.com/gin-contrib/cors"
-	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	"github.com/rs/cors"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
 	"github.com/spburtsev/ex-files-backend/handlers"
+	"github.com/spburtsev/ex-files-backend/logging"
 	"github.com/spburtsev/ex-files-backend/middleware"
 	"github.com/spburtsev/ex-files-backend/models"
+	"github.com/spburtsev/ex-files-backend/oapi"
 	"github.com/spburtsev/ex-files-backend/seed"
 	"github.com/spburtsev/ex-files-backend/services"
 )
 
 func main() {
 	if err := godotenv.Load(); err != nil {
-		log.Println("No .env file found, reading environment variables from shell")
+		_ = err
 	}
+
+	logging.Init()
+	slog.Info("starting ex-files-backend")
 
 	dsn := os.Getenv("DB_DSN")
 	if dsn == "" {
-		dsn = "host=localhost user=admin password=admin dbname=exfiles port=5432 sslmode=disable TimeZone=UTC"
+		dsn = "host=localhost user=admin password=admin dbname=exfiles port=5433 sslmode=disable TimeZone=UTC"
 	}
-
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
-		log.Fatal("failed to connect to database:", err)
+		slog.Error("failed to connect to database", "error", err)
+		os.Exit(1)
+	}
+	if err := db.AutoMigrate(&models.User{}, &models.Workspace{}, &models.WorkspaceMember{}, &models.AuditEntry{}, &models.Issue{}, &models.Document{}, &models.DocumentVersion{}, &models.Comment{}); err != nil {
+		slog.Error("auto-migrate failed", "error", err)
+		os.Exit(1)
 	}
 
-	if err := db.AutoMigrate(&models.User{}, &models.Workspace{}, &models.WorkspaceMember{}, &models.AuditEntry{}, &models.Document{}, &models.DocumentVersion{}, &models.Assignment{}); err != nil {
-		log.Fatal("auto-migrate failed:", err)
-	}
-
-	ts := services.NewJWTTokenService(os.Getenv("JWT_SECRET"))
-	repo := &services.GormUserRepository{DB: db}
+	tokens := services.NewJWTTokenService(os.Getenv("JWT_SECRET"))
+	userRepo := &services.GormUserRepository{DB: db}
 	hasher := services.BcryptHasher{Cost: bcrypt.DefaultCost}
-
 	auditRepo := &services.GormAuditRepository{DB: db}
+	wsRepo := &services.GormWorkspaceRepository{DB: db}
+	issueRepo := &services.GormIssueRepository{DB: db}
+	docRepo := &services.GormDocumentRepository{DB: db}
+	commentRepo := &services.GormCommentRepository{DB: db}
 
-	minioEndpoint := os.Getenv("MINIO_ENDPOINT")
-	if minioEndpoint == "" {
-		minioEndpoint = "localhost:9000"
-	}
-	minioAccessKey := os.Getenv("MINIO_ACCESS_KEY")
-	if minioAccessKey == "" {
-		minioAccessKey = "minioadmin"
-	}
-	minioSecretKey := os.Getenv("MINIO_SECRET_KEY")
-	if minioSecretKey == "" {
-		minioSecretKey = "minioadmin"
-	}
-	minioBucket := os.Getenv("MINIO_BUCKET")
-	if minioBucket == "" {
-		minioBucket = "documents"
-	}
-
+	minioEndpoint := envOr("MINIO_ENDPOINT", "localhost:9002")
+	minioAccessKey := envOr("MINIO_ACCESS_KEY", "minioadmin")
+	minioSecretKey := envOr("MINIO_SECRET_KEY", "minioadmin")
+	minioBucket := envOr("MINIO_BUCKET", "documents")
 	storage, err := services.NewMinIOStorage(minioEndpoint, minioAccessKey, minioSecretKey, minioBucket, false)
 	if err != nil {
-		log.Fatal("failed to connect to MinIO:", err)
+		slog.Error("failed to connect to MinIO", "error", err)
+		os.Exit(1)
 	}
 
-	auth := &handlers.AuthHandler{Repo: repo, Tokens: ts, Hasher: hasher, Audit: auditRepo}
-	wsRepo := &services.GormWorkspaceRepository{DB: db}
-	ws := &handlers.WorkspaceHandler{Repo: wsRepo, UserRepo: repo, Audit: auditRepo}
-	audit := &handlers.AuditHandler{Repo: auditRepo}
-	docRepo := &services.GormDocumentRepository{DB: db}
-	docs := &handlers.DocumentHandler{Repo: docRepo, Storage: storage, Audit: auditRepo}
+	resendKey := os.Getenv("RESEND_API_KEY")
+	resendFrom := envOr("RESEND_FROM", "ex-files <noreply@ex-files.dev>")
+	emailSvc := services.NewResendEmailService(resendKey, resendFrom)
+	sseHub := services.NewSSEHub()
+
+	rdb, err := services.NewRedisClient(envOr("REDIS_ADDR", "localhost:6380"))
+	if err != nil {
+		slog.Error("failed to connect to Redis", "error", err)
+		os.Exit(1)
+	}
+
+	server := &handlers.Server{
+		UserRepo:      userRepo,
+		Tokens:        tokens,
+		Hasher:        hasher,
+		Audit:         auditRepo,
+		Email:         emailSvc,
+		Cache:         rdb,
+		ResetTokens:   rdb,
+		WorkspaceRepo: wsRepo,
+		IssueRepo:     issueRepo,
+		DocumentRepo:  docRepo,
+		CommentRepo:   commentRepo,
+		Storage:       storage,
+		Hub:           sseHub,
+		DB:            db,
+	}
 
 	seed.Run(db, hasher)
 
-	router := gin.Default()
+	ogenServer, err := oapi.NewServer(server, server)
+	if err != nil {
+		slog.Error("failed to construct ogen server", "error", err)
+		os.Exit(1)
+	}
 
-	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:5173", "http://localhost:4173"},
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Content-Type", "Authorization"},
-		ExposeHeaders:    []string{"X-Total-Count", "X-Page", "X-Per-Page", "X-Total-Pages"},
+	sse := &handlers.SSEHandler{Hub: sseHub}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	})
+	mux.Handle("/events", middleware.RequireAuth(tokens)(sse))
+	mux.Handle("/", ogenServer)
+
+	corsOrigins := envOr("CORS_ORIGINS", "http://localhost:5173,http://localhost:4173")
+	slog.Debug("CORS configuration", "origins", strings.Split(corsOrigins, ","))
+	corsHandler := cors.New(cors.Options{
+		AllowedOrigins:   strings.Split(corsOrigins, ","),
+		AllowedMethods:   []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodOptions},
+		AllowedHeaders:   []string{"Content-Type", "Authorization"},
+		ExposedHeaders:   []string{"X-Total-Count", "X-Page", "X-Per-Page", "X-Total-Pages"},
 		AllowCredentials: true,
-	}))
+	})
 
-	assignmentRepo := &services.GormAssignmentRepository{DB: db}
-	assignments := &handlers.AssignmentsHandler{Repo: assignmentRepo, UserRepo: repo}
-	router.GET("/users", assignments.GetUsers)
-	router.GET("/assignments", assignments.GetAssignments)
-	router.GET("/assignments/:id", assignments.GetAssignment)
+	root := middleware.Chain(mux,
+		corsHandler.Handler,
+		middleware.Recovery(),
+		middleware.RequestLogger(),
+		middleware.WithCookieJar,
+	)
 
-	authRoutes := router.Group("/auth")
-	{
-		authRoutes.POST("/register", auth.Register)
-		authRoutes.POST("/login", auth.Login)
-		authRoutes.POST("/logout", auth.Logout)
-		authRoutes.GET("/me", middleware.AuthMiddleware(ts), auth.Me)
-		authRoutes.GET("/users", middleware.AuthMiddleware(ts), auth.ListUsers)
+	port := envOr("PORT", "8080")
+	slog.Info("listening", "addr", ":"+port)
+	if err := http.ListenAndServe(":"+port, root); err != nil {
+		slog.Error("server stopped", "error", err)
+		os.Exit(1)
 	}
+}
 
-	workspaceRoutes := router.Group("/workspaces", middleware.AuthMiddleware(ts))
-	{
-		workspaceRoutes.POST("", ws.Create)
-		workspaceRoutes.GET("", ws.List)
-		workspaceRoutes.GET("/:id", ws.Get)
-		workspaceRoutes.PUT("/:id", ws.Update)
-		workspaceRoutes.DELETE("/:id", ws.Delete)
-		workspaceRoutes.POST("/:id/members", ws.AddMember)
-		workspaceRoutes.DELETE("/:id/members/:userId", ws.RemoveMember)
-		workspaceRoutes.POST("/:id/documents", docs.Upload)
-		workspaceRoutes.GET("/:id/documents", docs.List)
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
 	}
-
-	documentRoutes := router.Group("/documents", middleware.AuthMiddleware(ts))
-	{
-		documentRoutes.GET("/:id", docs.Get)
-		documentRoutes.DELETE("/:id", docs.Delete)
-		documentRoutes.POST("/:id/versions", docs.UploadVersion)
-		documentRoutes.GET("/:id/versions/:versionId/download", docs.Download)
-		documentRoutes.POST("/:id/submit", docs.Submit)
-		documentRoutes.POST("/:id/resubmit", docs.Resubmit)
-		documentRoutes.POST("/:id/approve", docs.Approve)
-		documentRoutes.POST("/:id/reject", docs.Reject)
-		documentRoutes.POST("/:id/request-changes", docs.RequestChanges)
-		documentRoutes.PUT("/:id/reviewer", docs.AssignReviewer)
-	}
-
-	auditRoutes := router.Group("/audit", middleware.AuthMiddleware(ts))
-	{
-		auditRoutes.GET("", audit.List)
-	}
-
-	router.Run()
+	return fallback
 }

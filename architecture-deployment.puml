@@ -1,0 +1,61 @@
+@startuml "Ex-Files Platform - Deployment"
+!theme plain
+skinparam linetype ortho
+skinparam nodesep 60
+skinparam ranksep 50
+
+' User Land 
+rectangle "User Land" as userland #f5f5f5 {
+    node "Browser / PWA" as browser <<Application>> #ffffff
+    actor "Admin" as admin
+}
+
+' Platform Infrastructure (Docker Compose) 
+rectangle "Platform Infrastructure\n<i>Docker Compose</i>\n" as platform #e8f4fd {
+
+    ' Application Layer 
+    rectangle "\nApplication Layer" as applayer #dceefb {
+        node "Frontend\n<i>SvelteKit</i>\n:3003" as frontend <<Container>> #b3d9f7
+        node "Backend\n<i>Go</i>\n:8080" as backend <<Container>> #b3d9f7
+    }
+
+    ' Data Layer
+    rectangle "Data Layer" as datalayer #d6ebd6 {
+        database "PostgreSQL 17\n:5433" as pg <<Container>> #a3d9a3
+        database "Redis 7\n<i>Cache & tokens</i>\n:6380" as redis <<Container>> #a3d9a3
+        storage "MinIO\n<i>S3-compatible</i>\n:9002 / :9003" as minio <<Container>> #a3d9a3
+    }
+
+    ' Observability Layer 
+    rectangle "Observability Layer" as obslayer #fce8d5 {
+        node "Promtail\n<i>Log shipper</i>" as promtail <<Container>> #f5c89a
+        node "Loki\n<i>Log aggregation</i>\n:3100" as loki <<Container>> #f5c89a
+        node "Grafana\n<i>Dashboards</i>\n:3200" as grafana <<Container>> #f5c89a
+    }
+
+    file "Docker Socket\n/var/run/docker.sock" as dockersock #ffffff
+}
+
+' Connections 
+
+' User  Application
+browser -down-> frontend : "HTTP + SSE\n"
+frontend -right-> backend : "  HTTP/JSON (OpenAPI)  \n"
+
+' Application  Data
+backend -down-> pg    : TCP
+backend -down-> redis : TCP
+backend -down-> minio : S3 API
+
+' Backend logs  Docker Socket (stdout captured by Docker daemon)
+backend  .down.> dockersock  : "stdout\n(JSON logs)"
+
+' Observability
+promtail -up-> dockersock    : "reads container\nlogs"
+promtail -right-> loki       : "push\n(HTTP)"
+grafana  -left-> loki        : "query\n(HTTP)"
+
+' Admin access
+admin -down-> grafana        : "HTTP\n:3200"
+
+@enduml
