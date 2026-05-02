@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"gorm.io/gorm"
 
 	auditv1 "github.com/spburtsev/ex-files-backend/gen/audit/v1"
 	"github.com/spburtsev/ex-files-backend/models"
@@ -16,6 +17,7 @@ import (
 
 type AuditHandler struct {
 	Repo services.AuditRepository
+	DB   *gorm.DB
 }
 
 func auditEntryToProto(e *models.AuditEntry) *auditv1.AuditEntry {
@@ -111,5 +113,82 @@ func (h *AuditHandler) List(c *gin.Context) {
 
 	protobufResponse(c, http.StatusOK, &auditv1.GetAuditLogResponse{
 		Entries: pbEntries,
+	})
+}
+
+type actionCount struct {
+	Action string `json:"action"`
+	Count  int64  `json:"count"`
+}
+
+type dailyActivity struct {
+	Date  string `json:"date"`
+	Count int64  `json:"count"`
+}
+
+type statusCount struct {
+	Status string `json:"status"`
+	Count  int64  `json:"count"`
+}
+
+type topActor struct {
+	ActorID   uint   `json:"actor_id"`
+	ActorName string `json:"actor_name"`
+	Count     int64  `json:"count"`
+}
+
+// Stats returns aggregated analytics data from audit entries and documents.
+// @Summary      Audit statistics
+// @Tags         audit
+// @Produce      json
+// @Success      200  {object}  map[string]any
+// @Security     BearerAuth || CookieAuth
+// @Router       /audit/stats [get]
+func (h *AuditHandler) Stats(c *gin.Context) {
+	if h.DB == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "stats not available"})
+		return
+	}
+
+	// Actions by type
+	var actions []actionCount
+	h.DB.Model(&models.AuditEntry{}).
+		Select("action, count(*) as count").
+		Group("action").
+		Order("count DESC").
+		Scan(&actions)
+
+	// Activity per day (last 30 days)
+	var daily []dailyActivity
+	thirtyDaysAgo := time.Now().AddDate(0, 0, -30)
+	h.DB.Model(&models.AuditEntry{}).
+		Select("DATE(created_at) as date, count(*) as count").
+		Where("created_at >= ?", thirtyDaysAgo).
+		Group("DATE(created_at)").
+		Order("date ASC").
+		Scan(&daily)
+
+	// Documents by status
+	var statuses []statusCount
+	h.DB.Model(&models.Document{}).
+		Select("status, count(*) as count").
+		Group("status").
+		Scan(&statuses)
+
+	// Top actors
+	var actors []topActor
+	h.DB.Model(&models.AuditEntry{}).
+		Select("audit_entries.actor_id, users.name as actor_name, count(*) as count").
+		Joins("LEFT JOIN users ON users.id = audit_entries.actor_id").
+		Group("audit_entries.actor_id, users.name").
+		Order("count DESC").
+		Limit(10).
+		Scan(&actors)
+
+	c.JSON(http.StatusOK, gin.H{
+		"actions_by_type":     actions,
+		"daily_activity":      daily,
+		"documents_by_status": statuses,
+		"top_actors":          actors,
 	})
 }

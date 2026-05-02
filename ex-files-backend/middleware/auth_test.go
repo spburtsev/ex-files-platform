@@ -56,6 +56,57 @@ var validClaims = &models.Claims{
 	Role:   models.RoleEmployee,
 }
 
+func TestRequestLogger(t *testing.T) {
+	t.Run("logs_200", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		_, r := gin.CreateTestContext(w)
+		r.Use(middleware.RequestLogger())
+		r.GET("/ok", func(c *gin.Context) {
+			c.Status(http.StatusOK)
+		})
+		req := httptest.NewRequest(http.MethodGet, "/ok", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("logs_404", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		_, r := gin.CreateTestContext(w)
+		r.Use(middleware.RequestLogger())
+		r.GET("/notfound", func(c *gin.Context) {
+			c.Status(http.StatusNotFound)
+		})
+		req := httptest.NewRequest(http.MethodGet, "/notfound", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusNotFound, w.Code)
+	})
+
+	t.Run("logs_500", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		_, r := gin.CreateTestContext(w)
+		r.Use(middleware.RequestLogger())
+		r.GET("/error", func(c *gin.Context) {
+			c.Status(http.StatusInternalServerError)
+		})
+		req := httptest.NewRequest(http.MethodGet, "/error", nil)
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+
+	t.Run("logs_with_origin", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		_, r := gin.CreateTestContext(w)
+		r.Use(middleware.RequestLogger())
+		r.GET("/with-origin", func(c *gin.Context) {
+			c.Status(http.StatusOK)
+		})
+		req := httptest.NewRequest(http.MethodGet, "/with-origin", nil)
+		req.Header.Set("Origin", "http://localhost:5173")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+	})
+}
+
 func TestAuthMiddleware(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -126,6 +177,19 @@ func TestAuthMiddleware(t *testing.T) {
 			},
 			setup: func(ts *mockTokenService) {
 				ts.On("Validate", "badtoken").Return(nil, errors.New("expired"))
+			},
+			wantStatus: http.StatusUnauthorized,
+			wantNext:   false,
+		},
+		{
+			name: "validate_returns_nil_claims_no_error",
+			buildRequest: func() *http.Request {
+				req := httptest.NewRequest(http.MethodGet, "/test", nil)
+				req.AddCookie(&http.Cookie{Name: "session", Value: "nilclaims"})
+				return req
+			},
+			setup: func(ts *mockTokenService) {
+				ts.On("Validate", "nilclaims").Return(nil, nil)
 			},
 			wantStatus: http.StatusUnauthorized,
 			wantNext:   false,

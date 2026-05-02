@@ -41,7 +41,6 @@
 	"role_manager": "Manager",
 	"role_employee": "Employee",
 
-	"nav_platform": "Platform",
 	"nav_dashboard": "Dashboard",
 	"nav_workspaces": "Workspaces",
 	"nav_users": "Users",
@@ -61,6 +60,26 @@
 	"login_invalid_credentials": "Invalid email or password.",
 	"login_no_account": "Don't have an account?",
 	"login_signup_link": "Sign up",
+
+	"forgot_page_title": "Forgot Password - ex-files",
+	"forgot_heading": "Forgot your password?",
+	"forgot_description": "Enter your email and we'll send you a reset link.",
+	"forgot_submit": "Send reset link",
+	"forgot_submitting": "Sending…",
+	"forgot_success": "If an account with that email exists, a reset link has been sent.",
+	"forgot_back_to_login": "Back to login",
+
+	"reset_page_title": "Reset Password - ex-files",
+	"reset_heading": "Reset your password",
+	"reset_description": "Enter the token from your email and choose a new password.",
+	"reset_token_label": "Reset token",
+	"reset_token_placeholder": "Paste your reset token here",
+	"reset_new_password": "New password",
+	"reset_password_placeholder": "••••••••",
+	"reset_submit": "Reset password",
+	"reset_submitting": "Resetting…",
+	"reset_success": "Your password has been reset. You can now log in.",
+	"reset_invalid_token": "Invalid or expired token.",
 
 	"signup_page_title": "Sign up - ex-files",
 	"signup_heading": "Create an account",
@@ -211,8 +230,6 @@
 	"workbench_upload_submission": "Upload submission",
 	"workbench_details": "Details",
 	"workbench_issue_details": "Issue details",
-	"workbench_instructions": "Instructions",
-	"workbench_instructions_text": "Please ensure your submission follows the formatting guidelines. Your work must be original and properly cited. Late submissions will be penalised unless an extension has been granted in advance.",
 	"workbench_overdue": "Overdue",
 	"workbench_hours_left": "{hours}h left",
 	"workbench_days_hours_left": "{days}d {hours}h left",
@@ -221,6 +238,16 @@
 	"workbench_show_markers": "Show markers",
 	"workbench_comments": "Comments",
 	"workbench_activity": "Activity",
+	"workbench_status_draft": "Draft",
+	"workbench_status_saved": "Saved",
+	"workbench_status_error": "Error",
+	"workbench_save_button": "Save",
+	"workbench_saving": "Saving...",
+	"workbench_save_success": "Saved \"{name}\"",
+	"workbench_save_error": "Failed to save document",
+	"workbench_no_description": "No description provided",
+	"workbench_discard_button": "Discard",
+	"workbench_discard_success": "Discarded \"{name}\"",
 
 	"pdf_click_to_upload": "Click to upload",
 	"pdf_or_drag_drop": "or drag and drop",
@@ -244,6 +271,17 @@
 
 	"issue_open": "Open",
 	"issue_resolved": "Resolved",
+
+	"nav_analytics": "Analytics",
+	"analytics_page_title": "Analytics - ex-files",
+	"analytics_heading": "Analytics",
+	"analytics_description": "Overview of platform activity and document status.",
+	"analytics_actions_by_type": "Actions by Type",
+	"analytics_daily_activity": "Daily Activity (Last 30 Days)",
+	"analytics_documents_by_status": "Documents by Status",
+	"analytics_top_actors": "Most Active Users",
+	"analytics_no_data": "No data available yet.",
+	"analytics_download_csv": "Download CSV",
 
 	"lang_switch": "Language"
 }

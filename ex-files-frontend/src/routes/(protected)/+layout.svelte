@@ -18,7 +18,8 @@
 		LogOut,
 		User,
 		FileCheck2,
-		ScrollText
+		ScrollText,
+		ChartColumn
 	} from '@lucide/svelte';
 	import { extraBreadcrumbs } from '$lib/stores/breadcrumbs';
 
@@ -52,7 +53,13 @@
 						href: localizeHref('/audit'),
 						label: m.nav_audit_log(),
 						Icon: ScrollText,
-						match: (p: string) => p.startsWith('/audit')
+						match: (p: string) => p === '/audit'
+					},
+					{
+						href: localizeHref('/analytics'),
+						label: m.nav_analytics(),
+						Icon: ChartColumn,
+						match: (p: string) => p.startsWith('/analytics')
 					}
 				]
 			: [])
@@ -79,7 +86,6 @@
 		<!-- Nav links -->
 		<Sidebar.Content>
 			<Sidebar.Group>
-				<Sidebar.GroupLabel>{m.nav_platform()}</Sidebar.GroupLabel>
 				<Sidebar.Menu>
 					{#each navLinks as link (link.href)}
 						<Sidebar.MenuItem>

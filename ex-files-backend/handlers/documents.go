@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"google.golang.org/protobuf/types/known/timestamppb"
+	"gorm.io/gorm"
 
 	docsv1 "github.com/spburtsev/ex-files-backend/gen/documents/v1"
 	"github.com/spburtsev/ex-files-backend/models"
@@ -97,6 +99,17 @@ func (h *DocumentHandler) Upload(c *gin.Context) {
 		return
 	}
 	hash := fmt.Sprintf("%x", hasher.Sum(nil))
+
+	// Reject if this issue already has a document with the same content.
+	if existing, err := h.Repo.FindByIssueAndHash(uint(issueID), hash); err == nil && existing != nil {
+		c.JSON(http.StatusConflict, gin.H{
+			"error": fmt.Sprintf("issue already has a document with the same content: %q", existing.Name),
+		})
+		return
+	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check existing documents"})
+		return
+	}
 
 	// Reset file reader for upload
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
@@ -348,6 +361,50 @@ func (h *DocumentHandler) Get(c *gin.Context) {
 			Versions: pbVersions,
 		},
 	})
+}
+
+// File streams the binary contents of a document version.
+// @Summary      Stream version file
+// @Tags         documents
+// @Produce      application/octet-stream
+// @Param        id         path      int  true  "Document ID"
+// @Param        versionId  path      int  true  "Version ID"
+// @Success      200  {file}    binary
+// @Failure      404  {object}  swagErrorResponse
+// @Security     BearerAuth || CookieAuth
+// @Router       /documents/{id}/versions/{versionId}/file [get]
+func (h *DocumentHandler) File(c *gin.Context) {
+	versionID, err := strconv.ParseUint(c.Param("versionId"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid version id"})
+		return
+	}
+
+	version, err := h.Repo.GetVersion(uint(versionID))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "version not found"})
+		return
+	}
+
+	reader, err := h.Storage.Get(c.Request.Context(), version.StorageKey)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read file"})
+		return
+	}
+	defer reader.Close()
+
+	contentType := "application/octet-stream"
+	if doc, err := h.Repo.FindByID(version.DocumentID); err == nil && doc.MimeType != "" {
+		contentType = doc.MimeType
+	}
+	c.Header("Content-Type", contentType)
+	if version.Size > 0 {
+		c.Header("Content-Length", strconv.FormatInt(version.Size, 10))
+	}
+	if _, err := io.Copy(c.Writer, reader); err != nil {
+		// Headers already sent — log and bail.
+		return
+	}
 }
 
 // Download returns a presigned URL for downloading a document version.

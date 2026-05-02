@@ -16,6 +16,19 @@ services:
       timeout: 3s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    restart: always
+    ports:
+      - ${REDIS_PORT:-6380}:6379
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   ex-files-minio:
     image: minio/minio
     restart: always
@@ -58,6 +71,7 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_USER:-minioadmin}
       MINIO_SECRET_KEY: ${MINIO_PASSWORD:-minioadmin}
       MINIO_BUCKET: documents
+      REDIS_ADDR: redis:6379
       CORS_ORIGINS: http://localhost:${FRONTEND_PORT:-3003},http://localhost:5173,http://localhost:4173
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
@@ -68,6 +82,8 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-debug}
     depends_on:
       ex-files-pg:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       ex-files-minio-init:
         condition: service_completed_successfully
@@ -121,5 +137,6 @@ services:
 volumes:
   pgdata:
   miniodata:
+  redisdata:
   loki-data:
   grafana-data:

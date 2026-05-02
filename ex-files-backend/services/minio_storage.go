@@ -41,6 +41,14 @@ func (s *MinIOStorage) PresignedURL(ctx context.Context, key string, expires tim
 	return u.String(), nil
 }
 
+func (s *MinIOStorage) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+	obj, err := s.client.GetObject(ctx, s.bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return obj, nil
+}
+
 func (s *MinIOStorage) Delete(ctx context.Context, key string) error {
 	return s.client.RemoveObject(ctx, s.bucket, key, minio.RemoveObjectOptions{})
 }

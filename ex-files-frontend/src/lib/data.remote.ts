@@ -122,9 +122,35 @@ export const getDocumentDetail = query('unchecked', async (docId: string) => {
     return r.document ?? null;
 });
 
+export const getDocumentBytes = query(
+    'unchecked',
+    async (arg: { docId: string; versionId: number }) => {
+        const { fetch } = getRequestEvent();
+        const res = await fetch(
+            `${BACKEND}/documents/${arg.docId}/versions/${arg.versionId}/file`
+        );
+        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+        return new Uint8Array(await res.arrayBuffer());
+    }
+);
+
 // ---------------------------------------------------------------------------
 // Audit query
 // ---------------------------------------------------------------------------
+
+export interface AuditStats {
+    actions_by_type: { action: string; count: number }[];
+    daily_activity: { date: string; count: number }[];
+    documents_by_status: { status: string; count: number }[];
+    top_actors: { actor_id: number; actor_name: string; count: number }[];
+}
+
+export const getAuditStats = query(async () => {
+    const { fetch } = getRequestEvent();
+    const res = await fetch(`${BACKEND}/audit/stats`);
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    return (await res.json()) as AuditStats;
+});
 
 export const getAuditLog = query('unchecked', async (queryStr: string = '') => {
     const sp = new URLSearchParams(queryStr);

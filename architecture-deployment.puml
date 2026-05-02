@@ -19,9 +19,10 @@ rectangle "Platform Infrastructure\n<i>Docker Compose</i>\n" as platform #e8f4fd
         node "Backend\n<i>Go</i>\n:8080" as backend <<Container>> #b3d9f7
     }
 
-    ' Data Layer 
+    ' Data Layer
     rectangle "Data Layer" as datalayer #d6ebd6 {
         database "PostgreSQL 17\n:5433" as pg <<Container>> #a3d9a3
+        database "Redis 7\n<i>Cache & tokens</i>\n:6380" as redis <<Container>> #a3d9a3
         storage "MinIO\n<i>S3-compatible</i>\n:9002 / :9003" as minio <<Container>> #a3d9a3
     }
 
@@ -43,6 +44,7 @@ frontend -right-> backend : "  HTTP  \n"
 
 ' Application  Data
 backend -down-> pg    : TCP
+backend -down-> redis : TCP
 backend -down-> minio : S3 API
 
 ' Backend logs  Docker Socket (stdout captured by Docker daemon)

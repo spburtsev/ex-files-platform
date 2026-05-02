@@ -3,7 +3,10 @@ import { env } from '$env/dynamic/private';
 import { fromBinary } from '@bufbuild/protobuf';
 import { LoginResponseSchema, RegisterResponseSchema } from '$lib/gen/auth/v1/auth_pb';
 import { CreateWorkspaceResponseSchema } from '$lib/gen/workspaces/v1/workspaces_pb';
-import { GetDownloadURLResponseSchema } from '$lib/gen/documents/v1/documents_pb';
+import {
+	GetDownloadURLResponseSchema,
+	UploadDocumentResponseSchema
+} from '$lib/gen/documents/v1/documents_pb';
 
 const BACKEND = env.BACKEND_URL ?? 'http://localhost:8080';
 
@@ -77,6 +80,38 @@ export const register = command(
 			maxAge: 8 * 60 * 60,
 			sameSite: 'lax'
 		});
+		return { ok: true as const };
+	}
+);
+
+export const forgotPassword = command('unchecked', async (email: string) => {
+	const res = await safeFetch(`${BACKEND}/auth/forgot-password`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ email })
+	});
+	if (!res) return { ok: false as const, error: NETWORK_ERROR };
+	if (!res.ok) {
+		return { ok: false as const, error: await parseJsonError(res, 'Request failed') };
+	}
+	return { ok: true as const };
+});
+
+export const resetPassword = command(
+	'unchecked',
+	async (data: { token: string; password: string }) => {
+		const res = await safeFetch(`${BACKEND}/auth/reset-password`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(data)
+		});
+		if (!res) return { ok: false as const, error: NETWORK_ERROR };
+		if (!res.ok) {
+			return {
+				ok: false as const,
+				error: await parseJsonError(res, 'Reset failed. Token may be invalid or expired.')
+			};
+		}
 		return { ok: true as const };
 	}
 );
@@ -162,9 +197,19 @@ export const removeWorkspaceMember = command(
 
 export const uploadDocument = command(
 	'unchecked',
-	async ({ issueId, file }: { issueId: string; file: File }) => {
+	async ({
+		issueId,
+		name,
+		mimeType,
+		data
+	}: {
+		issueId: string;
+		name: string;
+		mimeType: string;
+		data: Uint8Array;
+	}) => {
 		const form = new FormData();
-		form.append('file', file);
+		form.append('file', new Blob([data.slice()], { type: mimeType }), name);
 		const res = await safeFetch(`${BACKEND}/issues/${issueId}/documents`, {
 			method: 'POST',
 			body: form
@@ -173,7 +218,12 @@ export const uploadDocument = command(
 		if (!res.ok) {
 			return { ok: false as const, error: await parseJsonError(res, 'Upload failed') };
 		}
-		return { ok: true as const };
+		const r = fromBinary(UploadDocumentResponseSchema, new Uint8Array(await res.arrayBuffer()));
+		return {
+			ok: true as const,
+			docId: r.document?.id ? String(r.document.id) : '',
+			versionId: r.version?.id ? Number(r.version.id) : 0
+		};
 	}
 );
 

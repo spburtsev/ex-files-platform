@@ -41,7 +41,6 @@
 	"role_manager": "Kierownik",
 	"role_employee": "Pracownik",
 
-	"nav_platform": "Platforma",
 	"nav_dashboard": "Panel",
 	"nav_workspaces": "Przestrzenie robocze",
 	"nav_users": "Użytkownicy",
@@ -61,6 +60,26 @@
 	"login_invalid_credentials": "Nieprawidłowy e-mail lub hasło.",
 	"login_no_account": "Nie masz konta?",
 	"login_signup_link": "Zarejestruj się",
+
+	"forgot_page_title": "Zapomniałeś hasła - ex-files",
+	"forgot_heading": "Zapomniałeś hasła?",
+	"forgot_description": "Podaj swój email, a wyślemy Ci link do resetowania hasła.",
+	"forgot_submit": "Wyślij link",
+	"forgot_submitting": "Wysyłanie…",
+	"forgot_success": "Jeśli konto z tym adresem email istnieje, link do resetowania został wysłany.",
+	"forgot_back_to_login": "Powrót do logowania",
+
+	"reset_page_title": "Resetowanie hasła - ex-files",
+	"reset_heading": "Zresetuj hasło",
+	"reset_description": "Wpisz token z emaila i wybierz nowe hasło.",
+	"reset_token_label": "Token resetowania",
+	"reset_token_placeholder": "Wklej token resetowania tutaj",
+	"reset_new_password": "Nowe hasło",
+	"reset_password_placeholder": "••••••••",
+	"reset_submit": "Zresetuj hasło",
+	"reset_submitting": "Resetowanie…",
+	"reset_success": "Twoje hasło zostało zresetowane. Możesz się teraz zalogować.",
+	"reset_invalid_token": "Nieprawidłowy lub wygasły token.",
 
 	"signup_page_title": "Rejestracja - ex-files",
 	"signup_heading": "Utwórz konto",
@@ -211,8 +230,6 @@
 	"workbench_upload_submission": "Prześlij zgłoszenie",
 	"workbench_details": "Szczegóły",
 	"workbench_issue_details": "Szczegóły zagadnienia",
-	"workbench_instructions": "Instrukcje",
-	"workbench_instructions_text": "Upewnij się, że Twoje zgłoszenie jest zgodne z wytycznymi formatowania. Twoja praca musi być oryginalna i odpowiednio cytowana. Spóźnione zgłoszenia zostaną ukarane, chyba że wcześniej przyznano przedłużenie.",
 	"workbench_overdue": "Po terminie",
 	"workbench_hours_left": "{hours}h pozostało",
 	"workbench_days_hours_left": "{days}d {hours}h pozostało",
@@ -221,6 +238,16 @@
 	"workbench_show_markers": "Pokaż znaczniki",
 	"workbench_comments": "Komentarze",
 	"workbench_activity": "Aktywność",
+	"workbench_status_draft": "Szkic",
+	"workbench_status_saved": "Zapisane",
+	"workbench_status_error": "Błąd",
+	"workbench_save_button": "Zapisz",
+	"workbench_saving": "Zapisywanie...",
+	"workbench_save_success": "Zapisano \"{name}\"",
+	"workbench_save_error": "Nie udało się zapisać dokumentu",
+	"workbench_no_description": "Brak opisu",
+	"workbench_discard_button": "Odrzuć",
+	"workbench_discard_success": "Odrzucono \"{name}\"",
 
 	"pdf_click_to_upload": "Kliknij, aby przesłać",
 	"pdf_or_drag_drop": "lub przeciągnij i upuść",
@@ -244,6 +271,17 @@
 
 	"issue_open": "Otwarte",
 	"issue_resolved": "Rozwiązane",
+
+	"nav_analytics": "Analityka",
+	"analytics_page_title": "Analityka - ex-files",
+	"analytics_heading": "Analityka",
+	"analytics_description": "Przegląd aktywności platformy i statusu dokumentów.",
+	"analytics_actions_by_type": "Akcje wg typu",
+	"analytics_daily_activity": "Aktywność dzienna (ostatnie 30 dni)",
+	"analytics_documents_by_status": "Dokumenty wg statusu",
+	"analytics_top_actors": "Najaktywniejsze osoby",
+	"analytics_no_data": "Brak danych.",
+	"analytics_download_csv": "Pobierz CSV",
 
 	"lang_switch": "Język"
 }

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -59,6 +60,25 @@ func (m *mockRepo) ListAll() ([]models.User, error) {
 	return nil, args.Error(1)
 }
 
+func (m *mockRepo) UpdatePassword(userID uint, passwordHash string) error {
+	return m.Called(userID, passwordHash).Error(0)
+}
+
+type mockResetTokenStore struct{ mock.Mock }
+
+func (m *mockResetTokenStore) StoreResetToken(token string, userID uint, ttl time.Duration) error {
+	return m.Called(token, userID, ttl).Error(0)
+}
+
+func (m *mockResetTokenStore) GetResetTokenUserID(token string) (uint, error) {
+	args := m.Called(token)
+	return args.Get(0).(uint), args.Error(1)
+}
+
+func (m *mockResetTokenStore) DeleteResetToken(token string) error {
+	return m.Called(token).Error(0)
+}
+
 type mockTokens struct{ mock.Mock }
 
 func (m *mockTokens) Issue(user *models.User) (string, error) {
@@ -83,6 +103,12 @@ func (m *mockHasher) Hash(password string) (string, error) {
 
 func (m *mockHasher) Compare(hash, password string) error {
 	return m.Called(hash, password).Error(0)
+}
+
+type mockEmailSvc struct{ mock.Mock }
+
+func (m *mockEmailSvc) Send(to, subject, body string) error {
+	return m.Called(to, subject, body).Error(0)
 }
 
 // --- Helpers ---
@@ -430,5 +456,90 @@ func TestListUsers(t *testing.T) {
 
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 		repo.AssertExpectations(t)
+	})
+}
+
+// --- TestForgotPassword ---
+
+func TestForgotPassword(t *testing.T) {
+	t.Run("user_not_found_returns_200", func(t *testing.T) {
+		repo := &mockRepo{}
+		repo.On("FindByEmail", "unknown@test.com").Return(nil, gorm.ErrRecordNotFound)
+
+		h := &handlers.AuthHandler{Repo: repo, Email: &mockEmailSvc{}, ResetTokens: &mockResetTokenStore{}}
+		w := executeRequest(h.ForgotPassword, http.MethodPost, "/auth/forgot-password",
+			jsonBody(t, map[string]string{"email": "unknown@test.com"}))
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "if the email exists")
+	})
+
+	t.Run("success", func(t *testing.T) {
+		repo := &mockRepo{}
+		emailSvc := &mockEmailSvc{}
+		resetStore := &mockResetTokenStore{}
+
+		user := &models.User{Email: "alice@test.com", Name: "Alice"}
+		user.ID = 1
+		repo.On("FindByEmail", "alice@test.com").Return(user, nil)
+		resetStore.On("StoreResetToken", mock.AnythingOfType("string"), uint(1), 1*time.Hour).Return(nil)
+		emailSvc.On("Send", "alice@test.com", mock.Anything, mock.Anything).Return(nil)
+
+		h := &handlers.AuthHandler{Repo: repo, Email: emailSvc, ResetTokens: resetStore}
+		w := executeRequest(h.ForgotPassword, http.MethodPost, "/auth/forgot-password",
+			jsonBody(t, map[string]string{"email": "alice@test.com"}))
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		resetStore.AssertExpectations(t)
+		emailSvc.AssertExpectations(t)
+	})
+
+	t.Run("invalid_email", func(t *testing.T) {
+		h := &handlers.AuthHandler{Repo: &mockRepo{}, ResetTokens: &mockResetTokenStore{}}
+		w := executeRequest(h.ForgotPassword, http.MethodPost, "/auth/forgot-password",
+			jsonBody(t, map[string]string{"email": "not-an-email"}))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+}
+
+// --- TestResetPassword ---
+
+func TestResetPassword(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		repo := &mockRepo{}
+		hasher := &mockHasher{}
+		resetStore := &mockResetTokenStore{}
+
+		resetStore.On("GetResetTokenUserID", "valid-token").Return(uint(1), nil)
+		hasher.On("Hash", "newpassword123").Return("newhash", nil)
+		repo.On("UpdatePassword", uint(1), "newhash").Return(nil)
+		resetStore.On("DeleteResetToken", "valid-token").Return(nil)
+
+		h := &handlers.AuthHandler{Repo: repo, Hasher: hasher, ResetTokens: resetStore}
+		w := executeRequest(h.ResetPassword, http.MethodPost, "/auth/reset-password",
+			jsonBody(t, map[string]string{"token": "valid-token", "password": "newpassword123"}))
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), "password has been reset")
+		resetStore.AssertExpectations(t)
+		repo.AssertExpectations(t)
+	})
+
+	t.Run("invalid_token", func(t *testing.T) {
+		resetStore := &mockResetTokenStore{}
+		resetStore.On("GetResetTokenUserID", "bad-token").Return(uint(0), errors.New("token not found"))
+
+		h := &handlers.AuthHandler{Repo: &mockRepo{}, Hasher: &mockHasher{}, ResetTokens: resetStore}
+		w := executeRequest(h.ResetPassword, http.MethodPost, "/auth/reset-password",
+			jsonBody(t, map[string]string{"token": "bad-token", "password": "newpassword123"}))
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("short_password", func(t *testing.T) {
+		h := &handlers.AuthHandler{Repo: &mockRepo{}, Hasher: &mockHasher{}, ResetTokens: &mockResetTokenStore{}}
+		w := executeRequest(h.ResetPassword, http.MethodPost, "/auth/reset-password",
+			jsonBody(t, map[string]string{"token": "tok", "password": "short"}))
+		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 }

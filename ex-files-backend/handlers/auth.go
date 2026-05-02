@@ -1,13 +1,16 @@
 package handlers
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
-
-	"strconv"
 
 	authv1 "github.com/spburtsev/ex-files-backend/gen/auth/v1"
 	issuesv1 "github.com/spburtsev/ex-files-backend/gen/issues/v1"
@@ -16,10 +19,13 @@ import (
 )
 
 type AuthHandler struct {
-	Repo   services.UserRepository
-	Tokens services.TokenService
-	Hasher services.Hasher
-	Audit  services.AuditRepository
+	Repo        services.UserRepository
+	Tokens      services.TokenService
+	Hasher      services.Hasher
+	Audit       services.AuditRepository
+	Email       services.EmailService
+	Cache       services.CacheService
+	ResetTokens services.ResetTokenStore
 }
 
 type registerRequest struct {
@@ -161,10 +167,28 @@ func (h *AuthHandler) Me(c *gin.Context) {
 	if !ok {
 		return
 	}
+
+	cacheKey := fmt.Sprintf("user:%d", userID)
+	if h.Cache != nil {
+		if cached, hit := h.Cache.Get(cacheKey); hit {
+			var user models.User
+			if err := json.Unmarshal(cached, &user); err == nil {
+				protobufResponse(c, http.StatusOK, &authv1.MeResponse{User: userToProto(&user)})
+				return
+			}
+		}
+	}
+
 	user, err := h.Repo.FindByID(userID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 		return
+	}
+
+	if h.Cache != nil {
+		if data, err := json.Marshal(user); err == nil {
+			h.Cache.Set(cacheKey, data, 30*time.Second)
+		}
 	}
 	protobufResponse(c, http.StatusOK, &authv1.MeResponse{User: userToProto(user)})
 }
@@ -209,4 +233,109 @@ func (h *AuthHandler) ListUsers(c *gin.Context) {
 		}
 	}
 	protobufResponse(c, http.StatusOK, &issuesv1.GetUsersResponse{Users: pb})
+}
+
+type forgotPasswordRequest struct {
+	Email string `json:"email" binding:"required,email"`
+}
+
+type resetPasswordRequest struct {
+	Token    string `json:"token"    binding:"required"`
+	Password string `json:"password" binding:"required,min=8"`
+}
+
+// ForgotPassword generates a reset token and emails a reset link.
+// @Summary      Request password reset
+// @Tags         auth
+// @Accept       json
+// @Produce      json
+// @Param        body  body      forgotPasswordRequest  true  "Email"
+// @Success      200   {object}  map[string]string
+// @Failure      400   {object}  swagErrorResponse
+// @Router       /auth/forgot-password [post]
+func (h *AuthHandler) ForgotPassword(c *gin.Context) {
+	var req forgotPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Always return 200 regardless of whether user exists (prevent enumeration).
+	user, err := h.Repo.FindByEmail(req.Email)
+	if err != nil {
+		slog.Debug("forgot-password: user not found", "email", req.Email)
+		c.JSON(http.StatusOK, gin.H{"message": "if the email exists, a reset link has been sent"})
+		return
+	}
+
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		slog.Error("forgot-password: failed to generate token", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	tokenStr := hex.EncodeToString(tokenBytes)
+
+	if err := h.ResetTokens.StoreResetToken(tokenStr, user.ID, 1*time.Hour); err != nil {
+		slog.Error("forgot-password: failed to save token", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+
+	if h.Email != nil {
+		subject := "Password Reset — Ex-Files"
+		body := fmt.Sprintf(
+			"<p>Hello %s,</p>"+
+				"<p>You requested a password reset. Use the following token to reset your password:</p>"+
+				"<p><strong>%s</strong></p>"+
+				"<p>This token expires in 1 hour. If you did not request this, ignore this email.</p>",
+			user.Name, tokenStr,
+		)
+		if err := h.Email.Send(user.Email, subject, body); err != nil {
+			slog.Error("forgot-password: failed to send email", "error", err)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "if the email exists, a reset link has been sent"})
+}
+
+// ResetPassword validates a reset token and updates the password.
+// @Summary      Reset password
+// @Tags         auth
+// @Accept       json
+// @Produce      json
+// @Param        body  body      resetPasswordRequest  true  "Token and new password"
+// @Success      200   {object}  map[string]string
+// @Failure      400   {object}  swagErrorResponse
+// @Router       /auth/reset-password [post]
+func (h *AuthHandler) ResetPassword(c *gin.Context) {
+	var req resetPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	userID, err := h.ResetTokens.GetResetTokenUserID(req.Token)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid or expired token"})
+		return
+	}
+
+	hash, err := h.Hasher.Hash(req.Password)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+
+	if err := h.Repo.UpdatePassword(userID, hash); err != nil {
+		slog.Error("reset-password: failed to update password", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+
+	if err := h.ResetTokens.DeleteResetToken(req.Token); err != nil {
+		slog.Error("reset-password: failed to delete token", "error", err)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "password has been reset"})
 }

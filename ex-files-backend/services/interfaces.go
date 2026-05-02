@@ -8,11 +8,24 @@ import (
 	"github.com/spburtsev/ex-files-backend/models"
 )
 
+type CacheService interface {
+	Get(key string) ([]byte, bool)
+	Set(key string, value []byte, ttl time.Duration)
+	Delete(key string)
+}
+
+type ResetTokenStore interface {
+	StoreResetToken(token string, userID uint, ttl time.Duration) error
+	GetResetTokenUserID(token string) (uint, error)
+	DeleteResetToken(token string) error
+}
+
 type UserRepository interface {
 	FindByEmail(email string) (*models.User, error)
 	FindByID(id uint) (*models.User, error)
 	Create(user *models.User) error
 	ListAll() ([]models.User, error)
+	UpdatePassword(userID uint, passwordHash string) error
 }
 
 type TokenService interface {
@@ -42,6 +55,7 @@ type AuditRepository interface {
 type StorageService interface {
 	Upload(ctx context.Context, key string, reader io.Reader, size int64, contentType string) error
 	PresignedURL(ctx context.Context, key string, expires time.Duration) (string, error)
+	Get(ctx context.Context, key string) (io.ReadCloser, error)
 	Delete(ctx context.Context, key string) error
 }
 
@@ -49,6 +63,7 @@ type DocumentRepository interface {
 	Create(doc *models.Document) error
 	FindByID(id uint) (*models.Document, error)
 	FindByHash(hash string) (*models.Document, error)
+	FindByIssueAndHash(issueID uint, hash string) (*models.Document, error)
 	Update(doc *models.Document) error
 	ListByIssue(issueID uint, search, status string, limit, offset int) ([]models.Document, int64, error)
 	Delete(id uint) error

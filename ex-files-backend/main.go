@@ -88,13 +88,28 @@ func main() {
 		os.Exit(1)
 	}
 
-	emailSvc := services.NewResendEmailService()
+	resendKey := os.Getenv("RESEND_API_KEY")
+	resendFrom := os.Getenv("RESEND_FROM")
+	if resendFrom == "" {
+		resendFrom = "ex-files <noreply@ex-files.dev>"
+	}
+	emailSvc := services.NewResendEmailService(resendKey, resendFrom)
 	sseHub := services.NewSSEHub()
 
-	auth := &handlers.AuthHandler{Repo: repo, Tokens: ts, Hasher: hasher, Audit: auditRepo}
+	redisAddr := os.Getenv("REDIS_ADDR")
+	if redisAddr == "" {
+		redisAddr = "localhost:6380"
+	}
+	rdb, err := services.NewRedisClient(redisAddr)
+	if err != nil {
+		slog.Error("failed to connect to Redis", "error", err)
+		os.Exit(1)
+	}
+
+	auth := &handlers.AuthHandler{Repo: repo, Tokens: ts, Hasher: hasher, Audit: auditRepo, Email: emailSvc, Cache: rdb, ResetTokens: rdb}
 	wsRepo := &services.GormWorkspaceRepository{DB: db}
 	ws := &handlers.WorkspaceHandler{Repo: wsRepo, UserRepo: repo, Audit: auditRepo}
-	audit := &handlers.AuditHandler{Repo: auditRepo}
+	audit := &handlers.AuditHandler{Repo: auditRepo, DB: db}
 	docRepo := &services.GormDocumentRepository{DB: db}
 	docs := &handlers.DocumentHandler{Repo: docRepo, Storage: storage, Audit: auditRepo, UserRepo: repo, Email: emailSvc, Hub: sseHub}
 	sse := &handlers.SSEHandler{Hub: sseHub}
@@ -129,6 +144,8 @@ func main() {
 		authRoutes.POST("/register", auth.Register)
 		authRoutes.POST("/login", auth.Login)
 		authRoutes.POST("/logout", auth.Logout)
+		authRoutes.POST("/forgot-password", auth.ForgotPassword)
+		authRoutes.POST("/reset-password", auth.ResetPassword)
 		authRoutes.GET("/me", middleware.AuthMiddleware(ts), auth.Me)
 		authRoutes.GET("/users", middleware.AuthMiddleware(ts), auth.ListUsers)
 	}
@@ -160,6 +177,7 @@ func main() {
 		documentRoutes.DELETE("/:id", docs.Delete)
 		documentRoutes.POST("/:id/versions", docs.UploadVersion)
 		documentRoutes.GET("/:id/versions/:versionId/download", docs.Download)
+		documentRoutes.GET("/:id/versions/:versionId/file", docs.File)
 		documentRoutes.POST("/:id/submit", docs.Submit)
 		documentRoutes.POST("/:id/resubmit", docs.Resubmit)
 		documentRoutes.POST("/:id/approve", docs.Approve)
@@ -173,6 +191,7 @@ func main() {
 	auditRoutes := router.Group("/audit", middleware.AuthMiddleware(ts))
 	{
 		auditRoutes.GET("", audit.List)
+		auditRoutes.GET("/stats", audit.Stats)
 	}
 	router.GET("/events", middleware.AuthMiddleware(ts), sse.Stream)
 	router.GET("/verify", verify.Verify)

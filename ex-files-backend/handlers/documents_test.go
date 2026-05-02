@@ -49,6 +49,14 @@ func (m *mockDocRepo) FindByHash(hash string) (*models.Document, error) {
 	return nil, args.Error(1)
 }
 
+func (m *mockDocRepo) FindByIssueAndHash(issueID uint, hash string) (*models.Document, error) {
+	args := m.Called(issueID, hash)
+	if d, ok := args.Get(0).(*models.Document); ok {
+		return d, args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
 func (m *mockDocRepo) Update(doc *models.Document) error {
 	return m.Called(doc).Error(0)
 }
@@ -97,6 +105,12 @@ func (m *mockStorage) Upload(ctx context.Context, key string, reader io.Reader, 
 func (m *mockStorage) PresignedURL(ctx context.Context, key string, expires time.Duration) (string, error) {
 	args := m.Called(ctx, key, expires)
 	return args.String(0), args.Error(1)
+}
+
+func (m *mockStorage) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+	args := m.Called(ctx, key)
+	rc, _ := args.Get(0).(io.ReadCloser)
+	return rc, args.Error(1)
 }
 
 func (m *mockStorage) Delete(ctx context.Context, key string) error {
@@ -237,6 +251,7 @@ func TestDocumentUpload(t *testing.T) {
 		storage := &mockStorage{}
 		auditRepo := &mockAuditRepo{}
 
+		docRepo.On("FindByIssueAndHash", uint(1), mock.AnythingOfType("string")).Return(nil, gorm.ErrRecordNotFound)
 		docRepo.On("Create", mock.AnythingOfType("*models.Document")).Return(nil)
 		storage.On("Upload", mock.Anything, mock.AnythingOfType("string"), mock.Anything, mock.AnythingOfType("int64"), mock.AnythingOfType("string")).Return(nil)
 		docRepo.On("CreateVersion", mock.AnythingOfType("*models.DocumentVersion")).Return(nil)
@@ -254,6 +269,21 @@ func TestDocumentUpload(t *testing.T) {
 		assert.Equal(t, http.StatusCreated, w.Code)
 		docRepo.AssertExpectations(t)
 		storage.AssertExpectations(t)
+	})
+
+	t.Run("rejects_duplicate_hash_in_issue", func(t *testing.T) {
+		docRepo := &mockDocRepo{}
+		existing := &models.Document{Name: "earlier.pdf"}
+		existing.ID = 7
+		docRepo.On("FindByIssueAndHash", uint(1), mock.AnythingOfType("string")).Return(existing, nil)
+
+		h := newDocHandler(docRepo, &mockStorage{}, nil)
+
+		body, contentType := createMultipartFile(t, "file", "test.pdf", "fake pdf content")
+		w := docRequest(h.Upload, http.MethodPost, "/issues/1/documents", "/issues/:id/documents", body, contentType, 1, "manager")
+
+		assert.Equal(t, http.StatusConflict, w.Code)
+		docRepo.AssertExpectations(t)
 	})
 }
 

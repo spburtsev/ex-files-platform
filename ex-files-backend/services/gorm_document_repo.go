@@ -30,6 +30,14 @@ func (r *GormDocumentRepository) FindByHash(hash string) (*models.Document, erro
 	return &doc, nil
 }
 
+func (r *GormDocumentRepository) FindByIssueAndHash(issueID uint, hash string) (*models.Document, error) {
+	var doc models.Document
+	if err := r.DB.Where("issue_id = ? AND hash = ?", issueID, hash).First(&doc).Error; err != nil {
+		return nil, err
+	}
+	return &doc, nil
+}
+
 func (r *GormDocumentRepository) ListByIssue(issueID uint, search, status string, limit, offset int) ([]models.Document, int64, error) {
 	var docs []models.Document
 	var total int64

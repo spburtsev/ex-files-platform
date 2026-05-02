@@ -43,7 +43,7 @@ docs: docs-proto docs-swagger
 # --- Local development ---
 
 infra-up:
-	docker compose up -d ex-files-pg ex-files-minio ex-files-minio-init
+	docker compose up -d ex-files-pg redis ex-files-minio ex-files-minio-init
 
 infra-down:
 	docker compose down

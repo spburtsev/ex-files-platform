@@ -30,10 +30,7 @@
 </script>
 
 <div class="flex h-full flex-col">
-	<div class="flex items-center justify-between border-b px-4 py-3">
-		<h3 class="text-sm font-semibold">
-			{m.pdf_comments_count({ count: String(comments.length) })}
-		</h3>
+	<div class="flex items-center justify-end border-b px-3 py-2">
 		<div class="flex gap-1 rounded-md bg-muted p-0.5 text-xs">
 			<button
 				class="rounded px-2 py-1 {filter === 'page'
