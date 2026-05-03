@@ -834,6 +834,25 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  /documents/{id}/comments/{commentId}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+      - name: commentId
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      tags: [comments]
+      operationId: commentsDelete
+      summary: Delete a comment (author only)
+      responses:
+        '204':
+          description: Comment deleted.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   /audit:
     get:
       tags: [audit]
@@ -1345,22 +1364,32 @@ components:
       properties:
         archived: { type: boolean }
 
+    CommentMetadata:
+      type: object
+      required: [page, x, y]
+      properties:
+        page: { type: integer, minimum: 1 }
+        x:    { type: number, format: double, minimum: 0, maximum: 1 }
+        y:    { type: number, format: double, minimum: 0, maximum: 1 }
+
     Comment:
       type: object
-      required: [id, documentId, authorId, authorName, body, createdAt]
+      required: [id, documentId, authorId, authorName, body, metadata, createdAt]
       properties:
         id:         { type: string }
         documentId: { type: string }
         authorId:   { type: string }
         authorName: { type: string }
         body:       { type: string }
+        metadata:   { $ref: '#/components/schemas/CommentMetadata' }
         createdAt:  { type: string, format: date-time }
 
     CreateCommentRequest:
       type: object
-      required: [body]
+      required: [body, metadata]
       properties:
-        body: { type: string, minLength: 1 }
+        body:     { type: string, minLength: 1 }
+        metadata: { $ref: '#/components/schemas/CommentMetadata' }
 
     CreateCommentResponse:
       type: object

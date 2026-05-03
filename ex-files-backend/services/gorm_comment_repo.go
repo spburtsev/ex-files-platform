@@ -32,3 +32,7 @@ func (r *GormCommentRepository) ListByDocument(documentID uint) ([]models.Commen
 	}
 	return comments, nil
 }
+
+func (r *GormCommentRepository) Delete(id uint) error {
+	return r.DB.Delete(&models.Comment{}, id).Error
+}

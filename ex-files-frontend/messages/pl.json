@@ -303,6 +303,8 @@
 	"issue_archive_confirm_desc": "To zadanie zostanie przeniesione do zakładki Archiwum.",
 	"issue_unarchive_confirm_title": "Przywrócić zadanie?",
 	"issue_unarchive_confirm_desc": "To zadanie zostanie przywrócone do zakładki Zadania.",
+	"comment_delete_confirm_title": "Usunąć komentarz?",
+	"comment_delete_confirm_desc": "Ten komentarz zostanie trwale usunięty. Tej operacji nie można cofnąć.",
 
 	"nav_analytics": "Analityka",
 	"analytics_page_title": "Analityka - ex-files",

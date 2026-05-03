@@ -28,20 +28,8 @@ export interface HydratedDocument {
 	reviewStatus?: ReviewStatus;
 }
 
-export interface Comment {
-	id: string;
-	documentId: string;
-	page: number;
-	x: number;
-	y: number;
-	text: string;
-	author: string;
-	createdAt: Date;
-}
-
 interface IssueSlot {
 	documents: Document[];
-	comments: Comment[];
 	activeDocumentId: string | null;
 	hydrated: boolean;
 }
@@ -49,7 +37,6 @@ interface IssueSlot {
 function emptySlot(): IssueSlot {
 	return {
 		documents: [],
-		comments: [],
 		activeDocumentId: null,
 		hydrated: false
 	};
@@ -64,9 +51,6 @@ function createWorkbenchStore() {
 	);
 	const activeDocument = $derived(
 		slot.documents.find((d) => d.id === slot.activeDocumentId) ?? null
-	);
-	const activeComments = $derived(
-		slot.comments.filter((c) => c.documentId === slot.activeDocumentId)
 	);
 
 	function setIssue(issueId: string) {
@@ -159,41 +143,12 @@ function createWorkbenchStore() {
 		slots[currentIssueId].activeDocumentId = id;
 	}
 
-	function addComment(page: number, x: number, y: number, text: string, author: string) {
-		if (!currentIssueId) return;
-		const activeId = slots[currentIssueId].activeDocumentId;
-		if (!activeId) return;
-		const comment: Comment = {
-			id: crypto.randomUUID(),
-			documentId: activeId,
-			page,
-			x,
-			y,
-			text,
-			author,
-			createdAt: new Date()
-		};
-		slots[currentIssueId].comments.push(comment);
-		return comment;
-	}
-
-	function deleteComment(id: string) {
-		if (!currentIssueId) return;
-		const list = slots[currentIssueId].comments;
-		const idx = list.findIndex((c) => c.id === id);
-		if (idx === -1) return;
-		list.splice(idx, 1);
-	}
-
 	function discardDocument(id: string) {
 		if (!currentIssueId) return;
 		const s = slots[currentIssueId];
 		const idx = s.documents.findIndex((d) => d.id === id);
 		if (idx === -1) return;
 		s.documents.splice(idx, 1);
-		for (let i = s.comments.length - 1; i >= 0; i--) {
-			if (s.comments[i].documentId === id) s.comments.splice(i, 1);
-		}
 		if (s.activeDocumentId === id) {
 			s.activeDocumentId = s.documents[0]?.id ?? null;
 		}
@@ -206,17 +161,11 @@ function createWorkbenchStore() {
 		get documents() {
 			return slot.documents;
 		},
-		get comments() {
-			return slot.comments;
-		},
 		get activeDocument() {
 			return activeDocument;
 		},
 		get activeDocumentId() {
 			return slot.activeDocumentId;
-		},
-		get activeComments() {
-			return activeComments;
 		},
 		get hydrated() {
 			return slot.hydrated;
@@ -229,8 +178,6 @@ function createWorkbenchStore() {
 		setDocumentReviewStatus,
 		hydrate,
 		setActiveDocument,
-		addComment,
-		deleteComment,
 		discardDocument
 	};
 }

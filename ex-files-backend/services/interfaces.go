@@ -89,6 +89,7 @@ type CommentRepository interface {
 	Create(comment *models.Comment) error
 	FindByID(id uint) (*models.Comment, error)
 	ListByDocument(documentID uint) ([]models.Comment, error)
+	Delete(id uint) error
 }
 
 type WorkspaceRepository interface {

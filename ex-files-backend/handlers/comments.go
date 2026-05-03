@@ -2,19 +2,55 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
+
+	"gorm.io/datatypes"
 
 	"github.com/spburtsev/ex-files-backend/models"
 	"github.com/spburtsev/ex-files-backend/oapi"
 	"github.com/spburtsev/ex-files-backend/services"
 )
 
+// jsonNumberToFloat handles values from datatypes.JSONMap.Scan, which uses
+// json.Decoder.UseNumber() — numeric fields come back as json.Number (string),
+// not float64.
+func jsonNumberToFloat(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case float32:
+		return float64(n), true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case json.Number:
+		f, err := n.Float64()
+		return f, err == nil
+	}
+	return 0, false
+}
+
 func commentToOAPI(c *models.Comment) oapi.Comment {
+	meta := oapi.CommentMetadata{}
+	if c.Metadata != nil {
+		if f, ok := jsonNumberToFloat(c.Metadata["page"]); ok {
+			meta.Page = int(f)
+		}
+		if f, ok := jsonNumberToFloat(c.Metadata["x"]); ok {
+			meta.X = f
+		}
+		if f, ok := jsonNumberToFloat(c.Metadata["y"]); ok {
+			meta.Y = f
+		}
+	}
 	return oapi.Comment{
 		ID:         formatID(c.ID),
 		DocumentId: formatID(c.DocumentID),
 		AuthorId:   formatID(c.AuthorID),
 		AuthorName: c.Author.Name,
 		Body:       c.Body,
+		Metadata:   meta,
 		CreatedAt:  c.CreatedAt,
 	}
 }
@@ -33,6 +69,11 @@ func (s *Server) CommentsCreate(ctx context.Context, req *oapi.CreateCommentRequ
 		DocumentID: docID,
 		AuthorID:   uid,
 		Body:       req.Body,
+		Metadata: datatypes.JSONMap{
+			"page": req.Metadata.Page,
+			"x":    req.Metadata.X,
+			"y":    req.Metadata.Y,
+		},
 	}
 	if err := s.CommentRepo.Create(&c); err != nil {
 		logErr("comments.create", err)
@@ -75,4 +116,38 @@ func (s *Server) CommentsList(ctx context.Context, params oapi.CommentsListParam
 		out[i] = commentToOAPI(&comments[i])
 	}
 	return &oapi.ListCommentsResponse{Comments: out}, nil
+}
+
+// CommentsDelete implements DELETE /documents/{id}/comments/{commentId}.
+func (s *Server) CommentsDelete(ctx context.Context, params oapi.CommentsDeleteParams) (oapi.CommentsDeleteRes, error) {
+	uid, err := s.callerID(ctx)
+	if err != nil {
+		return &oapi.CommentsDeleteUnauthorized{Error: "unauthorized"}, nil
+	}
+	commentID, ok := parseUintID(params.CommentId)
+	if !ok {
+		return &oapi.CommentsDeleteNotFound{Error: "comment not found"}, nil
+	}
+	c, err := s.CommentRepo.FindByID(commentID)
+	if err != nil {
+		return &oapi.CommentsDeleteNotFound{Error: "comment not found"}, nil
+	}
+	if c.AuthorID != uid {
+		return &oapi.CommentsDeleteForbidden{Error: "only the author can delete this comment"}, nil
+	}
+	if err := s.CommentRepo.Delete(commentID); err != nil {
+		logErr("comments.delete", err)
+		return &oapi.CommentsDeleteInternalServerError{Error: "failed to delete comment"}, nil
+	}
+	logAudit(s.Audit, models.AuditActionCommentDeleted, uid, uintPtr(c.ID), "comment", map[string]any{
+		"document_id": c.DocumentID,
+	})
+	if s.Hub != nil {
+		s.Hub.Broadcast(services.SSEEvent{
+			Type:       "comment.deleted",
+			DocumentID: c.DocumentID,
+			Payload:    map[string]any{"id": c.ID},
+		})
+	}
+	return &oapi.CommentsDeleteNoContent{}, nil
 }

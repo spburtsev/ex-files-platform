@@ -8,6 +8,7 @@ import {
 	authRegister,
 	authResetPassword,
 	commentsCreate,
+	commentsDelete,
 	documentsApprove,
 	documentsAssignReviewer,
 	documentsDelete,
@@ -28,14 +29,18 @@ import {
 	workspacesRemoveMember,
 	workspacesUpdate
 } from '$lib/api';
-import { getIssues } from './queries.remote';
+import { getComments, getIssues } from './queries.remote';
 
 const NETWORK_ERROR = 'Unable to reach the server. Please try again later.';
 
 function errorMessage(error: unknown, fallback: string): string {
-	if (error && typeof error === 'object' && 'error' in error) {
-		const e = (error as { error: unknown }).error;
-		if (typeof e === 'string') return e;
+	if (error && typeof error === 'object'){
+        if ('error' in error && typeof error.error === 'string') {
+            return error.error;
+        }
+        if ('error_message' in error && typeof error.error_message === 'string') {
+            return error.error_message;
+        }
 	}
 	return fallback;
 }
@@ -382,9 +387,49 @@ export const updateIssueAssignee = command(
 
 export const createComment = command(
 	'unchecked',
-	async ({ docId, body }: { docId: string; body: string }) => {
-		const r = await commentsCreate({ ...apiOpts(), path: { id: docId }, body: { body } });
-		if (r.error) return { ok: false as const, error: errorMessage(r.error, 'Failed to comment') };
+	async ({
+		docId,
+		body,
+		metadata
+	}: {
+		docId: string;
+		body: string;
+		metadata: { page: number; x: number; y: number };
+	}) => {
+		const r = await commentsCreate({
+			...apiOpts(),
+			path: { id: docId },
+			body: { body, metadata }
+		});
+		if (r.error) {
+            return { 
+                ok: false as const, 
+                error: errorMessage(r.error, 'Failed to comment'),
+            };
+        }
+        for (const { query } of requested(getComments, 1)) {
+			void query.refresh();
+		}
+		return { ok: true as const };
+	}
+);
+
+export const deleteComment = command(
+	'unchecked',
+	async ({ docId, commentId }: { docId: string; commentId: string }) => {
+		const r = await commentsDelete({
+			...apiOpts(),
+			path: { id: docId, commentId }
+		});
+		if (r.error) {
+			return { 
+                ok: false as const, 
+                error: errorMessage(r.error, 'Failed to delete comment'),
+            };
+        }
+        for (const { query } of requested(getComments, 1)) {
+			void query.refresh();
+		}
 		return { ok: true as const };
 	}
 );

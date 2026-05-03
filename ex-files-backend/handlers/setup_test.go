@@ -317,6 +317,9 @@ func (m *mockCommentRepo) ListByDocument(documentID uint) ([]models.Comment, err
 	a := m.Called(documentID)
 	return a.Get(0).([]models.Comment), a.Error(1)
 }
+func (m *mockCommentRepo) Delete(id uint) error {
+	return m.Called(id).Error(0)
+}
 
 // --- mocks: storage -----------------------------------------------------
 

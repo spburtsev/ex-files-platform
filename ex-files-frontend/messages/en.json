@@ -303,6 +303,8 @@
 	"issue_archive_confirm_desc": "This issue will be moved to the Archive tab.",
 	"issue_unarchive_confirm_title": "Unarchive issue?",
 	"issue_unarchive_confirm_desc": "This issue will be restored to the Issues tab.",
+	"comment_delete_confirm_title": "Delete comment?",
+	"comment_delete_confirm_desc": "This comment will be permanently removed. This action cannot be undone.",
 
 	"nav_analytics": "Analytics",
 	"analytics_page_title": "Analytics - ex-files",
