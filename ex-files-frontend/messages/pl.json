@@ -36,7 +36,6 @@
 	"status_changes_requested": "Wymagane zmiany",
 	"status_approved": "Zatwierdzony",
 	"status_rejected": "Odrzucony",
-	"status_active": "Aktywny",
 
 	"role_manager": "Kierownik",
 	"role_employee": "Pracownik",
@@ -47,7 +46,6 @@
 	"nav_audit_log": "Dziennik audytu",
 	"nav_profile": "Profil",
 	"nav_logout": "Wyloguj się",
-	"nav_offline": "Offline",
 
 	"login_page_title": "Logowanie - ex-files",
 	"login_welcome": "Witamy ponownie",
@@ -127,7 +125,6 @@
 	"ws_no_workspaces": "Brak przestrzeni roboczych",
 	"ws_no_workspaces_manager": "Utwórz przestrzeń roboczą, aby rozpocząć.",
 	"ws_no_workspaces_employee": "Nie zostałeś dodany do żadnej przestrzeni roboczej.",
-	"ws_manager_id": "ID kierownika: {id}",
 	"ws_created_date": "Utworzono {date}",
 	"ws_manager_label": "Kierownik: {name}",
 
@@ -169,9 +166,7 @@
 	"ws_issue_change_assignee_label": "Zmień przypisanego",
 	"ws_issue_deadline_label": "Termin",
 	"ws_issue_create_error": "Nie udało się utworzyć zagadnienia",
-	"ws_filter_all": "Wszystkie",
 	"ws_search_no_results": "Brak przestrzeni roboczych pasujących do wyszukiwania.",
-	"ws_status_label": "Status",
 	"ws_status_all": "Wszystkie",
 	"ws_status_active": "Aktywne",
 	"ws_status_archived": "Zarchiwizowane",
@@ -261,7 +256,6 @@
 	"workbench_show_comments": "Pokaż komentarze",
 	"workbench_hide_comments": "Ukryj komentarze",
 	"workbench_comments": "Komentarze",
-	"workbench_activity": "Aktywność",
 	"workbench_actions": "Akcje",
 	"workbench_status_draft": "Szkic",
 	"workbench_status_saved": "Zapisane",
@@ -285,7 +279,6 @@
 	"pdf_add_comment": "Dodaj komentarz",
 	"pdf_comment_position": "Strona {page} - Pozycja ({x}%, {y}%)",
 	"pdf_comment_placeholder": "Napisz komentarz...",
-	"pdf_comments_count": "Komentarze ({count})",
 	"pdf_this_page": "Ta strona",
 	"pdf_all": "Wszystkie",
 	"pdf_no_comments_page": "Brak komentarzy na tej stronie",
@@ -333,7 +326,5 @@
 	"analytics_documents_by_status": "Dokumenty wg statusu",
 	"analytics_top_actors": "Najaktywniejsze osoby",
 	"analytics_no_data": "Brak danych.",
-	"analytics_download_csv": "Pobierz CSV",
-
-	"lang_switch": "Język"
+	"analytics_download_csv": "Pobierz CSV"
 }

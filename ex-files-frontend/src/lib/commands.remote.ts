@@ -46,6 +46,22 @@ function errorMessage(error: unknown, fallback: string): string {
 	return fallback;
 }
 
+type ApiResult<T extends { error?: unknown }> = T;
+type CommandResult = { ok: true } | { ok: false; error: string };
+
+async function runApi<T extends { error?: unknown }>(
+	call: Promise<ApiResult<T>>,
+	fallback: string
+): Promise<CommandResult> {
+	try {
+		const r = await call;
+		if (r.error) return { ok: false as const, error: errorMessage(r.error, fallback) };
+		return { ok: true as const };
+	} catch {
+		return { ok: false as const, error: NETWORK_ERROR };
+	}
+}
+
 function setSessionCookie(token: string) {
 	const event = getRequestEvent();
 	event.cookies.set('session', token, {
@@ -115,41 +131,17 @@ export const forgotPassword = command('unchecked', async (email: string) => {
 
 export const resetPassword = command(
 	'unchecked',
-	async (data: { token: string; password: string }) => {
-		try {
-			const r = await authResetPassword({ ...apiOpts(), body: data });
-			if (r.error) {
-				return {
-					ok: false as const,
-					error: errorMessage(r.error, 'Reset failed. Token may be invalid or expired.')
-				};
-			}
-			return { ok: true as const };
-		} catch {
-			return { ok: false as const, error: NETWORK_ERROR };
-		}
-	}
+	async (data: { token: string; password: string }) =>
+		runApi(authResetPassword({ ...apiOpts(), body: data }), 'Reset failed. Token may be invalid or expired.')
 );
 
 export const changePassword = command(
 	'unchecked',
-	async ({ oldPassword, newPassword }: { oldPassword: string; newPassword: string }) => {
-		try {
-			const r = await authChangePassword({
-				...apiOpts(),
-				body: { oldPassword, newPassword }
-			});
-			if (r.error) {
-				return {
-					ok: false as const,
-					error: errorMessage(r.error, 'Failed to change password')
-				};
-			}
-			return { ok: true as const };
-		} catch {
-			return { ok: false as const, error: NETWORK_ERROR };
-		}
-	}
+	async ({ oldPassword, newPassword }: { oldPassword: string; newPassword: string }) =>
+		runApi(
+			authChangePassword({ ...apiOpts(), body: { oldPassword, newPassword } }),
+			'Failed to change password'
+		)
 );
 
 export const logout = command(async () => {
@@ -176,13 +168,11 @@ export const createWorkspace = command('unchecked', async (name: string) => {
 
 export const updateWorkspace = command(
 	'unchecked',
-	async ({ id, name }: { id: string; name: string }) => {
-		const r = await workspacesUpdate({ ...apiOpts(), path: { id }, body: { name } });
-		if (r.error) {
-			return { ok: false as const, error: errorMessage(r.error, 'Failed to update workspace') };
-		}
-		return { ok: true as const };
-	}
+	async ({ id, name }: { id: string; name: string }) =>
+		runApi(
+			workspacesUpdate({ ...apiOpts(), path: { id }, body: { name } }),
+			'Failed to update workspace'
+		)
 );
 
 export const deleteWorkspace = command('unchecked', async (id: string) => {
@@ -209,17 +199,11 @@ export const archiveIssue = command(
 
 export const addWorkspaceMember = command(
 	'unchecked',
-	async ({ workspaceId, userId }: { workspaceId: string; userId: string }) => {
-		const r = await workspacesAddMember({
-			...apiOpts(),
-			path: { id: workspaceId },
-			body: { userId }
-		});
-		if (r.error) {
-			return { ok: false as const, error: errorMessage(r.error, 'Failed to add member') };
-		}
-		return { ok: true as const };
-	}
+	async ({ workspaceId, userId }: { workspaceId: string; userId: string }) =>
+		runApi(
+			workspacesAddMember({ ...apiOpts(), path: { id: workspaceId }, body: { userId } }),
+			'Failed to add member'
+		)
 );
 
 export const removeWorkspaceMember = command(
@@ -251,22 +235,20 @@ export const createIssue = command(
 		description?: string;
 		assigneeId: string;
 		deadline?: string;
-	}) => {
-		const r = await issuesCreate({
-			...apiOpts(),
-			path: { id: workspaceId },
-			body: {
-				title,
-				description,
-				assigneeId,
-				deadline: deadline ? new Date(deadline).toISOString() : null
-			}
-		});
-		if (r.error) {
-			return { ok: false as const, error: errorMessage(r.error, 'Failed to create issue') };
-		}
-		return { ok: true as const };
-	}
+	}) =>
+		runApi(
+			issuesCreate({
+				...apiOpts(),
+				path: { id: workspaceId },
+				body: {
+					title,
+					description,
+					assigneeId,
+					deadline: deadline ? new Date(deadline).toISOString() : null
+				}
+			}),
+			'Failed to create issue'
+		)
 );
 
 // ---------------------------------------------------------------------------
@@ -310,17 +292,11 @@ export const deleteDocument = command('unchecked', async (id: string) => {
 
 export const uploadDocumentVersion = command(
 	'unchecked',
-	async ({ docId, file }: { docId: string; file: File }) => {
-		const r = await documentsUploadVersion({
-			...apiOpts(),
-			path: { id: docId },
-			body: { file }
-		});
-		if (r.error) {
-			return { ok: false as const, error: errorMessage(r.error, 'Upload failed') };
-		}
-		return { ok: true as const };
-	}
+	async ({ docId, file }: { docId: string; file: File }) =>
+		runApi(
+			documentsUploadVersion({ ...apiOpts(), path: { id: docId }, body: { file } }),
+			'Upload failed'
+		)
 );
 
 export const getDocumentDownloadUrl = command(
@@ -339,75 +315,60 @@ export const getDocumentDownloadUrl = command(
 // Document workflow
 // ---------------------------------------------------------------------------
 
-export const submitDocument = command('unchecked', async (id: string) => {
-	const r = await documentsSubmit({ ...apiOpts(), path: { id } });
-	if (r.error) return { ok: false as const, error: errorMessage(r.error, 'Action failed') };
-	return { ok: true as const };
-});
+export const submitDocument = command('unchecked', async (id: string) =>
+	runApi(documentsSubmit({ ...apiOpts(), path: { id } }), 'Action failed')
+);
 
-export const resubmitDocument = command('unchecked', async (id: string) => {
-	const r = await documentsResubmit({ ...apiOpts(), path: { id } });
-	if (r.error) return { ok: false as const, error: errorMessage(r.error, 'Action failed') };
-	return { ok: true as const };
-});
+export const resubmitDocument = command('unchecked', async (id: string) =>
+	runApi(documentsResubmit({ ...apiOpts(), path: { id } }), 'Action failed')
+);
 
-export const approveDocument = command('unchecked', async (id: string) => {
-	const r = await documentsApprove({ ...apiOpts(), path: { id } });
-	if (r.error) return { ok: false as const, error: errorMessage(r.error, 'Action failed') };
-	return { ok: true as const };
-});
+export const approveDocument = command('unchecked', async (id: string) =>
+	runApi(documentsApprove({ ...apiOpts(), path: { id } }), 'Action failed')
+);
 
 export const rejectDocument = command(
 	'unchecked',
-	async ({ id, note }: { id: string; note: string }) => {
-		const r = await documentsReject({ ...apiOpts(), path: { id }, body: { note } });
-		if (r.error) return { ok: false as const, error: errorMessage(r.error, 'Action failed') };
-		return { ok: true as const };
-	}
+	async ({ id, note }: { id: string; note: string }) =>
+		runApi(documentsReject({ ...apiOpts(), path: { id }, body: { note } }), 'Action failed')
 );
 
 export const requestDocumentChanges = command(
 	'unchecked',
-	async ({ id, note }: { id: string; note: string }) => {
-		const r = await documentsRequestChanges({ ...apiOpts(), path: { id }, body: { note } });
-		if (r.error) return { ok: false as const, error: errorMessage(r.error, 'Action failed') };
-		return { ok: true as const };
-	}
+	async ({ id, note }: { id: string; note: string }) =>
+		runApi(
+			documentsRequestChanges({ ...apiOpts(), path: { id }, body: { note } }),
+			'Action failed'
+		)
 );
 
 export const assignDocumentReviewer = command(
 	'unchecked',
-	async ({ id, reviewerId }: { id: string; reviewerId: string }) => {
-		const r = await documentsAssignReviewer({
-			...apiOpts(),
-			path: { id },
-			body: { reviewerId }
-		});
-		if (r.error) {
-			return { ok: false as const, error: errorMessage(r.error, 'Failed to assign reviewer') };
-		}
-		return { ok: true as const };
-	}
+	async ({ id, reviewerId }: { id: string; reviewerId: string }) =>
+		runApi(
+			documentsAssignReviewer({ ...apiOpts(), path: { id }, body: { reviewerId } }),
+			'Failed to assign reviewer'
+		)
 );
 
 export const updateIssueAssignee = command(
 	'unchecked',
-	async ({ id, assigneeId }: { id: string; assigneeId: string }) => {
-		const r = await issuesUpdateAssignee({
-			...apiOpts(),
-			path: { id },
-			body: { assigneeId }
-		});
-		if (r.error) {
-			return { ok: false as const, error: errorMessage(r.error, 'Failed to change assignee') };
-		}
-		return { ok: true as const };
-	}
+	async ({ id, assigneeId }: { id: string; assigneeId: string }) =>
+		runApi(
+			issuesUpdateAssignee({ ...apiOpts(), path: { id }, body: { assigneeId } }),
+			'Failed to change assignee'
+		)
 );
 
 // ---------------------------------------------------------------------------
 // Comments
 // ---------------------------------------------------------------------------
+
+function refreshComments() {
+	for (const { query } of requested(getComments, 1)) {
+		void query.refresh();
+	}
+}
 
 export const createComment = command(
 	'unchecked',
@@ -420,40 +381,23 @@ export const createComment = command(
 		body: string;
 		metadata: { page: number; x: number; y: number };
 	}) => {
-		const r = await commentsCreate({
-			...apiOpts(),
-			path: { id: docId },
-			body: { body, metadata }
-		});
-		if (r.error) {
-            return { 
-                ok: false as const, 
-                error: errorMessage(r.error, 'Failed to comment'),
-            };
-        }
-        for (const { query } of requested(getComments, 1)) {
-			void query.refresh();
-		}
-		return { ok: true as const };
+		const r = await runApi(
+			commentsCreate({ ...apiOpts(), path: { id: docId }, body: { body, metadata } }),
+			'Failed to comment'
+		);
+		if (r.ok) refreshComments();
+		return r;
 	}
 );
 
 export const deleteComment = command(
 	'unchecked',
 	async ({ docId, commentId }: { docId: string; commentId: string }) => {
-		const r = await commentsDelete({
-			...apiOpts(),
-			path: { id: docId, commentId }
-		});
-		if (r.error) {
-			return { 
-                ok: false as const, 
-                error: errorMessage(r.error, 'Failed to delete comment'),
-            };
-        }
-        for (const { query } of requested(getComments, 1)) {
-			void query.refresh();
-		}
-		return { ok: true as const };
+		const r = await runApi(
+			commentsDelete({ ...apiOpts(), path: { id: docId, commentId } }),
+			'Failed to delete comment'
+		);
+		if (r.ok) refreshComments();
+		return r;
 	}
 );

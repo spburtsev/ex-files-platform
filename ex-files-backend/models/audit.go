@@ -26,7 +26,6 @@ const (
 	AuditActionVersionCreated           AuditAction = "document.version_created"
 	AuditActionCommentAdded             AuditAction = "document.comment_added"
 	AuditActionCommentDeleted           AuditAction = "document.comment_deleted"
-	AuditActionRoleChanged              AuditAction = "user.role_changed"
 	AuditActionPasswordChanged          AuditAction = "user.password_changed"
 )
 
