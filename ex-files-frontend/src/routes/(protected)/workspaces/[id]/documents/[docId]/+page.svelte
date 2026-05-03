@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { goto, invalidateAll } from '$app/navigation';
-	import { getDocumentDetail, getWorkspaceDetail } from '$lib/data.remote';
-	import { isManager, formatTimestamp } from '$lib/proto-utils';
+	import { getDocumentDetail, getWorkspaceDetail } from '$lib/queries.remote';
+	import { isManager, formatTimestamp } from '$lib/utils';
 	import {
 		submitDocument,
 		resubmitDocument,
@@ -40,7 +40,7 @@
 		RotateCcw,
 		UserCheck
 	} from '@lucide/svelte';
-	import { extraBreadcrumbs } from '$lib/stores/breadcrumbs';
+	import { extraBreadcrumbs } from '$lib/stores/breadcrumbs.svelte';
 	import { onDestroy } from 'svelte';
 
 	const wsId = page.params.id ?? '';
@@ -310,7 +310,7 @@
 							</span>
 							<span class="flex items-center gap-1">
 								<FileText class="size-3.5" />
-								{doc ? formatSize(doc.size) : '-'} · {doc?.mimeType}
+								{doc ? formatSize(doc.size) : '-'} - {doc?.mimeType}
 							</span>
 							{#if doc?.reviewerName}
 								<span class="flex items-center gap-1">

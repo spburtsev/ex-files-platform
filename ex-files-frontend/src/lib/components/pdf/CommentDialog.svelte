@@ -49,9 +49,9 @@
 		<h4 class="mb-1 text-sm font-semibold">{m.pdf_add_comment()}</h4>
 		<p class="mb-3 text-xs text-muted-foreground">
 			{m.pdf_comment_position({
-				page: String(page + 1),
-				x: String(Math.round(x)),
-				y: String(Math.round(y))
+				page: String(page),
+				x: String(Math.round(x * 100)),
+				y: String(Math.round(y * 100))
 			})}
 		</p>
 

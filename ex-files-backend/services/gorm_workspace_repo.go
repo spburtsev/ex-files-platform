@@ -22,31 +22,43 @@ func (r *GormWorkspaceRepository) FindByID(id uint) (*models.Workspace, error) {
 	return &ws, nil
 }
 
-func (r *GormWorkspaceRepository) FindByManager(managerID uint, limit, offset int) ([]models.Workspace, int64, error) {
+func (r *GormWorkspaceRepository) FindByManager(managerID uint, search string, status models.WorkspaceStatus, limit, offset int) ([]models.Workspace, int64, error) {
 	var workspaces []models.Workspace
 	var total int64
 
 	q := r.DB.Model(&models.Workspace{}).Where("manager_id = ?", managerID)
+	if search != "" {
+		q = q.Where("LOWER(name) LIKE LOWER(?)", "%"+search+"%")
+	}
+	if status != "" {
+		q = q.Where("status = ?", status)
+	}
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	if err := q.Order("created_at DESC").Limit(limit).Offset(offset).Find(&workspaces).Error; err != nil {
+	if err := q.Preload("Manager").Order("created_at DESC").Limit(limit).Offset(offset).Find(&workspaces).Error; err != nil {
 		return nil, 0, err
 	}
 	return workspaces, total, nil
 }
 
-func (r *GormWorkspaceRepository) FindByMember(userID uint, limit, offset int) ([]models.Workspace, int64, error) {
+func (r *GormWorkspaceRepository) FindByMember(userID uint, search string, status models.WorkspaceStatus, limit, offset int) ([]models.Workspace, int64, error) {
 	var workspaces []models.Workspace
 	var total int64
 
 	q := r.DB.Model(&models.Workspace{}).
 		Joins("JOIN workspace_members ON workspace_members.workspace_id = workspaces.id AND workspace_members.deleted_at IS NULL").
 		Where("workspace_members.user_id = ?", userID)
+	if search != "" {
+		q = q.Where("LOWER(workspaces.name) LIKE LOWER(?)", "%"+search+"%")
+	}
+	if status != "" {
+		q = q.Where("workspaces.status = ?", status)
+	}
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	if err := q.Order("workspaces.created_at DESC").Limit(limit).Offset(offset).Find(&workspaces).Error; err != nil {
+	if err := q.Preload("Manager").Order("workspaces.created_at DESC").Limit(limit).Offset(offset).Find(&workspaces).Error; err != nil {
 		return nil, 0, err
 	}
 	return workspaces, total, nil

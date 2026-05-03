@@ -18,6 +18,7 @@ type Issue struct {
 	Description   string     `gorm:"type:text"`
 	Deadline      *time.Time
 	Resolved      bool `gorm:"default:false"`
+	Archived      bool `gorm:"default:false"`
 	CommentsCount int  `gorm:"default:0"`
 	VersionsCount int  `gorm:"default:0"`
 }

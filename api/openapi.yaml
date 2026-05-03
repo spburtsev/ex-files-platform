@@ -142,6 +142,28 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  /auth/change-password:
+    post:
+      tags: [auth]
+      operationId: authChangePassword
+      summary: Change the current user's password (requires old password)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+      responses:
+        '200':
+          description: Password updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   /auth/me:
     get:
       tags: [auth]
@@ -180,6 +202,15 @@ paths:
       parameters:
         - $ref: '#/components/parameters/PageQuery'
         - $ref: '#/components/parameters/PerPageQuery'
+        - name: search
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [all, active, archived]
+            default: active
       responses:
         '200':
           description: Paginated workspaces.
@@ -271,6 +302,25 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  /workspaces/{id}/archive:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    put:
+      tags: [workspaces]
+      operationId: workspacesArchive
+      summary: Archive a workspace (owner only)
+      responses:
+        '200':
+          description: Workspace archived.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   /workspaces/{id}/assignable-members:
     parameters:
       - $ref: '#/components/parameters/IdPath'
@@ -344,6 +394,22 @@ paths:
       tags: [issues]
       operationId: issuesListByWorkspace
       summary: List issues in a workspace
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [all, open, resolved]
+            default: all
+        - name: archived
+          in: query
+          schema:
+            type: boolean
+            default: false
       responses:
         '200':
           description: Issues list.
@@ -418,6 +484,31 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/Unprocessable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /issues/{id}/archive:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    put:
+      tags: [issues]
+      operationId: issuesArchive
+      summary: Archive or unarchive an issue (manager only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ArchiveIssueRequest'
+      responses:
+        '200':
+          description: Issue updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetIssueResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
 
   /issues/{id}/documents:
@@ -765,6 +856,25 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  /documents/{id}/comments/{commentId}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+      - name: commentId
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      tags: [comments]
+      operationId: commentsDelete
+      summary: Delete a comment (author only)
+      responses:
+        '204':
+          description: Comment deleted.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   /audit:
     get:
       tags: [audit]
@@ -1012,13 +1122,24 @@ components:
         token:    { type: string }
         password: { type: string, minLength: 8 }
 
+    ChangePasswordRequest:
+      type: object
+      required: [oldPassword, newPassword]
+      properties:
+        oldPassword: { type: string, minLength: 1 }
+        newPassword: { type: string, minLength: 8 }
+
     Workspace:
       type: object
-      required: [id, name, managerId, createdAt, updatedAt]
+      required: [id, name, status, managerId, managerName, createdAt, updatedAt]
       properties:
         id:        { type: string }
         name:      { type: string }
-        managerId: { type: string }
+        status:
+          type: string
+          enum: [active, archived]
+        managerId:   { type: string }
+        managerName: { type: string }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
@@ -1120,6 +1241,7 @@ components:
         description:   { type: string }
         deadline:      { type: string, format: date-time, nullable: true }
         resolved:      { type: boolean }
+        archived:      { type: boolean }
         commentsCount: { type: integer, format: int32 }
         versionsCount: { type: integer, format: int32 }
 
@@ -1265,22 +1387,38 @@ components:
       properties:
         assigneeId: { type: string }
 
+    ArchiveIssueRequest:
+      type: object
+      required: [archived]
+      properties:
+        archived: { type: boolean }
+
+    CommentMetadata:
+      type: object
+      required: [page, x, y]
+      properties:
+        page: { type: integer, minimum: 1 }
+        x:    { type: number, format: double, minimum: 0, maximum: 1 }
+        y:    { type: number, format: double, minimum: 0, maximum: 1 }
+
     Comment:
       type: object
-      required: [id, documentId, authorId, authorName, body, createdAt]
+      required: [id, documentId, authorId, authorName, body, metadata, createdAt]
       properties:
         id:         { type: string }
         documentId: { type: string }
         authorId:   { type: string }
         authorName: { type: string }
         body:       { type: string }
+        metadata:   { $ref: '#/components/schemas/CommentMetadata' }
         createdAt:  { type: string, format: date-time }
 
     CreateCommentRequest:
       type: object
-      required: [body]
+      required: [body, metadata]
       properties:
-        body: { type: string, minLength: 1 }
+        body:     { type: string, minLength: 1 }
+        metadata: { $ref: '#/components/schemas/CommentMetadata' }
 
     CreateCommentResponse:
       type: object

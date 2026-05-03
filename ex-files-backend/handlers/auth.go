@@ -176,6 +176,35 @@ func (s *Server) AuthForgotPassword(ctx context.Context, req *oapi.ForgotPasswor
 	return &oapi.MessageResponse{Message: stockMessage}, nil
 }
 
+// AuthChangePassword implements POST /auth/change-password.
+func (s *Server) AuthChangePassword(ctx context.Context, req *oapi.ChangePasswordRequest) (oapi.AuthChangePasswordRes, error) {
+	uid, err := s.callerID(ctx)
+	if err != nil {
+		return &oapi.AuthChangePasswordUnauthorized{Error: "unauthorized"}, nil
+	}
+	user, err := s.UserRepo.FindByID(uid)
+	if err != nil {
+		return &oapi.AuthChangePasswordUnauthorized{Error: "unauthorized"}, nil
+	}
+	if err := s.Hasher.Compare(user.PasswordHash, req.OldPassword); err != nil {
+		return &oapi.AuthChangePasswordUnauthorized{Error: "current password is incorrect"}, nil
+	}
+	if req.OldPassword == req.NewPassword {
+		return &oapi.AuthChangePasswordBadRequest{Error: "new password must differ from current"}, nil
+	}
+	hash, err := s.Hasher.Hash(req.NewPassword)
+	if err != nil {
+		logErr("auth.change.hash", err)
+		return &oapi.AuthChangePasswordInternalServerError{Error: "internal error"}, nil
+	}
+	if err := s.UserRepo.UpdatePassword(uid, hash); err != nil {
+		logErr("auth.change.update", err)
+		return &oapi.AuthChangePasswordInternalServerError{Error: "internal error"}, nil
+	}
+	logAudit(s.Audit, models.AuditActionPasswordChanged, uid, uintPtr(uid), "user", nil)
+	return &oapi.MessageResponse{Message: "password updated"}, nil
+}
+
 // AuthResetPassword implements POST /auth/reset-password.
 func (s *Server) AuthResetPassword(ctx context.Context, req *oapi.ResetPasswordRequest) (oapi.AuthResetPasswordRes, error) {
 	uid, err := s.ResetTokens.GetResetTokenUserID(req.Token)

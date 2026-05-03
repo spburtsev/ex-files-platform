@@ -2,7 +2,7 @@
 	import type { PDFDocumentProxy } from 'pdfjs-dist';
 	import type { Attachment } from 'svelte/attachments';
 	import { getPdfjs } from '$lib/pdf/pdfjs';
-	import type { Comment } from '$lib/stores/workbench.svelte';
+	import type { Comment } from '$lib/api';
 
 	interface Props {
 		comments: Comment[];
@@ -55,7 +55,7 @@
 		};
 	});
 
-	const pageComments = $derived(comments.filter((c) => c.page === currentPage));
+	const pageComments = $derived(comments.filter((c) => c.metadata.page === currentPage+1));
 
 	function renderAttachment(doc: PDFDocumentProxy): Attachment<HTMLCanvasElement> {
 		return (canvas) => {
@@ -91,13 +91,13 @@
 	function handleCanvasClick(e: MouseEvent) {
 		if (!canvasRef) return;
 		const rect = canvasRef.getBoundingClientRect();
-		const x = ((e.clientX - rect.left) / rect.width) * 100;
-		const y = ((e.clientY - rect.top) / rect.height) * 100;
+		const x = (e.clientX - rect.left) / rect.width;
+		const y = (e.clientY - rect.top) / rect.height;
 		onpageclick(currentPage, x, y, e.clientX, e.clientY);
 	}
 
-	function formatTime(date: Date) {
-		return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+	function formatTime(iso: string) {
+		return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 	}
 
 	function avatarColor(name: string) {
@@ -133,7 +133,7 @@
 					{#each pageComments as comment, i (comment.id)}
 						<div
 							class="absolute"
-							style="left: {comment.x}%; top: {comment.y}%"
+							style="left: {comment.metadata.x * 100}%; top: {comment.metadata.y * 100}%"
 							onmouseenter={() => (hoveredCommentId = comment.id)}
 							onmouseleave={() => (hoveredCommentId = null)}
 						>
@@ -144,7 +144,7 @@
 							</div>
 
 							{#if hoveredCommentId === comment.id}
-								{@const showBelow = comment.y < 25}
+								{@const showBelow = comment.metadata.y < 0.25}
 								<div
 									class="absolute left-1/2 z-20 w-56 -translate-x-1/2 rounded-lg border bg-card p-3 shadow-xl {showBelow
 										? 'top-full mt-2'
@@ -153,17 +153,17 @@
 									<div class="flex items-center gap-2">
 										<div
 											class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white {avatarColor(
-												comment.author
+												comment.authorName
 											)}"
 										>
-											{comment.author.charAt(0).toUpperCase()}
+											{comment.authorName.charAt(0).toUpperCase()}
 										</div>
 										<div class="min-w-0">
-											<p class="truncate text-sm font-medium">{comment.author}</p>
+											<p class="truncate text-sm font-medium">{comment.authorName}</p>
 											<p class="text-xs text-muted-foreground">{formatTime(comment.createdAt)}</p>
 										</div>
 									</div>
-									<p class="mt-2 text-sm leading-snug text-muted-foreground">{comment.text}</p>
+									<p class="mt-2 text-sm leading-snug text-muted-foreground">{comment.body}</p>
 									<!-- caret -->
 									{#if showBelow}
 										<div

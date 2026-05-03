@@ -83,7 +83,7 @@ func TestCommentsCreate_HappyPath(t *testing.T) {
 	srv := newTestServer(t, commentsServer(tokens, repo))
 	defer srv.Close()
 
-	body := strings.NewReader(`{"body":"Nice work"}`)
+	body := strings.NewReader(`{"body":"Nice work","metadata":{"page":1,"x":0.5,"y":0.25}}`)
 	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodPost, srv.URL+"/documents/42/comments", body))
 	require.NoError(t, err)
 	defer res.Body.Close()
@@ -103,7 +103,7 @@ func TestCommentsCreate_EmptyBodyReturns400(t *testing.T) {
 	srv := newTestServer(t, commentsServer(tokens, &mockCommentRepo{}))
 	defer srv.Close()
 
-	body := strings.NewReader(`{"body":""}`)
+	body := strings.NewReader(`{"body":"","metadata":{"page":1,"x":0,"y":0}}`)
 	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodPost, srv.URL+"/documents/42/comments", body))
 	require.NoError(t, err)
 	defer res.Body.Close()

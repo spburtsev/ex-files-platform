@@ -50,13 +50,23 @@ export const getUsers = query(async () => {
 // Workspaces
 // ---------------------------------------------------------------------------
 
-export const getWorkspaces = query('unchecked', async (page: number = 1) => {
-	const r = await workspacesList({ ...apiOpts(), query: { page, perPage: 20 } });
-	return {
-		workspaces: r.data?.workspaces ?? [],
-		...paginationFromHeaders(r.response)
-	};
-});
+export const getWorkspaces = query(
+	'unchecked',
+	async ({
+		page = 1,
+		search = '',
+		status = 'active'
+	}: { page?: number; search?: string; status?: 'all' | 'active' | 'archived' } = {}) => {
+		const r = await workspacesList({
+			...apiOpts(),
+			query: { page, perPage: 20, search: search || undefined, status }
+		});
+		return {
+			workspaces: r.data?.workspaces ?? [],
+			...paginationFromHeaders(r.response)
+		};
+	}
+);
 
 export const getWorkspaceDetail = query('unchecked', async (id: string) => {
 	const r = await workspacesGet({ ...apiOpts(), path: { id } });
@@ -72,10 +82,27 @@ export const getAssignableMembers = query('unchecked', async (workspaceId: strin
 // Issues
 // ---------------------------------------------------------------------------
 
-export const getIssues = query('unchecked', async (workspaceId: string) => {
-	const r = await issuesListByWorkspace({ ...apiOpts(), path: { id: workspaceId } });
-	return r.data?.issues ?? [];
-});
+export const getIssues = query(
+	'unchecked',
+	async ({
+		workspaceId,
+		search = '',
+		status = 'all',
+		archived = false
+	}: {
+		workspaceId: string;
+		search?: string;
+		status?: 'all' | 'open' | 'resolved';
+		archived?: boolean;
+	}) => {
+		const r = await issuesListByWorkspace({
+			...apiOpts(),
+			path: { id: workspaceId },
+			query: { search: search || undefined, status, archived }
+		});
+		return r.data?.issues ?? [];
+	}
+);
 
 export const getIssue = query('unchecked', async (id: string) => {
 	const r = await issuesGet({ ...apiOpts(), path: { id } });

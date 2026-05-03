@@ -5,19 +5,17 @@
 	import { locales, localizeHref, getLocaleForUrl } from '$lib/paraglide/runtime';
 	import { Globe } from '@lucide/svelte';
 	import { Toaster } from 'svelte-sonner';
-	import { m } from '$lib/paraglide/messages';
+	import ErrorBoundary from '$lib/components/custom/ErrorBoundary.svelte';
 
 	let { children } = $props();
 
-	const currentLocale = $derived(
-		(() => {
-			try {
-				return getLocaleForUrl(page.url.href);
-			} catch {
-				return 'en';
-			}
-		})()
-	);
+	const currentLocale = $derived.by(() => {
+		try {
+			return getLocaleForUrl(page.url.href);
+		} catch {
+			return 'en';
+		}
+	});
 </script>
 
 <svelte:head><link rel="icon" href={favicon} /></svelte:head>
@@ -25,12 +23,7 @@
 <svelte:boundary>
 	{@render children()}
 	{#snippet failed(error)}
-		<div class="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
-			<p class="text-4xl font-bold text-muted-foreground">!</p>
-			<p class="text-sm text-destructive">
-				{(error as Error).message ?? m.error_action_failed()}
-			</p>
-		</div>
+        <ErrorBoundary {error} />
 	{/snippet}
 </svelte:boundary>
 

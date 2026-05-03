@@ -31,7 +31,7 @@ func TestIssuesListByWorkspace_HappyPath(t *testing.T) {
 	tokens := &mockTokens{}
 	stubTokenAccept(tokens, 1, models.RoleManager)
 	repo := &mockIssueRepo{}
-	repo.On("ListByWorkspace", uint(7)).Return([]models.Issue{
+	repo.On("ListByWorkspace", uint(7), "", (*bool)(nil), false).Return([]models.Issue{
 		{Model: gormModelID(1), WorkspaceID: 7, CreatorID: 1, AssigneeID: 2, Title: "A"},
 		{Model: gormModelID(2), WorkspaceID: 7, CreatorID: 1, AssigneeID: 3, Title: "B"},
 	}, nil)
@@ -159,6 +159,72 @@ func TestIssuesCreate_BadAssigneeReturns400(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, res.StatusCode)
 }
 
+func TestIssuesListByWorkspace_StatusOpen(t *testing.T) {
+	tokens := &mockTokens{}
+	stubTokenAccept(tokens, 1, models.RoleManager)
+	repo := &mockIssueRepo{}
+	f := false
+	repo.On("ListByWorkspace", uint(7), "", &f, false).Return([]models.Issue{
+		{Model: gormModelID(1), WorkspaceID: 7, Title: "Open issue"},
+	}, nil)
+
+	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}))
+	defer srv.Close()
+
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodGet, srv.URL+"/workspaces/7/issues?status=open", nil))
+	require.NoError(t, err)
+	defer res.Body.Close()
+
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	var got oapi.GetIssuesResponse
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&got))
+	assert.Len(t, got.Issues, 1)
+}
+
+func TestIssuesListByWorkspace_StatusResolved(t *testing.T) {
+	tokens := &mockTokens{}
+	stubTokenAccept(tokens, 1, models.RoleManager)
+	repo := &mockIssueRepo{}
+	tr := true
+	repo.On("ListByWorkspace", uint(7), "", &tr, false).Return([]models.Issue{
+		{Model: gormModelID(2), WorkspaceID: 7, Title: "Done", Resolved: true},
+	}, nil)
+
+	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}))
+	defer srv.Close()
+
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodGet, srv.URL+"/workspaces/7/issues?status=resolved", nil))
+	require.NoError(t, err)
+	defer res.Body.Close()
+
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	var got oapi.GetIssuesResponse
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&got))
+	assert.Len(t, got.Issues, 1)
+	assert.True(t, got.Issues[0].Resolved)
+}
+
+func TestIssuesListByWorkspace_SearchParam(t *testing.T) {
+	tokens := &mockTokens{}
+	stubTokenAccept(tokens, 1, models.RoleManager)
+	repo := &mockIssueRepo{}
+	repo.On("ListByWorkspace", uint(7), "foo", (*bool)(nil), false).Return([]models.Issue{
+		{Model: gormModelID(3), WorkspaceID: 7, Title: "foo bar"},
+	}, nil)
+
+	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}))
+	defer srv.Close()
+
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodGet, srv.URL+"/workspaces/7/issues?search=foo", nil))
+	require.NoError(t, err)
+	defer res.Body.Close()
+
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	var got oapi.GetIssuesResponse
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&got))
+	assert.Len(t, got.Issues, 1)
+}
+
 func TestIssuesUpdateAssignee_ManagerSucceeds(t *testing.T) {
 	tokens := &mockTokens{}
 	stubTokenAccept(tokens, 1, models.RoleManager)
@@ -280,4 +346,69 @@ func TestIssuesUpdateAssignee_UnknownAssignee400(t *testing.T) {
 	require.NoError(t, err)
 	defer res.Body.Close()
 	assert.Equal(t, http.StatusBadRequest, res.StatusCode)
+}
+
+func TestIssuesListByWorkspace_ArchivedParam(t *testing.T) {
+	tokens := &mockTokens{}
+	stubTokenAccept(tokens, 1, models.RoleManager)
+	repo := &mockIssueRepo{}
+	repo.On("ListByWorkspace", uint(7), "", (*bool)(nil), true).Return([]models.Issue{
+		{Model: gormModelID(5), WorkspaceID: 7, Title: "Archived issue", Archived: true},
+	}, nil)
+
+	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}))
+	defer srv.Close()
+
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodGet, srv.URL+"/workspaces/7/issues?archived=true", nil))
+	require.NoError(t, err)
+	defer res.Body.Close()
+
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	var got oapi.GetIssuesResponse
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&got))
+	assert.Len(t, got.Issues, 1)
+}
+
+func TestIssuesArchive_ManagerSucceeds(t *testing.T) {
+	tokens := &mockTokens{}
+	stubTokenAccept(tokens, 1, models.RoleManager)
+	repo := &mockIssueRepo{}
+	repo.On("FindByID", uint(42)).Return(&models.Issue{
+		Model: gormModelID(42), WorkspaceID: 7, Title: "Review",
+		Assignee: models.User{Model: gormModelID(2), Name: "A"},
+	}, nil).Once()
+	repo.On("Update", mock.MatchedBy(func(i *models.Issue) bool { return i.Archived })).Return(nil)
+	repo.On("FindByID", uint(42)).Return(&models.Issue{
+		Model: gormModelID(42), WorkspaceID: 7, Title: "Review", Archived: true,
+		Assignee: models.User{Model: gormModelID(2), Name: "A"},
+	}, nil).Once()
+
+	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}))
+	defer srv.Close()
+
+	body := strings.NewReader(`{"archived":true}`)
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodPut, srv.URL+"/issues/42/archive", body))
+	require.NoError(t, err)
+	defer res.Body.Close()
+
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	var got oapi.GetIssueResponse
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&got))
+	archived, ok := got.Issue.Archived.Get()
+	require.True(t, ok)
+	assert.True(t, archived)
+}
+
+func TestIssuesArchive_EmployeeForbidden(t *testing.T) {
+	tokens := &mockTokens{}
+	stubTokenAccept(tokens, 1, models.RoleEmployee)
+
+	srv := newTestServer(t, issuesServer(tokens, &mockIssueRepo{}, &mockUserRepo{}))
+	defer srv.Close()
+
+	body := strings.NewReader(`{"archived":true}`)
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodPut, srv.URL+"/issues/42/archive", body))
+	require.NoError(t, err)
+	defer res.Body.Close()
+	assert.Equal(t, http.StatusForbidden, res.StatusCode)
 }

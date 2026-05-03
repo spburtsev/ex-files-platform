@@ -25,7 +25,8 @@ const (
 	AuditActionDocumentReviewerAssigned AuditAction = "document.reviewer_assigned"
 	AuditActionVersionCreated           AuditAction = "document.version_created"
 	AuditActionCommentAdded             AuditAction = "document.comment_added"
-	AuditActionRoleChanged              AuditAction = "user.role_changed"
+	AuditActionCommentDeleted           AuditAction = "document.comment_deleted"
+	AuditActionPasswordChanged          AuditAction = "user.password_changed"
 )
 
 // AuditEntry is append-only. It has no UpdatedAt or DeletedAt fields.

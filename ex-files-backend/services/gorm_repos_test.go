@@ -107,10 +107,90 @@ func TestGormWorkspaceRepo_CRUD(t *testing.T) {
 	found2, _ := wsRepo.FindByID(ws.ID)
 	assert.Equal(t, "Updated WS", found2.Name)
 
-	workspaces, total, err := wsRepo.FindByManager(manager.ID, 10, 0)
+	workspaces, total, err := wsRepo.FindByManager(manager.ID, "", "", 10, 0)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), total)
 	assert.Len(t, workspaces, 1)
+}
+
+func TestGormWorkspaceRepo_SearchByName(t *testing.T) {
+	db := setupTestDB(t)
+	wsRepo := &GormWorkspaceRepository{DB: db}
+	userRepo := &GormUserRepository{DB: db}
+
+	manager := &models.User{Email: "mgr2@test.com", Name: "Mgr", PasswordHash: "h", Role: models.RoleManager}
+	require.NoError(t, userRepo.Create(manager))
+
+	for _, name := range []string{"Alpha Project", "Beta Plan", "Gamma Initiative"} {
+		require.NoError(t, wsRepo.Create(&models.Workspace{Name: name, ManagerID: manager.ID}))
+	}
+
+	got, total, err := wsRepo.FindByManager(manager.ID, "ALPHA", "", 10, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	require.Len(t, got, 1)
+	assert.Equal(t, "Alpha Project", got[0].Name)
+
+	_, total, err = wsRepo.FindByManager(manager.ID, "a P", "", 10, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), total) // "Alpha Project" + "Beta Plan"
+
+	_, total, err = wsRepo.FindByManager(manager.ID, "zzz", "", 10, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), total)
+
+	_, total, err = wsRepo.FindByManager(manager.ID, "", "", 10, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), total)
+}
+
+func TestGormWorkspaceRepo_FilterByStatus(t *testing.T) {
+	db := setupTestDB(t)
+	wsRepo := &GormWorkspaceRepository{DB: db}
+	userRepo := &GormUserRepository{DB: db}
+
+	manager := &models.User{Email: "mgr-status@t.com", Name: "Mgr", PasswordHash: "h", Role: models.RoleManager}
+	require.NoError(t, userRepo.Create(manager))
+
+	for _, name := range []string{"A1", "A2"} {
+		require.NoError(t, wsRepo.Create(&models.Workspace{Name: name, ManagerID: manager.ID, Status: models.WorkspaceStatusActive}))
+	}
+	require.NoError(t, wsRepo.Create(&models.Workspace{Name: "Z1", ManagerID: manager.ID, Status: models.WorkspaceStatusArchived}))
+
+	_, total, err := wsRepo.FindByManager(manager.ID, "", models.WorkspaceStatusActive, 10, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), total)
+
+	_, total, err = wsRepo.FindByManager(manager.ID, "", models.WorkspaceStatusArchived, 10, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+
+	_, total, err = wsRepo.FindByManager(manager.ID, "", "", 10, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), total)
+}
+
+func TestGormWorkspaceRepo_SearchByMember(t *testing.T) {
+	db := setupTestDB(t)
+	wsRepo := &GormWorkspaceRepository{DB: db}
+	userRepo := &GormUserRepository{DB: db}
+
+	manager := &models.User{Email: "mgr3@test.com", Name: "Mgr", PasswordHash: "h", Role: models.RoleManager}
+	require.NoError(t, userRepo.Create(manager))
+	member := &models.User{Email: "mem@test.com", Name: "Mem", PasswordHash: "h", Role: models.RoleEmployee}
+	require.NoError(t, userRepo.Create(member))
+
+	for _, name := range []string{"Alpha Project", "Beta Plan"} {
+		ws := &models.Workspace{Name: name, ManagerID: manager.ID}
+		require.NoError(t, wsRepo.Create(ws))
+		require.NoError(t, wsRepo.AddMember(&models.WorkspaceMember{WorkspaceID: ws.ID, UserID: member.ID}))
+	}
+
+	got, total, err := wsRepo.FindByMember(member.ID, "alpha", "", 10, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	require.Len(t, got, 1)
+	assert.Equal(t, "Alpha Project", got[0].Name)
 }
 
 func TestGormWorkspaceRepo_Members(t *testing.T) {
@@ -134,7 +214,7 @@ func TestGormWorkspaceRepo_Members(t *testing.T) {
 	assert.Len(t, members, 1)
 	assert.Equal(t, "Emp", members[0].Name)
 
-	workspaces, total, err := wsRepo.FindByMember(employee.ID, 10, 0)
+	workspaces, total, err := wsRepo.FindByMember(employee.ID, "", "", 10, 0)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), total)
 	assert.Len(t, workspaces, 1)
@@ -295,13 +375,73 @@ func TestGormIssueRepo_CRUD(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Test Issue", found.Title)
 
-	issues, err := issueRepo.ListByWorkspace(1)
+	issues, err := issueRepo.ListByWorkspace(1, "", nil, false)
 	require.NoError(t, err)
 	assert.Len(t, issues, 1)
 
 	allIssues, err := issueRepo.ListAll()
 	require.NoError(t, err)
 	assert.Len(t, allIssues, 1)
+}
+
+func TestGormIssueRepo_FilterByStatus(t *testing.T) {
+	db := setupTestDB(t)
+	issueRepo := &GormIssueRepository{DB: db}
+	userRepo := &GormUserRepository{DB: db}
+
+	user := &models.User{Email: "filter@t.com", Name: "F", PasswordHash: "h"}
+	userRepo.Create(user)
+
+	open1 := &models.Issue{Title: "Open One", CreatorID: user.ID, AssigneeID: user.ID, WorkspaceID: 9}
+	open2 := &models.Issue{Title: "Open Two", CreatorID: user.ID, AssigneeID: user.ID, WorkspaceID: 9}
+	res := &models.Issue{Title: "Resolved One", CreatorID: user.ID, AssigneeID: user.ID, WorkspaceID: 9, Resolved: true}
+	require.NoError(t, issueRepo.Create(open1))
+	require.NoError(t, issueRepo.Create(open2))
+	require.NoError(t, issueRepo.Create(res))
+
+	falseVal, trueVal := false, true
+
+	all, err := issueRepo.ListByWorkspace(9, "", nil, false)
+	require.NoError(t, err)
+	assert.Len(t, all, 3)
+
+	openIssues, err := issueRepo.ListByWorkspace(9, "", &falseVal, false)
+	require.NoError(t, err)
+	assert.Len(t, openIssues, 2)
+
+	resolvedIssues, err := issueRepo.ListByWorkspace(9, "", &trueVal, false)
+	require.NoError(t, err)
+	assert.Len(t, resolvedIssues, 1)
+
+	searched, err := issueRepo.ListByWorkspace(9, "two", nil, false)
+	require.NoError(t, err)
+	require.Len(t, searched, 1)
+	assert.Equal(t, "Open Two", searched[0].Title)
+}
+
+func TestGormIssueRepo_FilterByArchived(t *testing.T) {
+	db := setupTestDB(t)
+	issueRepo := &GormIssueRepository{DB: db}
+	userRepo := &GormUserRepository{DB: db}
+
+	user := &models.User{Email: "arch@t.com", Name: "A", PasswordHash: "h"}
+	userRepo.Create(user)
+
+	active1 := &models.Issue{Title: "Active One", CreatorID: user.ID, AssigneeID: user.ID, WorkspaceID: 10}
+	active2 := &models.Issue{Title: "Active Two", CreatorID: user.ID, AssigneeID: user.ID, WorkspaceID: 10}
+	archived := &models.Issue{Title: "Archived One", CreatorID: user.ID, AssigneeID: user.ID, WorkspaceID: 10, Archived: true}
+	require.NoError(t, issueRepo.Create(active1))
+	require.NoError(t, issueRepo.Create(active2))
+	require.NoError(t, issueRepo.Create(archived))
+
+	active, err := issueRepo.ListByWorkspace(10, "", nil, false)
+	require.NoError(t, err)
+	assert.Len(t, active, 2)
+
+	archivedList, err := issueRepo.ListByWorkspace(10, "", nil, true)
+	require.NoError(t, err)
+	assert.Len(t, archivedList, 1)
+	assert.Equal(t, "Archived One", archivedList[0].Title)
 }
 
 // --- Comment Repository ---

@@ -16,6 +16,7 @@ func issueToOAPI(i *models.Issue) oapi.Issue {
 		Title:         i.Title,
 		Description:   i.Description,
 		Resolved:      i.Resolved,
+		Archived:      oapi.NewOptBool(i.Archived),
 		CommentsCount: int32(i.CommentsCount),
 		VersionsCount: int32(i.VersionsCount),
 	}
@@ -53,7 +54,18 @@ func (s *Server) IssuesListByWorkspace(ctx context.Context, params oapi.IssuesLi
 	if !ok {
 		return &oapi.IssuesListByWorkspaceInternalServerError{Error: "invalid workspace id"}, nil
 	}
-	issues, err := s.IssueRepo.ListByWorkspace(wsID)
+	search := params.Search.Or("")
+	var resolved *bool
+	switch params.Status.Or(oapi.IssuesListByWorkspaceStatusAll) {
+	case oapi.IssuesListByWorkspaceStatusOpen:
+		f := false
+		resolved = &f
+	case oapi.IssuesListByWorkspaceStatusResolved:
+		t := true
+		resolved = &t
+	}
+	archived := params.Archived.Or(false)
+	issues, err := s.IssueRepo.ListByWorkspace(wsID, search, resolved, archived)
 	if err != nil {
 		logErr("issues.list", err)
 		return &oapi.IssuesListByWorkspaceInternalServerError{Error: "failed to list issues"}, nil
@@ -141,4 +153,37 @@ func (s *Server) IssuesCreate(ctx context.Context, req *oapi.CreateIssueRequest,
 		return &oapi.IssuesCreateInternalServerError{Error: "failed to create issue"}, nil
 	}
 	return &oapi.CreateIssueResponse{Issue: issueToOAPI(&issue)}, nil
+}
+
+// IssuesArchive implements PUT /issues/{id}/archive.
+func (s *Server) IssuesArchive(ctx context.Context, req *oapi.ArchiveIssueRequest, params oapi.IssuesArchiveParams) (oapi.IssuesArchiveRes, error) {
+	_, role, err := s.callerIDAndRole(ctx)
+	if err != nil {
+		return &oapi.IssuesArchiveUnauthorized{Error: "unauthorized"}, nil
+	}
+	if !role.CanManageWorkspaces() {
+		return &oapi.IssuesArchiveForbidden{Error: "only managers may archive issues"}, nil
+	}
+	id, ok := parseUintID(params.ID)
+	if !ok {
+		return &oapi.IssuesArchiveNotFound{Error: "issue not found"}, nil
+	}
+	issue, err := s.IssueRepo.FindByID(id)
+	if err != nil {
+		return &oapi.IssuesArchiveNotFound{Error: "issue not found"}, nil
+	}
+	issue.Archived = req.Archived
+	if err := s.IssueRepo.Update(issue); err != nil {
+		logErr("issues.archive", err)
+		return &oapi.IssuesArchiveInternalServerError{Error: "failed to archive issue"}, nil
+	}
+	refreshed, err := s.IssueRepo.FindByID(id)
+	if err != nil {
+		logErr("issues.archive.refetch", err)
+		return &oapi.IssuesArchiveInternalServerError{Error: "failed to load updated issue"}, nil
+	}
+	return &oapi.GetIssueResponse{
+		Issue: issueToOAPI(refreshed),
+		User:  userToOAPI(&refreshed.Assignee),
+	}, nil
 }

@@ -12,7 +12,7 @@ import { paraglideMiddleware } from '$lib/paraglide/server';
 
 const BACKEND = env.BACKEND_URL ?? 'http://localhost:8080';
 
-const PUBLIC_PATHS = ['/login', '/signup'];
+const PUBLIC_PATHS = ['/login', '/signup', '/forgot-password', '/reset-password'];
 
 const handleAuth: Handle = ({ event, resolve }) => {
 	const pathname = deLocalizeUrl(event.url).pathname;

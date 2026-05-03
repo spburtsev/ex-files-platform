@@ -1,8 +1,7 @@
 <script lang="ts">
-	import type { Comment } from '$lib/stores/workbench.svelte';
-	import { Button } from '$lib/components/ui/button/index.js';
-	import { X } from '@lucide/svelte';
+	import type { Comment } from '$lib/api';
 	import { m } from '$lib/paraglide/messages.js';
+	import CommentItem from './CommentItem.svelte';
 
 	interface Props {
 		comments: Comment[];
@@ -16,21 +15,25 @@
 	let filter = $state<'page' | 'all'>('page');
 
 	const visibleComments = $derived(
-		filter === 'page' ? comments.filter((c) => c.page === currentPage) : [...comments]
+		filter === 'page' ? comments.filter((c) => c.metadata.page === currentPage + 1) : [...comments]
 	);
 
 	function commentNumber(comment: Comment): number {
-		const pageComments = comments.filter((c) => c.page === comment.page);
+		const pageComments = comments.filter((c) => c.metadata.page === comment.metadata.page);
 		return pageComments.indexOf(comment) + 1;
-	}
-
-	function formatTime(date: Date) {
-		return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 	}
 </script>
 
 <div class="flex h-full flex-col">
-	<div class="flex items-center justify-end border-b px-3 py-2">
+	<div class="flex items-center justify-between border-b px-3 py-2">
+		<div class="flex shrink-0 items-center gap-1.5 px-1 text-xs font-medium text-muted-foreground">
+			{m.workbench_comments()}
+			{#if comments.length > 0}
+				<span class="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold">
+					{comments.length}
+				</span>
+			{/if}
+		</div>
 		<div class="flex gap-1 rounded-md bg-muted p-0.5 text-xs">
 			<button
 				class="rounded px-2 py-1 {filter === 'page'
@@ -60,38 +63,7 @@
 		{:else}
 			<div class="divide-y">
 				{#each visibleComments as comment (comment.id)}
-					<div class="group px-4 py-3">
-						<div class="flex items-start justify-between">
-							<div class="flex items-center gap-2">
-								<span
-									class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-400 text-[10px] font-bold text-white"
-								>
-									{commentNumber(comment)}
-								</span>
-								<span class="text-sm font-medium">{comment.author}</span>
-							</div>
-							<Button
-								variant="ghost"
-								size="icon"
-								class="size-6 opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive"
-								onclick={() => ondelete(comment.id)}
-							>
-								<X class="size-3" />
-							</Button>
-						</div>
-						<p class="mt-1 text-sm text-muted-foreground">{comment.text}</p>
-						<div class="mt-1.5 flex items-center gap-2 text-xs text-muted-foreground">
-							<span>{formatTime(comment.createdAt)}</span>
-							{#if filter === 'all'}
-								<button
-									class="text-primary hover:underline"
-									onclick={() => ongotopage(comment.page)}
-								>
-									{m.pdf_page_label({ page: String(comment.page + 1) })}
-								</button>
-							{/if}
-						</div>
-					</div>
+					<CommentItem {comment} commentNumber={commentNumber(comment)} {ondelete} {ongotopage} />
 				{/each}
 			</div>
 		{/if}
