@@ -375,13 +375,73 @@ func TestGormIssueRepo_CRUD(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Test Issue", found.Title)
 
-	issues, err := issueRepo.ListByWorkspace(1)
+	issues, err := issueRepo.ListByWorkspace(1, "", nil, false)
 	require.NoError(t, err)
 	assert.Len(t, issues, 1)
 
 	allIssues, err := issueRepo.ListAll()
 	require.NoError(t, err)
 	assert.Len(t, allIssues, 1)
+}
+
+func TestGormIssueRepo_FilterByStatus(t *testing.T) {
+	db := setupTestDB(t)
+	issueRepo := &GormIssueRepository{DB: db}
+	userRepo := &GormUserRepository{DB: db}
+
+	user := &models.User{Email: "filter@t.com", Name: "F", PasswordHash: "h"}
+	userRepo.Create(user)
+
+	open1 := &models.Issue{Title: "Open One", CreatorID: user.ID, AssigneeID: user.ID, WorkspaceID: 9}
+	open2 := &models.Issue{Title: "Open Two", CreatorID: user.ID, AssigneeID: user.ID, WorkspaceID: 9}
+	res := &models.Issue{Title: "Resolved One", CreatorID: user.ID, AssigneeID: user.ID, WorkspaceID: 9, Resolved: true}
+	require.NoError(t, issueRepo.Create(open1))
+	require.NoError(t, issueRepo.Create(open2))
+	require.NoError(t, issueRepo.Create(res))
+
+	falseVal, trueVal := false, true
+
+	all, err := issueRepo.ListByWorkspace(9, "", nil, false)
+	require.NoError(t, err)
+	assert.Len(t, all, 3)
+
+	openIssues, err := issueRepo.ListByWorkspace(9, "", &falseVal, false)
+	require.NoError(t, err)
+	assert.Len(t, openIssues, 2)
+
+	resolvedIssues, err := issueRepo.ListByWorkspace(9, "", &trueVal, false)
+	require.NoError(t, err)
+	assert.Len(t, resolvedIssues, 1)
+
+	searched, err := issueRepo.ListByWorkspace(9, "two", nil, false)
+	require.NoError(t, err)
+	require.Len(t, searched, 1)
+	assert.Equal(t, "Open Two", searched[0].Title)
+}
+
+func TestGormIssueRepo_FilterByArchived(t *testing.T) {
+	db := setupTestDB(t)
+	issueRepo := &GormIssueRepository{DB: db}
+	userRepo := &GormUserRepository{DB: db}
+
+	user := &models.User{Email: "arch@t.com", Name: "A", PasswordHash: "h"}
+	userRepo.Create(user)
+
+	active1 := &models.Issue{Title: "Active One", CreatorID: user.ID, AssigneeID: user.ID, WorkspaceID: 10}
+	active2 := &models.Issue{Title: "Active Two", CreatorID: user.ID, AssigneeID: user.ID, WorkspaceID: 10}
+	archived := &models.Issue{Title: "Archived One", CreatorID: user.ID, AssigneeID: user.ID, WorkspaceID: 10, Archived: true}
+	require.NoError(t, issueRepo.Create(active1))
+	require.NoError(t, issueRepo.Create(active2))
+	require.NoError(t, issueRepo.Create(archived))
+
+	active, err := issueRepo.ListByWorkspace(10, "", nil, false)
+	require.NoError(t, err)
+	assert.Len(t, active, 2)
+
+	archivedList, err := issueRepo.ListByWorkspace(10, "", nil, true)
+	require.NoError(t, err)
+	assert.Len(t, archivedList, 1)
+	assert.Equal(t, "Archived One", archivedList[0].Title)
 }
 
 // --- Comment Repository ---

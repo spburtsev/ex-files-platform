@@ -183,9 +183,12 @@ func (s *Server) WorkspacesUpdate(ctx context.Context, req *oapi.UpdateWorkspace
 
 // WorkspacesDelete implements DELETE /workspaces/{id}.
 func (s *Server) WorkspacesDelete(ctx context.Context, params oapi.WorkspacesDeleteParams) (oapi.WorkspacesDeleteRes, error) {
-	uid, err := s.callerID(ctx)
+	uid, role, err := s.callerIDAndRole(ctx)
 	if err != nil {
 		return &oapi.WorkspacesDeleteUnauthorized{Error: "unauthorized"}, nil
+	}
+	if role != models.RoleRoot {
+		return &oapi.WorkspacesDeleteForbidden{Error: "only root may delete workspaces"}, nil
 	}
 	id, ok := parseUintID(params.ID)
 	if !ok {
@@ -195,9 +198,6 @@ func (s *Server) WorkspacesDelete(ctx context.Context, params oapi.WorkspacesDel
 	if err != nil {
 		return &oapi.WorkspacesDeleteNotFound{Error: "workspace not found"}, nil
 	}
-	if !ws.IsOwnedBy(uid) {
-		return &oapi.WorkspacesDeleteForbidden{Error: "only the workspace manager can delete it"}, nil
-	}
 	if err := s.WorkspaceRepo.Delete(id); err != nil {
 		logErr("workspaces.delete", err)
 		return &oapi.WorkspacesDeleteInternalServerError{Error: "failed to delete workspace"}, nil
@@ -206,6 +206,34 @@ func (s *Server) WorkspacesDelete(ctx context.Context, params oapi.WorkspacesDel
 		"name": ws.Name,
 	})
 	return &oapi.MessageResponse{Message: "workspace deleted"}, nil
+}
+
+// WorkspacesArchive implements PUT /workspaces/{id}/archive.
+func (s *Server) WorkspacesArchive(ctx context.Context, params oapi.WorkspacesArchiveParams) (oapi.WorkspacesArchiveRes, error) {
+	uid, err := s.callerID(ctx)
+	if err != nil {
+		return &oapi.WorkspacesArchiveUnauthorized{Error: "unauthorized"}, nil
+	}
+	id, ok := parseUintID(params.ID)
+	if !ok {
+		return &oapi.WorkspacesArchiveNotFound{Error: "workspace not found"}, nil
+	}
+	ws, err := s.WorkspaceRepo.FindByID(id)
+	if err != nil {
+		return &oapi.WorkspacesArchiveNotFound{Error: "workspace not found"}, nil
+	}
+	if !ws.IsOwnedBy(uid) {
+		return &oapi.WorkspacesArchiveForbidden{Error: "only the workspace manager can archive it"}, nil
+	}
+	ws.Status = models.WorkspaceStatusArchived
+	if err := s.WorkspaceRepo.Update(ws); err != nil {
+		logErr("workspaces.archive", err)
+		return &oapi.WorkspacesArchiveInternalServerError{Error: "failed to archive workspace"}, nil
+	}
+	logAudit(s.Audit, models.AuditActionWorkspaceUpdated, uid, uintPtr(id), "workspace", map[string]any{
+		"name": ws.Name, "status": "archived",
+	})
+	return &oapi.MessageResponse{Message: "workspace archived"}, nil
 }
 
 // WorkspacesAddMember implements POST /workspaces/{id}/members.

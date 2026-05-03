@@ -75,7 +75,7 @@ type DocumentRepository interface {
 
 type IssueRepository interface {
 	ListAll() ([]models.Issue, error)
-	ListByWorkspace(workspaceID uint) ([]models.Issue, error)
+	ListByWorkspace(workspaceID uint, search string, resolved *bool, archived bool) ([]models.Issue, error)
 	FindByID(id uint) (*models.Issue, error)
 	Create(issue *models.Issue) error
 	Update(issue *models.Issue) error

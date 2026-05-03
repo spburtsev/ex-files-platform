@@ -208,8 +208,8 @@ func (m *mockIssueRepo) ListAll() ([]models.Issue, error) {
 	a := m.Called()
 	return a.Get(0).([]models.Issue), a.Error(1)
 }
-func (m *mockIssueRepo) ListByWorkspace(workspaceID uint) ([]models.Issue, error) {
-	a := m.Called(workspaceID)
+func (m *mockIssueRepo) ListByWorkspace(workspaceID uint, search string, resolved *bool, archived bool) ([]models.Issue, error) {
+	a := m.Called(workspaceID, search, resolved, archived)
 	return a.Get(0).([]models.Issue), a.Error(1)
 }
 func (m *mockIssueRepo) FindByID(id uint) (*models.Issue, error) {

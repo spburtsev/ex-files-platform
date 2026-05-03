@@ -280,6 +280,25 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  /workspaces/{id}/archive:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    put:
+      tags: [workspaces]
+      operationId: workspacesArchive
+      summary: Archive a workspace (owner only)
+      responses:
+        '200':
+          description: Workspace archived.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   /workspaces/{id}/assignable-members:
     parameters:
       - $ref: '#/components/parameters/IdPath'
@@ -353,6 +372,22 @@ paths:
       tags: [issues]
       operationId: issuesListByWorkspace
       summary: List issues in a workspace
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [all, open, resolved]
+            default: all
+        - name: archived
+          in: query
+          schema:
+            type: boolean
+            default: false
       responses:
         '200':
           description: Issues list.
@@ -427,6 +462,31 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/Unprocessable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /issues/{id}/archive:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    put:
+      tags: [issues]
+      operationId: issuesArchive
+      summary: Archive or unarchive an issue (manager only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ArchiveIssueRequest'
+      responses:
+        '200':
+          description: Issue updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetIssueResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
 
   /issues/{id}/documents:
@@ -1133,6 +1193,7 @@ components:
         description:   { type: string }
         deadline:      { type: string, format: date-time, nullable: true }
         resolved:      { type: boolean }
+        archived:      { type: boolean }
         commentsCount: { type: integer, format: int32 }
         versionsCount: { type: integer, format: int32 }
 
@@ -1277,6 +1338,12 @@ components:
       required: [assigneeId]
       properties:
         assigneeId: { type: string }
+
+    ArchiveIssueRequest:
+      type: object
+      required: [archived]
+      properties:
+        archived: { type: boolean }
 
     Comment:
       type: object

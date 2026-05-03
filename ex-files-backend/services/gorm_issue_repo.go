@@ -19,13 +19,18 @@ func (r *GormIssueRepository) ListAll() ([]models.Issue, error) {
 	return issues, nil
 }
 
-func (r *GormIssueRepository) ListByWorkspace(workspaceID uint) ([]models.Issue, error) {
+func (r *GormIssueRepository) ListByWorkspace(workspaceID uint, search string, resolved *bool, archived bool) ([]models.Issue, error) {
 	var issues []models.Issue
-	err := r.DB.Preload("Creator").Preload("Assignee").
+	q := r.DB.Preload("Creator").Preload("Assignee").
 		Where("workspace_id = ?", workspaceID).
-		Order("created_at DESC").
-		Find(&issues).Error
-	if err != nil {
+		Where("archived = ?", archived)
+	if search != "" {
+		q = q.Where("LOWER(title) LIKE LOWER(?)", "%"+search+"%")
+	}
+	if resolved != nil {
+		q = q.Where("resolved = ?", *resolved)
+	}
+	if err := q.Order("created_at DESC").Find(&issues).Error; err != nil {
 		return nil, err
 	}
 	return issues, nil

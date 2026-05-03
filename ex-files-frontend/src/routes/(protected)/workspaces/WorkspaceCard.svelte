@@ -36,7 +36,7 @@
 		</p>
 	</Card.Content>
 	<Card.Footer class="mt-auto border-t pt-3">
-		<Button size="sm" class="w-full gap-1.5" href={localizeHref(`/workspaces/${ws.id}`)}>
+		<Button class="w-full gap-1.5" href={localizeHref(`/workspaces/${ws.id}`)}>
 			{m.common_open()}
 			<ArrowRight class="size-3.5" />
 		</Button>

@@ -256,9 +256,9 @@ func TestWorkspacesUpdate_OwnerOnly(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, res.StatusCode)
 }
 
-func TestWorkspacesDelete_OwnerSucceeds(t *testing.T) {
+func TestWorkspacesDelete_RootSucceeds(t *testing.T) {
 	tokens := &mockTokens{}
-	stubTokenAccept(tokens, 1, models.RoleManager)
+	stubTokenAccept(tokens, 1, models.RoleRoot)
 	repo := &mockWorkspaceRepo{}
 	repo.On("FindByID", uint(7)).Return(&models.Workspace{Model: gormModelID(7), Name: "X", ManagerID: 1}, nil)
 	repo.On("Delete", uint(7)).Return(nil)
@@ -274,6 +274,56 @@ func TestWorkspacesDelete_OwnerSucceeds(t *testing.T) {
 	var msg oapi.MessageResponse
 	require.NoError(t, json.NewDecoder(res.Body).Decode(&msg))
 	assert.Equal(t, "workspace deleted", msg.Message)
+}
+
+func TestWorkspacesDelete_ManagerForbidden(t *testing.T) {
+	tokens := &mockTokens{}
+	stubTokenAccept(tokens, 1, models.RoleManager)
+
+	srv := newTestServer(t, wsServer(tokens, &mockWorkspaceRepo{}, &mockUserRepo{}))
+	defer srv.Close()
+
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodDelete, srv.URL+"/workspaces/7", nil))
+	require.NoError(t, err)
+	defer res.Body.Close()
+	assert.Equal(t, http.StatusForbidden, res.StatusCode)
+}
+
+func TestWorkspacesArchive_OwnerSucceeds(t *testing.T) {
+	tokens := &mockTokens{}
+	stubTokenAccept(tokens, 1, models.RoleManager)
+	repo := &mockWorkspaceRepo{}
+	repo.On("FindByID", uint(7)).Return(&models.Workspace{Model: gormModelID(7), Name: "X", ManagerID: 1}, nil)
+	repo.On("Update", mock.MatchedBy(func(ws *models.Workspace) bool {
+		return ws.Status == models.WorkspaceStatusArchived
+	})).Return(nil)
+
+	srv := newTestServer(t, wsServer(tokens, repo, &mockUserRepo{}))
+	defer srv.Close()
+
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodPut, srv.URL+"/workspaces/7/archive", nil))
+	require.NoError(t, err)
+	defer res.Body.Close()
+
+	assert.Equal(t, http.StatusOK, res.StatusCode)
+	var msg oapi.MessageResponse
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&msg))
+	assert.Equal(t, "workspace archived", msg.Message)
+}
+
+func TestWorkspacesArchive_NonOwnerForbidden(t *testing.T) {
+	tokens := &mockTokens{}
+	stubTokenAccept(tokens, 99, models.RoleManager)
+	repo := &mockWorkspaceRepo{}
+	repo.On("FindByID", uint(7)).Return(&models.Workspace{Model: gormModelID(7), ManagerID: 1}, nil)
+
+	srv := newTestServer(t, wsServer(tokens, repo, &mockUserRepo{}))
+	defer srv.Close()
+
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodPut, srv.URL+"/workspaces/7/archive", nil))
+	require.NoError(t, err)
+	defer res.Body.Close()
+	assert.Equal(t, http.StatusForbidden, res.StatusCode)
 }
 
 func TestWorkspacesAddMember_OwnerSucceeds(t *testing.T) {

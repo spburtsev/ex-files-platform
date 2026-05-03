@@ -43,7 +43,7 @@
 <Dialog.Root bind:open>
 	<Dialog.Trigger>
 		{#snippet child({ props })}
-			<Button size="sm" class="gap-1.5" {...props}>
+			<Button class="gap-1.5" {...props}>
 				<Plus class="size-4" />
 				{m.ws_new()}
 			</Button>

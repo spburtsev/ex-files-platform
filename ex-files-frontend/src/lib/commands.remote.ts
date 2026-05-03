@@ -1,4 +1,4 @@
-import { command, getRequestEvent } from '$app/server';
+import { command, getRequestEvent, requested } from '$app/server';
 
 import { apiOpts } from '$lib/api-client';
 import {
@@ -18,14 +18,17 @@ import {
 	documentsSubmit,
 	documentsUpload,
 	documentsUploadVersion,
+	issuesArchive,
 	issuesCreate,
 	issuesUpdateAssignee,
 	workspacesAddMember,
+	workspacesArchive,
 	workspacesCreate,
 	workspacesDelete,
 	workspacesRemoveMember,
 	workspacesUpdate
 } from '$lib/api';
+import { getIssues } from './queries.remote';
 
 const NETWORK_ERROR = 'Unable to reach the server. Please try again later.';
 
@@ -157,6 +160,23 @@ export const deleteWorkspace = command('unchecked', async (id: string) => {
 	const r = await workspacesDelete({ ...apiOpts(), path: { id } });
 	return { ok: !r.error };
 });
+
+export const archiveWorkspace = command('unchecked', async (id: string) => {
+	const r = await workspacesArchive({ ...apiOpts(), path: { id } });
+	return { ok: !r.error };
+});
+
+export const archiveIssue = command(
+	'unchecked',
+	async ({ issueId, archived }: { issueId: string; archived: boolean }) => {
+		const r = await issuesArchive({ ...apiOpts(), path: { id: issueId }, body: { archived } });
+
+        for (const { query } of requested(getIssues, 2)) {
+			void query.refresh();
+		}
+        return { ok: !r.error };
+	}
+);
 
 export const addWorkspaceMember = command(
 	'unchecked',

@@ -1,15 +1,13 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { goto, invalidateAll } from '$app/navigation';
-	import {
-		getWorkspaceDetail,
-		getAssignableMembers,
-		getIssues
-	} from '$lib/queries.remote';
+	import { getWorkspaceDetail, getAssignableMembers, getIssues } from '$lib/queries.remote';
 	import { formatTimestamp, roleName, isManager, initials } from '$lib/utils';
 	import {
 		updateWorkspace,
 		deleteWorkspace,
+		archiveWorkspace,
+		archiveIssue,
 		addWorkspaceMember,
 		removeWorkspaceMember,
 		createIssue
@@ -17,6 +15,7 @@
 	import { toast } from 'svelte-sonner';
 	import { m } from '$lib/paraglide/messages.js';
 	import { localizeHref } from '$lib/paraglide/runtime';
+	import * as AlertDialog from '$lib/components/ui/alert-dialog/index.js';
 	import * as Card from '$lib/components/ui/card/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import * as Avatar from '$lib/components/ui/avatar/index.js';
@@ -30,14 +29,17 @@
 	import {
 		Pencil,
 		Trash2,
+		Archive,
 		UserPlus,
 		UserMinus,
 		Calendar,
 		Crown,
 		FileText,
 		ArrowRight,
-		Plus
+		Plus,
+		Search
 	} from '@lucide/svelte';
+	import * as Select from '$lib/components/ui/select/index.js';
 	import { extraBreadcrumbs } from '$lib/stores/breadcrumbs.svelte';
 	import { onDestroy } from 'svelte';
 
@@ -52,7 +54,7 @@
 	});
 	onDestroy(() => extraBreadcrumbs.set([]));
 
-    const { data } = $props();
+	const { data } = $props();
 	const me = $derived(data.user);
 
 	const detailQuery = getWorkspaceDetail(wsId);
@@ -61,9 +63,64 @@
 	const manager = $derived(detail?.manager);
 	const members = $derived(detail?.members ?? []);
 
-	// Issues
-	const issuesQuery = getIssues(wsId);
+	// Issues filter
+	let issueSearch = $state('');
+	let committedIssueSearch = $state('');
+	type IssueStatusFilter = 'all' | 'open' | 'resolved';
+	let issueStatusFilter = $state<IssueStatusFilter>('all');
+
+	$effect(() => {
+		const value = issueSearch;
+		const t = setTimeout(() => {
+			committedIssueSearch = value;
+		}, 200);
+		return () => clearTimeout(t);
+	});
+
+	const issuesQuery = $derived(
+		getIssues({
+			workspaceId: wsId,
+			search: committedIssueSearch,
+			status: issueStatusFilter
+		})
+	);
 	const issuesList = $derived(issuesQuery.current ?? []);
+
+	const displayedIssueFilter = $derived.by(() => {
+		if (issueStatusFilter === 'open') return m.issues_status_open();
+		if (issueStatusFilter === 'resolved') return m.issues_status_resolved();
+		return m.issues_status_all();
+	});
+
+	// Archive tab filter
+	let archiveSearch = $state('');
+	let committedArchiveSearch = $state('');
+	type ArchiveStatusFilter = 'all' | 'open' | 'resolved';
+	let archiveStatusFilter = $state<ArchiveStatusFilter>('all');
+
+	$effect(() => {
+		const value = archiveSearch;
+		const t = setTimeout(() => {
+			committedArchiveSearch = value;
+		}, 200);
+		return () => clearTimeout(t);
+	});
+
+	const archivedIssuesQuery = $derived(
+		getIssues({
+			workspaceId: wsId,
+			search: committedArchiveSearch,
+			status: archiveStatusFilter,
+			archived: true
+		})
+	);
+	const archivedIssuesList = $derived(archivedIssuesQuery.current ?? []);
+
+	const displayedArchiveFilter = $derived.by(() => {
+		if (archiveStatusFilter === 'open') return m.issues_status_open();
+		if (archiveStatusFilter === 'resolved') return m.issues_status_resolved();
+		return m.issues_status_all();
+	});
 
 	// Users assignable as members (employees not already in workspace)
 	const assignableQuery = getAssignableMembers(wsId);
@@ -81,6 +138,35 @@
 	let deleteOpen = $state(false);
 	let deleting = $state(false);
 
+	// Archive workspace dialog
+	let archiveOpen = $state(false);
+	let archiving = $state(false);
+
+	// Archive/unarchive issue confirmation
+	let pendingIssueArchive = $state<{ id: string; archived: boolean } | null>(null);
+	let issueArchiveConfirmOpen = $state(false);
+
+	function promptArchiveIssue(id: string, archived: boolean) {
+		pendingIssueArchive = { id, archived };
+		issueArchiveConfirmOpen = true;
+	}
+
+	async function confirmArchiveIssue() {
+		if (!pendingIssueArchive) return;
+		const { id, archived } = pendingIssueArchive;
+		const r = await archiveIssue({ issueId: id, archived }).updates(
+			archivedIssuesQuery,
+			issuesQuery
+		);
+		if (!r.ok) {
+			toast.error(m.error_archive_issue());
+		} else {
+			toast.success(archived ? m.issue_archived() : m.issue_unarchived());
+		}
+		issueArchiveConfirmOpen = false;
+		pendingIssueArchive = null;
+	}
+
 	// New issue dialog
 	let newIssueOpen = $state(false);
 	let newIssueTitle = $state('');
@@ -89,6 +175,12 @@
 	let newIssueDeadline = $state('');
 	let creatingIssue = $state(false);
 	let newIssueError = $state('');
+
+	const displayedNewIssueAssignee = $derived.by(() => {
+		if (!newIssueAssignee) return m.ws_issue_assignee_select();
+		const found = members.find((u) => String(u.id) === newIssueAssignee);
+		return found?.name ?? m.ws_issue_assignee_select();
+	});
 
 	// Add member dialog
 	let addOpen = $state(false);
@@ -144,6 +236,23 @@
 		} finally {
 			deleting = false;
 			deleteOpen = false;
+		}
+	}
+
+	async function handleArchive() {
+		archiving = true;
+		try {
+			const result = await archiveWorkspace(wsId);
+			if (!result.ok) {
+				toast.error(m.error_archive_workspace());
+				return;
+			}
+			goto(localizeHref('/workspaces'));
+		} catch {
+			toast.error(m.error_archive_workspace());
+		} finally {
+			archiving = false;
+			archiveOpen = false;
 		}
 	}
 
@@ -252,15 +361,27 @@
 								<Pencil class="size-3.5" />
 								{m.common_edit()}
 							</Button>
-							<Button
-								variant="outline"
-								size="sm"
-								class="gap-1.5 text-destructive hover:text-destructive"
-								onclick={() => (deleteOpen = true)}
-							>
-								<Trash2 class="size-3.5" />
-								{m.common_delete()}
-							</Button>
+							{#if me?.role === 'root'}
+								<Button
+									variant="outline"
+									size="sm"
+									class="gap-1.5 text-destructive hover:text-destructive"
+									onclick={() => (deleteOpen = true)}
+								>
+									<Trash2 class="size-3.5" />
+									{m.common_delete()}
+								</Button>
+							{:else}
+								<Button
+									variant="outline"
+									size="sm"
+									class="gap-1.5"
+									onclick={() => (archiveOpen = true)}
+								>
+									<Archive class="size-3.5" />
+									{m.ws_archive()}
+								</Button>
+							{/if}
 						</div>
 					{/if}
 				</div>
@@ -269,43 +390,70 @@
 
 		<!-- Tabbed content: Issues / Members -->
 		<Tabs.Root value="issues">
-			<div class="flex items-center justify-between">
-				<Tabs.List>
-					<Tabs.Trigger value="issues">
-						<FileText class="mr-1.5 size-3.5" />
-						{m.ws_issues_tab()}
-						{#if issuesList.length > 0}
-							<span class="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold">
-								{issuesList.length}
-							</span>
-						{/if}
-					</Tabs.Trigger>
-					<Tabs.Trigger value="members">
-						<UserPlus class="mr-1.5 size-3.5" />
-						{m.ws_members_tab()}
-						{#if members.length > 0}
-							<span class="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold">
-								{members.length}
-							</span>
-						{/if}
-					</Tabs.Trigger>
-				</Tabs.List>
-				{#if isManager(me?.role)}
-					<Button size="sm" class="gap-1.5" onclick={() => (newIssueOpen = true)}>
-						<Plus class="size-4" />
-						{m.ws_new_issue()}
-					</Button>
-				{/if}
-			</div>
+			<Tabs.List>
+				<Tabs.Trigger value="issues">
+					<FileText class="mr-1.5 size-3.5" />
+					{m.ws_issues_tab()}
+					{#if issuesList.length > 0}
+						<span class="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold">
+							{issuesList.length}
+						</span>
+					{/if}
+				</Tabs.Trigger>
+				<Tabs.Trigger value="members">
+					<UserPlus class="mr-1.5 size-3.5" />
+					{m.ws_members_tab()}
+					{#if members.length > 0}
+						<span class="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold">
+							{members.length}
+						</span>
+					{/if}
+				</Tabs.Trigger>
+				<Tabs.Trigger value="archive">
+					<Archive class="mr-1.5 size-3.5" />
+					{m.ws_tab_archive()}
+				</Tabs.Trigger>
+			</Tabs.List>
 
 			<!-- Issues tab -->
 			<Tabs.Content value="issues" class="mt-4 flex flex-col gap-4">
+				<!-- Filter bar -->
+				<div class="flex items-center gap-2">
+					<div class="relative flex-1">
+						<Search
+							class="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
+						/>
+						<Input
+							class="pl-8 text-sm"
+							placeholder={m.issues_search_placeholder()}
+							bind:value={issueSearch}
+						/>
+					</div>
+					<Select.Root bind:value={issueStatusFilter} type="single">
+						<Select.Trigger class="w-28">{displayedIssueFilter}</Select.Trigger>
+						<Select.Content>
+							<Select.Item value="all">{m.issues_status_all()}</Select.Item>
+							<Select.Item value="open">{m.issues_status_open()}</Select.Item>
+							<Select.Item value="resolved">{m.issues_status_resolved()}</Select.Item>
+						</Select.Content>
+					</Select.Root>
+					{#if isManager(me.role)}
+						<Button class="gap-1.5" onclick={() => (newIssueOpen = true)}>
+							<Plus class="size-4" />
+							{m.ws_new_issue()}
+						</Button>
+					{/if}
+				</div>
 				{#if issuesList.length === 0}
 					<Card.Root class="flex flex-col items-center justify-center py-12 text-center">
 						<Card.Content>
 							<FileText class="mx-auto mb-3 size-8 text-muted-foreground/40" />
-							<p class="text-sm font-medium">{m.ws_no_issues()}</p>
-							<p class="mt-1 text-xs text-muted-foreground">{m.ws_no_issues_hint()}</p>
+							{#if committedIssueSearch || issueStatusFilter !== 'all'}
+								<p class="text-sm font-medium">{m.issues_no_results()}</p>
+							{:else}
+								<p class="text-sm font-medium">{m.ws_no_issues()}</p>
+								<p class="mt-1 text-xs text-muted-foreground">{m.ws_no_issues_hint()}</p>
+							{/if}
 						</Card.Content>
 					</Card.Root>
 				{:else}
@@ -330,6 +478,17 @@
 									>
 										{issue.resolved ? m.issue_resolved() : m.issue_open()}
 									</Badge>
+									{#if isManager(me?.role)}
+										<Button
+											variant="ghost"
+											size="sm"
+											class="shrink-0 gap-1.5 text-muted-foreground"
+											onclick={() => promptArchiveIssue(String(issue.id), true)}
+										>
+											<Archive class="size-3.5" />
+											{m.issue_archive()}
+										</Button>
+									{/if}
 									<Button
 										variant="ghost"
 										size="sm"
@@ -479,6 +638,86 @@
 					</Card.Content>
 				</Card.Root>
 			</Tabs.Content>
+
+			<!-- Archive tab -->
+			<Tabs.Content value="archive" class="mt-4 flex flex-col gap-4">
+				<!-- Filter bar -->
+				<div class="flex items-center gap-2">
+					<div class="relative flex-1">
+						<Search
+							class="absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
+						/>
+						<Input
+							class="pl-8 text-sm"
+							placeholder={m.issues_search_placeholder()}
+							bind:value={archiveSearch}
+						/>
+					</div>
+					<Select.Root bind:value={archiveStatusFilter} type="single">
+						<Select.Trigger class="w-28">{displayedArchiveFilter}</Select.Trigger>
+						<Select.Content>
+							<Select.Item value="all">{m.issues_status_all()}</Select.Item>
+							<Select.Item value="open">{m.issues_status_open()}</Select.Item>
+							<Select.Item value="resolved">{m.issues_status_resolved()}</Select.Item>
+						</Select.Content>
+					</Select.Root>
+				</div>
+				{#if archivedIssuesList.length === 0}
+					<Card.Root class="flex flex-col items-center justify-center py-12 text-center">
+						<Card.Content>
+							<Archive class="mx-auto mb-3 size-8 text-muted-foreground/40" />
+							<p class="text-sm font-medium">{m.ws_no_archived_issues()}</p>
+							<p class="mt-1 text-xs text-muted-foreground">{m.ws_no_archived_issues_hint()}</p>
+						</Card.Content>
+					</Card.Root>
+				{:else}
+					<div class="flex flex-col gap-2">
+						{#each archivedIssuesList as issue (issue.id)}
+							<Card.Root class="transition-shadow hover:shadow-sm">
+								<Card.Content class="flex items-center gap-3 py-3">
+									<FileText class="size-8 shrink-0 text-muted-foreground/60" />
+									<div class="min-w-0 flex-1">
+										<p class="truncate text-sm font-medium">{issue.title}</p>
+										{#if issue.description}
+											<p class="mt-0.5 truncate text-xs text-muted-foreground">
+												{issue.description}
+											</p>
+										{/if}
+									</div>
+									<Badge
+										variant="secondary"
+										class="shrink-0 text-xs {issue.resolved
+											? 'bg-emerald-100 text-emerald-700'
+											: 'bg-blue-100 text-blue-700'}"
+									>
+										{issue.resolved ? m.issue_resolved() : m.issue_open()}
+									</Badge>
+									{#if isManager(me?.role)}
+										<Button
+											variant="ghost"
+											size="sm"
+											class="shrink-0 gap-1.5 text-muted-foreground"
+											onclick={() => promptArchiveIssue(String(issue.id), false)}
+										>
+											<Archive class="size-3.5" />
+											{m.issue_unarchive()}
+										</Button>
+									{/if}
+									<Button
+										variant="ghost"
+										size="sm"
+										class="shrink-0 gap-1"
+										href={localizeHref(`/workspaces/${wsId}/issues/${issue.id}`)}
+									>
+										{m.common_view()}
+										<ArrowRight class="size-3.5" />
+									</Button>
+								</Card.Content>
+							</Card.Root>
+						{/each}
+					</div>
+				{/if}
+			</Tabs.Content>
 		</Tabs.Root>
 	{/if}
 </div>
@@ -541,17 +780,15 @@
 				/>
 			</div>
 			<div class="grid gap-2">
-				<Label for="issue-assignee">{m.ws_issue_assignee_label()}</Label>
-				<select
-					id="issue-assignee"
-					class="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none"
-					bind:value={newIssueAssignee}
-				>
-					<option value="" disabled>{m.ws_issue_assignee_select()}</option>
-					{#each members as member (member.id)}
-						<option value={String(member.id)}>{member.name}</option>
-					{/each}
-				</select>
+				<Select.Root bind:value={newIssueAssignee} type="single">
+					<Select.Trigger class="w-full">{displayedNewIssueAssignee}</Select.Trigger>
+					<Select.Content>
+						<Select.Label>{m.ws_issue_assignee_label()}</Select.Label>
+						{#each members as member (member.id)}
+							<Select.Item value={String(member.id)}>{member.name}</Select.Item>
+						{/each}
+					</Select.Content>
+				</Select.Root>
 			</div>
 			<div class="grid gap-2">
 				<Label for="issue-deadline">{m.ws_issue_deadline_label()}</Label>
@@ -594,6 +831,52 @@
 			</Dialog.Close>
 			<Button variant="destructive" onclick={handleDelete} disabled={deleting}>
 				{deleting ? m.common_deleting() : m.common_delete()}
+			</Button>
+		</Dialog.Footer>
+	</Dialog.Content>
+</Dialog.Root>
+
+<!-- Archive/unarchive issue confirmation dialog -->
+<AlertDialog.Root bind:open={issueArchiveConfirmOpen}>
+	<AlertDialog.Content class="sm:max-w-sm">
+		<AlertDialog.Header>
+			<AlertDialog.Title>
+				{pendingIssueArchive?.archived
+					? m.issue_archive_confirm_title()
+					: m.issue_unarchive_confirm_title()}
+			</AlertDialog.Title>
+			<AlertDialog.Description>
+				{pendingIssueArchive?.archived
+					? m.issue_archive_confirm_desc()
+					: m.issue_unarchive_confirm_desc()}
+			</AlertDialog.Description>
+		</AlertDialog.Header>
+		<AlertDialog.Footer>
+			<AlertDialog.Cancel>{m.common_cancel()}</AlertDialog.Cancel>
+			<AlertDialog.Action onclick={confirmArchiveIssue}>
+				{pendingIssueArchive?.archived ? m.issue_archive() : m.issue_unarchive()}
+			</AlertDialog.Action>
+		</AlertDialog.Footer>
+	</AlertDialog.Content>
+</AlertDialog.Root>
+
+<!-- Archive workspace confirmation dialog -->
+<Dialog.Root bind:open={archiveOpen}>
+	<Dialog.Content class="sm:max-w-sm">
+		<Dialog.Header>
+			<Dialog.Title>{m.ws_archive_title()}</Dialog.Title>
+			<Dialog.Description>
+				{m.ws_archive_confirm({ name: ws?.name ?? '' })}
+			</Dialog.Description>
+		</Dialog.Header>
+		<Dialog.Footer>
+			<Dialog.Close>
+				{#snippet child({ props })}
+					<Button variant="outline" {...props}>{m.common_cancel()}</Button>
+				{/snippet}
+			</Dialog.Close>
+			<Button onclick={handleArchive} disabled={archiving}>
+				{archiving ? m.ws_archiving() : m.ws_archive()}
 			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
