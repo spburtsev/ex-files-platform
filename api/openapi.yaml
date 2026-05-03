@@ -142,6 +142,28 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  /auth/change-password:
+    post:
+      tags: [auth]
+      operationId: authChangePassword
+      summary: Change the current user's password (requires old password)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+      responses:
+        '200':
+          description: Password updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   /auth/me:
     get:
       tags: [auth]
@@ -1099,6 +1121,13 @@ components:
       properties:
         token:    { type: string }
         password: { type: string, minLength: 8 }
+
+    ChangePasswordRequest:
+      type: object
+      required: [oldPassword, newPassword]
+      properties:
+        oldPassword: { type: string, minLength: 1 }
+        newPassword: { type: string, minLength: 8 }
 
     Workspace:
       type: object

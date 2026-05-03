@@ -67,7 +67,13 @@
 	]);
 
 	const cleanPathname = $derived(deLocalizeHref(page.url.pathname));
-	const pageLabel = $derived(navLinks.find((l) => l.match(cleanPathname))?.label ?? 'ex-files');
+	const pageLabel = $derived.by(() => {
+		const fromNav = navLinks.find((l) => l.match(cleanPathname))?.label;
+		if (fromNav) return fromNav;
+		if (cleanPathname === '/profile') return m.nav_profile();
+
+		return 'ex-files';
+	});
 </script>
 
 <Sidebar.Provider>
@@ -224,7 +230,7 @@
 		<svelte:boundary>
 			{@render children()}
 			{#snippet failed(error)}
-                <ErrorBoundary {error} />
+				<ErrorBoundary {error} />
 			{/snippet}
 		</svelte:boundary>
 	</Sidebar.Inset>

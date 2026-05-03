@@ -2,6 +2,7 @@ import { command, getRequestEvent, requested } from '$app/server';
 
 import { apiOpts } from '$lib/api-client';
 import {
+	authChangePassword,
 	authForgotPassword,
 	authLogin,
 	authLogout,
@@ -102,10 +103,12 @@ export const forgotPassword = command('unchecked', async (email: string) => {
 	try {
 		const r = await authForgotPassword({ ...apiOpts(), body: { email } });
 		if (r.error) {
+            console.error('forgot password failed:', r.error);
 			return { ok: false as const, error: errorMessage(r.error, 'Request failed') };
 		}
 		return { ok: true as const };
-	} catch {
+	} catch (err: unknown) {
+        console.error('forgot password failed:', String(err));
 		return { ok: false as const, error: NETWORK_ERROR };
 	}
 });
@@ -119,6 +122,27 @@ export const resetPassword = command(
 				return {
 					ok: false as const,
 					error: errorMessage(r.error, 'Reset failed. Token may be invalid or expired.')
+				};
+			}
+			return { ok: true as const };
+		} catch {
+			return { ok: false as const, error: NETWORK_ERROR };
+		}
+	}
+);
+
+export const changePassword = command(
+	'unchecked',
+	async ({ oldPassword, newPassword }: { oldPassword: string; newPassword: string }) => {
+		try {
+			const r = await authChangePassword({
+				...apiOpts(),
+				body: { oldPassword, newPassword }
+			});
+			if (r.error) {
+				return {
+					ok: false as const,
+					error: errorMessage(r.error, 'Failed to change password')
 				};
 			}
 			return { ok: true as const };
