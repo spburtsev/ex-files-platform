@@ -27,13 +27,12 @@
 	import PdfViewer from '$lib/components/pdf/PdfViewer.svelte';
 	import CommentPanel from '$lib/components/pdf/CommentPanel.svelte';
 	import CommentDialog from '$lib/components/pdf/CommentDialog.svelte';
-	import ActivityLog from '$lib/components/pdf/ActivityLog.svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
+	import { Toggle } from '$lib/components/ui/toggle/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import * as ScrollArea from '$lib/components/ui/scroll-area/index.js';
-	import * as Tabs from '$lib/components/ui/tabs/index.js';
 	import * as Select from '$lib/components/ui/select/index.js';
 	import { Textarea } from '$lib/components/ui/textarea/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
@@ -112,7 +111,6 @@
 	let currentPage = $state(0);
 	let pageCount = $state(0);
 	let scale = $state(1);
-	let sidePanel = $state<'comments' | 'activity'>('comments');
 	let commentDialog = $state<{
 		page: number;
 		x: number;
@@ -326,6 +324,7 @@
 	}
 
 	function handlePageClick(page: number, x: number, y: number, screenX: number, screenY: number) {
+		if (!workbenchStore.activeDocument?.serverId) return;
 		commentDialog = { page, x, y, screenX, screenY };
 	}
 
@@ -564,7 +563,7 @@
 
 					<!-- Submissions list header -->
 					<div class="shrink-0 space-y-1.5 px-3 pt-3 pb-3">
-						<p class="text-[10px] font-semibold text-muted-foreground">
+						<p class="text-xs font-semibold text-muted-foreground">
 							{m.workbench_submissions()}
 						</p>
 						<Select.Root bind:value={submissionFilter} type="single">
@@ -727,11 +726,6 @@
 						<div class="w-full max-w-lg">
 							<UploadZone onupload={handleUpload} />
 						</div>
-						{#if workbenchStore.activityLog.length > 0}
-							<div class="mt-4 w-full max-w-lg rounded-lg border bg-card shadow-sm">
-								<ActivityLog entries={workbenchStore.activityLog} />
-							</div>
-						{/if}
 					</div>
 				{:else}
 					<!-- PDF Viewer -->
@@ -739,24 +733,22 @@
 						<!-- Document toolbar: zoom + pages + save -->
 						<div class="flex shrink-0 items-center gap-3 border-b bg-card px-3">
 							<!-- Zoom -->
-							<div class="flex flex-1 items-center gap-1">
+							<div class="flex flex-1 items-center">
 								<Button
 									variant="ghost"
-									size="icon"
-									class="size-7"
+									size="icon-xs"
 									disabled={scale <= 0.5}
 									aria-label={m.pdf_zoom_out()}
 									onclick={() => (scale = Math.max(0.5, scale - 0.25))}
 								>
 									<Minus class="size-3.5" />
 								</Button>
-								<span class="w-10 text-center text-xs tabular-nums">
+								<span class="text-center text-[10px] tabular-nums">
 									{Math.round(scale * 100)}%
 								</span>
 								<Button
 									variant="ghost"
-									size="icon"
-									class="size-7"
+									size="icon-xs"
 									disabled={scale >= 3}
 									aria-label={m.pdf_zoom_in()}
 									onclick={() => (scale = Math.min(3, scale + 0.25))}
@@ -769,8 +761,7 @@
 							<div class="flex items-center gap-1">
 								<Button
 									variant="ghost"
-									size="icon"
-									class="size-7"
+									size="icon-xs"
 									disabled={currentPage <= 0}
 									aria-label={m.pdf_page_back()}
 									onclick={() => (currentPage = Math.max(0, currentPage - 1))}
@@ -782,8 +773,7 @@
 								</span>
 								<Button
 									variant="ghost"
-									size="icon"
-									class="size-7"
+									size="icon-xs"
 									disabled={pageCount === 0 || currentPage >= pageCount - 1}
 									aria-label={m.pdf_page_forward()}
 									onclick={() => (currentPage = Math.min(pageCount - 1, currentPage + 1))}
@@ -794,28 +784,25 @@
 
 							<!-- Toggle comments + Save / discard draft -->
 							<div class="flex flex-1 items-center justify-end gap-2">
-								<Button
-									variant={showMarkers ? 'secondary' : 'ghost'}
+								<Toggle
+									bind:pressed={showMarkers}
 									size="sm"
-									class="gap-1.5 text-xs {showMarkers
-										? 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100'
-										: ''}"
 									disabled={!hasComments}
+									class="data-[state=on]:bg-transparent data-[state=on]:*:[svg]:fill-blue-500 data-[state=on]:*:[svg]:stroke-blue-500"
 									title={!hasComments
 										? m.workbench_no_markers()
 										: showMarkers
 											? m.workbench_hide_comments()
 											: m.workbench_show_comments()}
-									onclick={() => (showMarkers = !showMarkers)}
 								>
 									<MessageSquare class="size-3.5 shrink-0" />
 									{showMarkers ? m.workbench_hide_comments() : m.workbench_show_comments()}
-								</Button>
+								</Toggle>
 								{#if workbenchStore.activeDocument.status !== 'saved'}
 									{@const ad = workbenchStore.activeDocument}
 									<Button
 										variant="outline"
-										size="sm"
+										size="xs"
 										class="gap-1.5"
 										disabled={ad.status === 'saving'}
 										onclick={() => handleDiscard(ad.id)}
@@ -824,7 +811,7 @@
 										{m.workbench_discard_button()}
 									</Button>
 									<Button
-										size="sm"
+										size="xs"
 										class="gap-1.5"
 										disabled={ad.status === 'saving'}
 										onclick={() => handleSave(ad.id)}
@@ -877,7 +864,6 @@
 								<Button
 									variant="outline"
 									size="icon"
-									class="size-7"
 									title={m.workbench_expand_sidebar()}
 									onclick={() => (rightCollapsed = false)}
 								>
@@ -886,34 +872,12 @@
 							</div>
 						{:else}
 							<div class="flex min-h-0 w-full flex-col">
-								<Tabs.Root bind:value={sidePanel} class="flex min-h-0 flex-1 flex-col gap-0">
-									<Tabs.List class="mx-2 mt-2 w-auto shrink-0">
-										<Tabs.Trigger value="comments" class="flex-1">
-											{m.workbench_comments()}
-											{#if workbenchStore.comments.length > 0}
-												<span
-													class="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold"
-												>
-													{workbenchStore.comments.length}
-												</span>
-											{/if}
-										</Tabs.Trigger>
-										<Tabs.Trigger value="activity" class="flex-1">
-											{m.workbench_activity()}
-										</Tabs.Trigger>
-									</Tabs.List>
-									<Tabs.Content value="comments" class="mt-2 min-h-0 flex-1 overflow-hidden">
-										<CommentPanel
-											comments={workbenchStore.activeComments}
-											{currentPage}
-											ondelete={(id) => workbenchStore.deleteComment(id)}
-											ongotopage={(p) => (currentPage = p)}
-										/>
-									</Tabs.Content>
-									<Tabs.Content value="activity" class="mt-2 min-h-0 flex-1 overflow-hidden">
-										<ActivityLog entries={workbenchStore.activityLog} />
-									</Tabs.Content>
-								</Tabs.Root>
+									<CommentPanel
+										comments={workbenchStore.activeComments}
+										{currentPage}
+										ondelete={(id) => workbenchStore.deleteComment(id)}
+										ongotopage={(p) => (currentPage = p)}
+									/>
 							</div>
 						{/if}
 					</div>

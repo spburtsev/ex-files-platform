@@ -39,17 +39,9 @@ export interface Comment {
 	createdAt: Date;
 }
 
-export interface ActivityEntry {
-	id: string;
-	action: 'upload' | 'comment' | 'delete_comment' | 'view';
-	description: string;
-	timestamp: Date;
-}
-
 interface IssueSlot {
 	documents: Document[];
 	comments: Comment[];
-	activityLog: ActivityEntry[];
 	activeDocumentId: string | null;
 	hydrated: boolean;
 }
@@ -58,7 +50,6 @@ function emptySlot(): IssueSlot {
 	return {
 		documents: [],
 		comments: [],
-		activityLog: [],
 		activeDocumentId: null,
 		hydrated: false
 	};
@@ -85,16 +76,6 @@ function createWorkbenchStore() {
 		currentIssueId = issueId;
 	}
 
-	function addActivity(action: ActivityEntry['action'], description: string) {
-		if (!currentIssueId) return;
-		slots[currentIssueId].activityLog.unshift({
-			id: crypto.randomUUID(),
-			action,
-			description,
-			timestamp: new Date()
-		});
-	}
-
 	function uploadDocument(file: File, data: Uint8Array, pageCount: number) {
 		if (!currentIssueId) return;
 		const doc: Document = {
@@ -109,7 +90,6 @@ function createWorkbenchStore() {
 		};
 		slots[currentIssueId].documents.push(doc);
 		slots[currentIssueId].activeDocumentId = doc.id;
-		addActivity('upload', `Added draft "${file.name}" (${pageCount} pages)`);
 		return doc;
 	}
 
@@ -177,10 +157,6 @@ function createWorkbenchStore() {
 	function setActiveDocument(id: string) {
 		if (!currentIssueId) return;
 		slots[currentIssueId].activeDocumentId = id;
-		const doc = slots[currentIssueId].documents.find((d) => d.id === id);
-		if (doc) {
-			addActivity('view', `Opened "${doc.name}"`);
-		}
 	}
 
 	function addComment(page: number, x: number, y: number, text: string, author: string) {
@@ -198,10 +174,6 @@ function createWorkbenchStore() {
 			createdAt: new Date()
 		};
 		slots[currentIssueId].comments.push(comment);
-		addActivity(
-			'comment',
-			`${author} commented on page ${page + 1}: "${text.slice(0, 50)}${text.length > 50 ? '...' : ''}"`
-		);
 		return comment;
 	}
 
@@ -210,9 +182,7 @@ function createWorkbenchStore() {
 		const list = slots[currentIssueId].comments;
 		const idx = list.findIndex((c) => c.id === id);
 		if (idx === -1) return;
-		const comment = list[idx];
 		list.splice(idx, 1);
-		addActivity('delete_comment', `Deleted comment on page ${comment.page + 1}`);
 	}
 
 	function discardDocument(id: string) {
@@ -220,7 +190,6 @@ function createWorkbenchStore() {
 		const s = slots[currentIssueId];
 		const idx = s.documents.findIndex((d) => d.id === id);
 		if (idx === -1) return;
-		const doc = s.documents[idx];
 		s.documents.splice(idx, 1);
 		for (let i = s.comments.length - 1; i >= 0; i--) {
 			if (s.comments[i].documentId === id) s.comments.splice(i, 1);
@@ -228,7 +197,6 @@ function createWorkbenchStore() {
 		if (s.activeDocumentId === id) {
 			s.activeDocumentId = s.documents[0]?.id ?? null;
 		}
-		addActivity('delete_comment', `Discarded draft "${doc.name}"`);
 	}
 
 	return {
@@ -240,9 +208,6 @@ function createWorkbenchStore() {
 		},
 		get comments() {
 			return slot.comments;
-		},
-		get activityLog() {
-			return slot.activityLog;
 		},
 		get activeDocument() {
 			return activeDocument;

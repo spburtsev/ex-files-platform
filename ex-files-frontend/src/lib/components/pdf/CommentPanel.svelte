@@ -30,7 +30,17 @@
 </script>
 
 <div class="flex h-full flex-col">
-	<div class="flex items-center justify-end border-b px-3 py-2">
+	<div class="flex items-center justify-between border-b px-3 py-2">
+		<div
+			class="flex shrink-0 items-center gap-1.5 px-1 text-xs font-medium text-muted-foreground"
+		>
+			{m.workbench_comments()}
+			{#if comments.length > 0}
+				<span class="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold">
+					{comments.length}
+				</span>
+			{/if}
+		</div>
 		<div class="flex gap-1 rounded-md bg-muted p-0.5 text-xs">
 			<button
 				class="rounded px-2 py-1 {filter === 'page'
