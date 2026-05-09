@@ -2,16 +2,16 @@ import { query } from '$app/server';
 
 import { apiOpts } from '$lib/api-client';
 import {
-	auditList,
-	auditStats,
 	authListUsers,
 	authMe,
 	commentsList,
+	dashboardGet,
 	documentsGet,
 	documentsGetFile,
 	documentsList,
 	issuesGet,
 	issuesListByWorkspace,
+	issuesListMine,
 	workspacesAssignableMembers,
 	workspacesGet,
 	workspacesList
@@ -138,22 +138,19 @@ export const getDocumentDetail = query('unchecked', async (docId: string) => {
 	return r.data?.document ?? null;
 });
 
-export const getDocumentBytes = query(
-	'unchecked',
-	async (arg: { docId: string; versionId: string }) => {
-		const r = await documentsGetFile({
-			...apiOpts(),
-			path: { id: arg.docId, versionId: arg.versionId },
-			parseAs: 'blob'
-		});
-		if (!r.data) return new Uint8Array();
-		const blob = r.data as unknown as Blob;
-		return new Uint8Array(await blob.arrayBuffer());
-	}
-);
+export const getDocumentBytes = query('unchecked', async (docId: string) => {
+	const r = await documentsGetFile({
+		...apiOpts(),
+		path: { id: docId },
+		parseAs: 'blob'
+	});
+	if (!r.data) return new Uint8Array();
+	const blob = r.data as unknown as Blob;
+	return new Uint8Array(await blob.arrayBuffer());
+});
 
 // ---------------------------------------------------------------------------
-// Comments
+// Comments, Dashboard
 // ---------------------------------------------------------------------------
 
 export const getComments = query('unchecked', async (docId: string) => {
@@ -161,41 +158,25 @@ export const getComments = query('unchecked', async (docId: string) => {
 	return r.data?.comments ?? [];
 });
 
-// ---------------------------------------------------------------------------
-// Audit
-// ---------------------------------------------------------------------------
-
-export const getAuditStats = query(async () => {
-	const r = await auditStats(apiOpts());
+export const getDashboard = query(async () => {
+	const r = await dashboardGet(apiOpts());
 	return r.data ?? null;
 });
 
-export const getAuditLog = query('unchecked', async (queryStr: string = '') => {
-	const sp = new URLSearchParams(queryStr);
-	const from = sp.get('from');
-	const to = sp.get('to');
-	const fromIso = from ? new Date(from).toISOString() : undefined;
-	let toIso: string | undefined;
-	if (to) {
-		const d = new Date(to);
-		d.setHours(23, 59, 59, 999);
-		toIso = d.toISOString();
+export const getMyIssues = query(
+	'unchecked',
+	async ({
+		page = 1,
+		perPage = 10,
+		search = ''
+	}: { page?: number; perPage?: number; search?: string } = {}) => {
+		const r = await issuesListMine({
+			...apiOpts(),
+			query: { page, perPage, search: search || undefined }
+		});
+		return {
+			issues: r.data?.issues ?? [],
+			...paginationFromHeaders(r.response)
+		};
 	}
-	const r = await auditList({
-		...apiOpts(),
-		query: {
-			page: Number(sp.get('page') ?? 1),
-			perPage: Number(sp.get('per_page') ?? 25),
-			action: sp.get('action') ?? undefined,
-			targetType: sp.get('target_type') ?? undefined,
-			actorId: sp.get('actor_id') ?? undefined,
-			targetId: sp.get('target_id') ?? undefined,
-			from: fromIso,
-			to: toIso
-		}
-	});
-	return {
-		entries: r.data?.entries ?? [],
-		...paginationFromHeaders(r.response)
-	};
-});
+);

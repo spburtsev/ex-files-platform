@@ -19,7 +19,6 @@ import {
 	documentsResubmit,
 	documentsSubmit,
 	documentsUpload,
-	documentsUploadVersion,
 	issuesArchive,
 	issuesCreate,
 	issuesUpdateAssignee,
@@ -27,6 +26,7 @@ import {
 	workspacesArchive,
 	workspacesCreate,
 	workspacesDelete,
+	verifyHash,
 	workspacesRemoveMember,
 	workspacesUpdate
 } from '$lib/api';
@@ -279,8 +279,7 @@ export const uploadDocument = command(
 		}
 		return {
 			ok: true as const,
-			docId: r.data.document.id,
-			versionId: r.data.version.id
+			docId: r.data.document.id
 		};
 	}
 );
@@ -290,21 +289,20 @@ export const deleteDocument = command('unchecked', async (id: string) => {
 	return { ok: !r.error };
 });
 
-export const uploadDocumentVersion = command(
-	'unchecked',
-	async ({ docId, file }: { docId: string; file: File }) =>
-		runApi(
-			documentsUploadVersion({ ...apiOpts(), path: { id: docId }, body: { file } }),
-			'Upload failed'
-		)
-);
+export const verifyDocumentHash = command('unchecked', async (hash: string) => {
+	const r = await verifyHash({ ...apiOpts(), query: { hash } });
+	if (r.error || !r.data) {
+		return { ok: false as const, error: errorMessage(r.error, 'Verification failed') };
+	}
+	return { ok: true as const, result: r.data };
+});
 
 export const getDocumentDownloadUrl = command(
 	'unchecked',
-	async ({ docId, versionId }: { docId: string; versionId: string }) => {
+	async (docId: string) => {
 		const r = await documentsGetDownloadUrl({
 			...apiOpts(),
-			path: { id: docId, versionId }
+			path: { id: docId }
 		});
 		if (r.error || !r.data) return { url: null };
 		return { url: r.data.url };

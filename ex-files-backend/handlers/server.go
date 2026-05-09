@@ -20,7 +20,6 @@ type Server struct {
 	UserRepo      services.UserRepository
 	Tokens        services.TokenService
 	Hasher        services.Hasher
-	Audit         services.AuditRepository
 	Email         services.EmailService
 	Cache         services.CacheService
 	ResetTokens   services.ResetTokenStore
@@ -33,8 +32,6 @@ type Server struct {
 	DB            *gorm.DB
 }
 
-// errUnauthorized is returned by handlers when the auth context is missing -
-// this should not happen in practice because ogen's SecurityHandler runs first.
 var errUnauthorized = errors.New("missing authentication context")
 
 func (s *Server) callerID(ctx context.Context) (uint, error) {
@@ -94,14 +91,6 @@ func userToOAPI(u *models.User) oapi.User {
 	return out
 }
 
-func errString(err error) string {
-	if err == nil {
-		return ""
-	}
-	return err.Error()
-}
-
-// logErr is a tiny convenience for the ubiquitous "log and return 500" path.
 func logErr(op string, err error) {
 	slog.Error(op, "error", err)
 }

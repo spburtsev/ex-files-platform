@@ -2,10 +2,11 @@
 	import './layout.css';
 	import favicon from '$lib/assets/favicon.svg';
 	import { page } from '$app/state';
-	import { locales, localizeHref, getLocaleForUrl } from '$lib/paraglide/runtime';
+	import { locales, localizeHref, getLocaleForUrl, type Locale } from '$lib/paraglide/runtime';
 	import { Globe } from '@lucide/svelte';
 	import { Toaster } from 'svelte-sonner';
 	import ErrorBoundary from '$lib/components/custom/ErrorBoundary.svelte';
+	import * as Select from '$lib/components/ui/select/index.js';
 
 	let { children } = $props();
 
@@ -16,6 +17,11 @@
 			return 'en';
 		}
 	});
+
+	function changeLocale(next: string) {
+		if (next === currentLocale) return;
+		window.location.assign(localizeHref(page.url.pathname, { locale: next as Locale }));
+	}
 </script>
 
 <svelte:head><link rel="icon" href={favicon} /></svelte:head>
@@ -27,25 +33,18 @@
 	{/snippet}
 </svelte:boundary>
 
-<div class="fixed right-4 bottom-4 z-50">
-	<div class="flex items-center gap-1 rounded-full border bg-card px-2 py-1 shadow-md">
-		<Globe class="size-3.5 text-muted-foreground" />
-		{#each locales as locale (locale)}
-			{#if currentLocale === locale}
-				<span class="rounded-md bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground">
-					{locale.toUpperCase()}
-				</span>
-			{:else}
-				<a
-					href={localizeHref(page.url.pathname, { locale })}
-					data-sveltekit-reload
-					class="rounded-md px-2 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted"
-				>
-					{locale.toUpperCase()}
-				</a>
-			{/if}
-		{/each}
-	</div>
+<div class="fixed right-4 bottom-4 z-50 flex items-center gap-1.5">
+	<Globe class="size-4 text-muted-foreground" />
+	<Select.Root type="single" value={currentLocale} onValueChange={changeLocale}>
+		<Select.Trigger size="sm" class="min-w-14" aria-label="Language">
+			{currentLocale.toUpperCase()}
+		</Select.Trigger>
+		<Select.Content>
+			{#each locales as locale (locale)}
+				<Select.Item value={locale}>{locale.toUpperCase()}</Select.Item>
+			{/each}
+		</Select.Content>
+	</Select.Root>
 </div>
 
 <Toaster richColors closeButton position="top-right" />

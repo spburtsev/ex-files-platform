@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { browser } from '$app/environment';
 	import { onDestroy, tick } from 'svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { workbenchStore } from '$lib/stores/workbench.svelte';
@@ -8,12 +9,13 @@
 		getIssue,
 		getWorkspaceDetail,
 		getDocuments,
-		getDocumentDetail,
 		getDocumentBytes,
 		getComments
 	} from '$lib/queries.remote';
 	import { uploadDocument, createComment, deleteComment } from '$lib/commands.remote';
+	import { MAX_UPLOAD_BYTES, MAX_UPLOAD_MB } from '$lib/upload';
 	import { isManager } from '$lib/utils';
+	import { deadlineChip } from '$lib/deadline';
 	import { m } from '$lib/paraglide/messages.js';
 	import { localizeHref } from '$lib/paraglide/runtime';
 	import { toast } from 'svelte-sonner';
@@ -64,28 +66,38 @@
 		if (issueId) workbenchStore.setIssue(issueId);
 	});
 
+	// Pulls the latest documents for the current issue from the API and merges
+	// them into the workbench store. Used both for the initial hydrate and for
+	// re-syncing after review actions / SSE-driven invalidations so reviewer
+	// notes and statuses stay current without a page refresh.
+	async function syncDocumentsFromServer() {
+		if (!issueId) return;
+		const id = issueId;
+		try {
+			const res = await getDocuments(id);
+			if (workbenchStore.currentIssueId !== id) return;
+			workbenchStore.hydrate(
+				res.documents.map((d) => ({
+					serverId: String(d.id),
+					name: d.name,
+					size: Number(d.size),
+					mimeType: d.mimeType,
+					uploaderName: d.uploaderName,
+					reviewStatus: d.status,
+					reviewerNote: d.reviewerNote
+				}))
+			);
+		} catch (err) {
+			console.error('Failed to sync documents', err);
+		}
+	}
+
 	$effect(() => {
 		if (!issueId || workbenchStore.hydrated) return;
-		const id = issueId;
 		(async () => {
-			try {
-				const res = await getDocuments(id);
-				if (workbenchStore.currentIssueId !== id) return;
-				workbenchStore.hydrate(
-					res.documents.map((d) => ({
-						serverId: String(d.id),
-						name: d.name,
-						size: Number(d.size),
-						mimeType: d.mimeType,
-						uploaderName: d.uploaderName,
-						reviewStatus: d.status
-					}))
-				);
-				const activeId = workbenchStore.activeDocumentId;
-				if (activeId) await selectDocument(activeId);
-			} catch (err) {
-				console.error('Failed to hydrate documents', err);
-			}
+			await syncDocumentsFromServer();
+			const activeId = workbenchStore.activeDocumentId;
+			if (activeId) await selectDocument(activeId);
 		})();
 	});
 
@@ -93,9 +105,12 @@
 		const wsName = workspace?.name;
 		const issueTitle = issue?.title;
 		if (wsName && issueTitle) {
+			const statusBadge = issue.resolved
+				? { label: m.issue_resolved(), cls: 'bg-emerald-100 text-emerald-700' }
+				: { label: m.issue_open(), cls: 'bg-blue-100 text-blue-700' };
 			extraBreadcrumbs.set([
 				{ label: wsName, href: localizeHref(`/workspaces/${wsId}`) },
-				{ label: issueTitle }
+				{ label: issueTitle, badges: [statusBadge] }
 			]);
 		}
 	});
@@ -121,6 +136,38 @@
 	const commentsQuery = $derived(activeServerId ? getComments(activeServerId) : null);
 	const comments = $derived(commentsQuery?.current ?? []);
 	const hasComments = $derived(comments.length > 0);
+
+	// Live updates: subscribe to SSE for the active document. Comment events
+	// refresh the comments list; review events refresh the doc list so badges
+	// (status, reviewer) update without a manual reload.
+	const COMMENT_EVENTS = new Set(['comment.added', 'comment.deleted']);
+	const REVIEW_EVENTS = new Set([
+		'document.approved',
+		'document.rejected',
+		'document.changes_requested',
+		'document.reviewer_assigned'
+	]);
+	$effect(() => {
+		if (!browser) return;
+		const docId = activeServerId;
+		if (!docId) return;
+		const es = new EventSource(`/api/events?documentId=${docId}`);
+		es.onmessage = (e) => {
+			try {
+				const ev = JSON.parse(e.data);
+				const t = ev?.type;
+				if (typeof t !== 'string') return;
+				if (COMMENT_EVENTS.has(t)) commentsQuery?.refresh();
+				else if (REVIEW_EVENTS.has(t)) {
+					workbenchQuery.refresh();
+					void syncDocumentsFromServer();
+				}
+			} catch (err) {
+				console.error('SSE parse error', err);
+			}
+		};
+		return () => es.close();
+	});
 
 	type SubmissionFilter = 'all' | 'approved' | 'changes_requested' | 'rejected';
 	let submissionFilter = $state<SubmissionFilter>('all');
@@ -168,24 +215,12 @@
 		if (!doc) return null;
 		if (doc.data) return doc.data;
 		if (!doc.serverId) return null;
-		let versionId = doc.versionId;
-		if (!versionId) {
-			const detail = await getDocumentDetail(doc.serverId).run();
-			const latest = [...(detail?.versions ?? [])].sort(
-				(a, b) => Number(b.version) - Number(a.version)
-			)[0];
-			if (!latest) return null;
-			versionId = latest.id;
-		}
-		const data = await getDocumentBytes({ docId: doc.serverId, versionId }).run();
+		const data = await getDocumentBytes(doc.serverId).run();
 		const pdfjsLib = await getPdfjs();
 		const probe = await pdfjsLib.getDocument({ data: data.slice() }).promise;
 		const numPages = probe.numPages;
 		probe.destroy();
 		workbenchStore.setDocumentData(localId, data, numPages);
-		if (versionId && !doc.versionId) {
-			workbenchStore.setDocumentSaved(localId, doc.serverId, versionId);
-		}
 		return data;
 	}
 
@@ -209,6 +244,10 @@
 	}
 
 	async function handleUpload(file: File) {
+		if (file.size > MAX_UPLOAD_BYTES) {
+			toast.error(m.workbench_file_too_large({ mb: String(MAX_UPLOAD_MB) }));
+			return;
+		}
 		rememberPageOf(workbenchStore.activeDocumentId);
 		const pdfjsLib = await getPdfjs();
 		const buffer = await file.arrayBuffer();
@@ -278,7 +317,7 @@
 				data: doc.data.slice()
 			});
 			if (result.ok) {
-				workbenchStore.setDocumentSaved(docId, result.docId, result.versionId);
+				workbenchStore.setDocumentSaved(docId, result.docId);
 				toast.success(m.workbench_save_success({ name: doc.name }));
 			} else {
 				workbenchStore.setDocumentStatus(docId, 'error', result.error);
@@ -289,29 +328,6 @@
 			workbenchStore.setDocumentStatus(docId, 'error', m.error_network_retry());
 			toast.error(m.error_network_retry());
 		}
-	}
-
-	function deadlineChip(d: Date) {
-		const h = (d.getTime() - Date.now()) / 3_600_000;
-		if (h < 0)
-			return { label: m.workbench_overdue(), cls: 'border-red-200 bg-red-50 text-red-600' };
-		if (h < 24)
-			return {
-				label: m.workbench_hours_left({ hours: String(Math.round(h)) }),
-				cls: 'border-red-200 bg-red-50 text-red-600'
-			};
-		if (h < 72)
-			return {
-				label: m.workbench_days_hours_left({
-					days: String(Math.floor(h / 24)),
-					hours: String(Math.round(h % 24))
-				}),
-				cls: 'border-amber-200 bg-amber-50 text-amber-700'
-			};
-		return {
-			label: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-			cls: 'border-border bg-muted/40 text-muted-foreground'
-		};
 	}
 
 	const dl = $derived.by(() => {
@@ -385,18 +401,6 @@
 										<Pencil class="size-3" />
 									</button>
 								{/if}
-							{/if}
-							{#if issue.resolved}
-								<Badge
-									variant="secondary"
-									class="shrink-0 bg-emerald-100 text-[10px] text-emerald-700"
-								>
-									{m.issue_resolved()}
-								</Badge>
-							{:else}
-								<Badge variant="secondary" class="shrink-0 bg-blue-100 text-[10px] text-blue-700">
-									{m.issue_open()}
-								</Badge>
 							{/if}
 						</div>
 						{#if dl}
@@ -604,6 +608,24 @@
 							</div>
 						</div>
 
+						{#if (workbenchStore.activeDocument?.reviewStatus === 'rejected' || workbenchStore.activeDocument?.reviewStatus === 'changes_requested') && workbenchStore.activeDocument?.reviewerNote}
+							<div
+								class="shrink-0 border-b px-4 py-3 text-sm {workbenchStore.activeDocument
+									.reviewStatus === 'rejected'
+									? 'border-red-200 bg-red-50 text-red-800'
+									: 'border-amber-200 bg-amber-50 text-amber-800'}"
+							>
+								<p class="font-medium">
+									{workbenchStore.activeDocument.reviewStatus === 'rejected'
+										? m.doc_rejection_reason()
+										: m.doc_changes_requested_label()}
+								</p>
+								<p class="mt-1 text-xs leading-relaxed whitespace-pre-line">
+									{workbenchStore.activeDocument.reviewerNote}
+								</p>
+							</div>
+						{/if}
+
 						<div class="relative flex-1 overflow-auto">
 							<PdfViewer
 								{comments}
@@ -651,6 +673,7 @@
 								<CommentPanel
 									{comments}
 									{currentPage}
+									currentUserId={me?.id}
 									ondelete={handleCommentDelete}
 									ongotopage={(p) => (currentPage = p)}
 								/>
@@ -687,7 +710,19 @@
 		onSuccess={() => workbenchQuery.refresh()}
 	/>
 	<!-- Reject Dialog -->
-	<RejectDialog bind:target={rejectTarget} onSuccess={() => workbenchQuery.refresh()} />
+	<RejectDialog
+		bind:target={rejectTarget}
+		onSuccess={async () => {
+			await workbenchQuery.refresh();
+			await syncDocumentsFromServer();
+		}}
+	/>
 	<!-- Request Changes Dialog -->
-	<RequestChanges bind:target={changesTarget} onSuccess={() => workbenchQuery.refresh()} />
+	<RequestChanges
+		bind:target={changesTarget}
+		onSuccess={async () => {
+			await workbenchQuery.refresh();
+			await syncDocumentsFromServer();
+		}}
+	/>
 {/if}

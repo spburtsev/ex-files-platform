@@ -11,7 +11,7 @@ import (
 
 func TestSSEHub_SubscribeAndBroadcast(t *testing.T) {
 	hub := NewSSEHub()
-	ch := hub.Subscribe(42)
+	ch := hub.Subscribe(42, 0)
 	defer hub.Unsubscribe(ch)
 
 	hub.Broadcast(SSEEvent{Type: "test.event", DocumentID: 42, Payload: map[string]any{"key": "val"}})
@@ -27,8 +27,8 @@ func TestSSEHub_SubscribeAndBroadcast(t *testing.T) {
 
 func TestSSEHub_FilterByDocumentID(t *testing.T) {
 	hub := NewSSEHub()
-	ch1 := hub.Subscribe(1)
-	ch2 := hub.Subscribe(2)
+	ch1 := hub.Subscribe(1, 0)
+	ch2 := hub.Subscribe(2, 0)
 	defer hub.Unsubscribe(ch1)
 	defer hub.Unsubscribe(ch2)
 
@@ -52,7 +52,7 @@ func TestSSEHub_FilterByDocumentID(t *testing.T) {
 func TestSSEHub_WildcardSubscriber(t *testing.T) {
 	hub := NewSSEHub()
 	// documentID=0 means subscribe to all events
-	ch := hub.Subscribe(0)
+	ch := hub.Subscribe(0, 0)
 	defer hub.Unsubscribe(ch)
 
 	hub.Broadcast(SSEEvent{Type: "any.event", DocumentID: 99})
@@ -67,7 +67,7 @@ func TestSSEHub_WildcardSubscriber(t *testing.T) {
 
 func TestSSEHub_Unsubscribe(t *testing.T) {
 	hub := NewSSEHub()
-	ch := hub.Subscribe(1)
+	ch := hub.Subscribe(1, 0)
 	hub.Unsubscribe(ch)
 
 	hub.Broadcast(SSEEvent{Type: "after.unsub", DocumentID: 1})
@@ -82,7 +82,7 @@ func TestSSEHub_Unsubscribe(t *testing.T) {
 
 func TestSSEHub_BroadcastFormat(t *testing.T) {
 	hub := NewSSEHub()
-	ch := hub.Subscribe(5)
+	ch := hub.Subscribe(5, 0)
 	defer hub.Unsubscribe(ch)
 
 	hub.Broadcast(SSEEvent{Type: "document.approved", DocumentID: 5, Payload: map[string]any{"status": "approved"}})
@@ -104,7 +104,7 @@ func TestSSEHub_BroadcastFormat(t *testing.T) {
 
 func TestSSEHub_SlowClientDrop(t *testing.T) {
 	hub := NewSSEHub()
-	ch := hub.Subscribe(1)
+	ch := hub.Subscribe(1, 0)
 	defer hub.Unsubscribe(ch)
 
 	// Fill the buffer (size 16) then send one more
@@ -128,8 +128,8 @@ done:
 
 func TestSSEHub_MultipleClients(t *testing.T) {
 	hub := NewSSEHub()
-	ch1 := hub.Subscribe(1)
-	ch2 := hub.Subscribe(1)
+	ch1 := hub.Subscribe(1, 0)
+	ch2 := hub.Subscribe(1, 0)
 	defer hub.Unsubscribe(ch1)
 	defer hub.Unsubscribe(ch2)
 
@@ -144,5 +144,44 @@ func TestSSEHub_MultipleClients(t *testing.T) {
 	case <-ch2:
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("ch2 should receive")
+	}
+}
+
+func TestSSEHub_UserTargeting(t *testing.T) {
+	hub := NewSSEHub()
+	chBob := hub.Subscribe(0, 42)
+	chAlice := hub.Subscribe(0, 99)
+	chLegacy := hub.Subscribe(0, 0)
+	defer hub.Unsubscribe(chBob)
+	defer hub.Unsubscribe(chAlice)
+	defer hub.Unsubscribe(chLegacy)
+
+	// Targeted at user 42.
+	hub.Broadcast(SSEEvent{Type: "review.feedback", UserID: 42})
+
+	select {
+	case <-chBob:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("user-42 client should receive its targeted event")
+	}
+	select {
+	case <-chAlice:
+		t.Fatal("user-99 client must not snoop on user-42's targeted event")
+	case <-time.After(50 * time.Millisecond):
+	}
+	select {
+	case <-chLegacy:
+		t.Fatal("legacy userID=0 subscriber must not receive other users' targeted events")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// Untargeted broadcast still reaches everyone.
+	hub.Broadcast(SSEEvent{Type: "anyone"})
+	for _, ch := range []chan string{chBob, chAlice, chLegacy} {
+		select {
+		case <-ch:
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("untargeted broadcast must reach every subscriber")
+		}
 	}
 }

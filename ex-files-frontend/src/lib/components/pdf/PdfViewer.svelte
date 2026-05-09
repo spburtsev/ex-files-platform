@@ -3,6 +3,8 @@
 	import type { Attachment } from 'svelte/attachments';
 	import { getPdfjs } from '$lib/pdf/pdfjs';
 	import type { Comment } from '$lib/api';
+	import { avatarColorClass, initials } from '$lib/utils';
+	import { deriveClusters } from '$lib/pdf/rendering';
 
 	interface Props {
 		comments: Comment[];
@@ -26,7 +28,8 @@
 	let error = $state<string | null>(null);
 	let canvasRef: HTMLCanvasElement | null = null;
 	let loadToken = 0;
-	let hoveredCommentId = $state<string | null>(null);
+	let hoveredClusterId = $state<string | null>(null);
+	let pinnedClusterId = $state<string | null>(null);
 
 	export async function load(data: Uint8Array) {
 		const myToken = ++loadToken;
@@ -55,7 +58,22 @@
 		};
 	});
 
-	const pageComments = $derived(comments.filter((c) => c.metadata.page === currentPage+1));
+	const pageComments = $derived(comments.filter((c) => c.metadata.page === currentPage + 1));
+	const clusteredComments = $derived(
+		pageComments.map((c) => ({ ...c, x: c.metadata.x, y: c.metadata.y }))
+	);
+
+	// Markers within 3% of canvas size (marker diameter at default zoom) collapse
+	// into a single cluster, displayed at the centroid.
+	const CLUSTER_THRESHOLD = 0.03;
+
+	const clusters = $derived(deriveClusters(clusteredComments, CLUSTER_THRESHOLD));
+
+	// Drop any pinned feed when navigating between pages.
+	$effect(() => {
+		void currentPage;
+		pinnedClusterId = null;
+	});
 
 	function renderAttachment(doc: PDFDocumentProxy): Attachment<HTMLCanvasElement> {
 		return (canvas) => {
@@ -89,6 +107,12 @@
 	}
 
 	function handleCanvasClick(e: MouseEvent) {
+		// A pinned feed is dismissed by any canvas click outside the marker/popup.
+		// Don't open the new-comment dialog on the same click that dismisses it.
+		if (pinnedClusterId !== null) {
+			pinnedClusterId = null;
+			return;
+		}
 		if (!canvasRef) return;
 		const rect = canvasRef.getBoundingClientRect();
 		const x = (e.clientX - rect.left) / rect.width;
@@ -96,22 +120,13 @@
 		onpageclick(currentPage, x, y, e.clientX, e.clientY);
 	}
 
-	function formatTime(iso: string) {
-		return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+	function toggleClusterPin(e: MouseEvent, clusterId: string) {
+		e.stopPropagation();
+		pinnedClusterId = pinnedClusterId === clusterId ? null : clusterId;
 	}
 
-	function avatarColor(name: string) {
-		const colors = [
-			'bg-blue-500',
-			'bg-emerald-500',
-			'bg-violet-500',
-			'bg-rose-500',
-			'bg-amber-500',
-			'bg-cyan-500'
-		];
-		let hash = 0;
-		for (const ch of name) hash = ch.charCodeAt(0) + ((hash << 5) - hash);
-		return colors[Math.abs(hash) % colors.length];
+	function formatTime(iso: string) {
+		return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 	}
 </script>
 
@@ -130,40 +145,81 @@
 				<canvas {@attach renderAttachment(pdfDoc)}></canvas>
 
 				{#if showMarkers}
-					{#each pageComments as comment, i (comment.id)}
+					{#each clusters as cluster (cluster.id)}
+						{@const isOpen = pinnedClusterId === cluster.id || hoveredClusterId === cluster.id}
+						{@const isPinned = pinnedClusterId === cluster.id}
+						{@const showBelow = cluster.y < 0.25}
+						{@const isFeed = cluster.items.length > 1}
 						<div
 							class="absolute"
-							style="left: {comment.metadata.x * 100}%; top: {comment.metadata.y * 100}%"
-							onmouseenter={() => (hoveredCommentId = comment.id)}
-							onmouseleave={() => (hoveredCommentId = null)}
+							style="left: {cluster.x * 100}%; top: {cluster.y * 100}%"
+							onmouseenter={() => (hoveredClusterId = cluster.id)}
+							onmouseleave={() => (hoveredClusterId = null)}
 						>
+							<!-- svelte-ignore a11y_click_events_have_key_events -->
+							<!-- svelte-ignore a11y_no_static_element_interactions -->
 							<div
-								class="flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-amber-400 text-xs font-bold text-white shadow-md ring-2 ring-white transition-transform hover:scale-125"
+								class="flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full bg-amber-400 text-xs font-bold text-white shadow-md ring-2 transition-transform hover:scale-125 {isPinned
+									? 'ring-amber-600'
+									: 'ring-white'}"
+								onclick={(e) => toggleClusterPin(e, cluster.id)}
 							>
-								{i + 1}
+								{cluster.items.length}
 							</div>
 
-							{#if hoveredCommentId === comment.id}
-								{@const showBelow = comment.metadata.y < 0.25}
+							{#if isOpen}
+								<!-- svelte-ignore a11y_click_events_have_key_events -->
+								<!-- svelte-ignore a11y_no_static_element_interactions -->
 								<div
-									class="absolute left-1/2 z-20 w-56 -translate-x-1/2 rounded-lg border bg-card p-3 shadow-xl {showBelow
-										? 'top-full mt-2'
-										: 'bottom-full mb-2'}"
+									class="absolute left-1/2 z-20 -translate-x-1/2 rounded-lg border bg-card shadow-xl {isFeed
+										? 'w-72'
+										: 'w-56 p-3'} {showBelow ? 'top-full mt-2' : 'bottom-full mb-2'}"
+									onclick={(e) => e.stopPropagation()}
 								>
-									<div class="flex items-center gap-2">
-										<div
-											class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white {avatarColor(
-												comment.authorName
-											)}"
-										>
-											{comment.authorName.charAt(0).toUpperCase()}
+									{#if isFeed}
+										<div class="max-h-64 divide-y overflow-y-auto">
+											{#each cluster.items as c (c.id)}
+												<div class="px-3 py-2">
+													<div class="flex items-center gap-2">
+														<span
+															class="flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] font-bold text-white {avatarColorClass(
+																c.authorId
+															)}"
+															title={c.authorName}
+														>
+															{initials(c.authorName)}
+														</span>
+														<div class="min-w-0 flex-1">
+															<p class="truncate text-xs font-medium">{c.authorName}</p>
+															<p class="text-[10px] text-muted-foreground">
+																{formatTime(c.createdAt)}
+															</p>
+														</div>
+													</div>
+													<p class="mt-1.5 text-sm leading-snug text-muted-foreground">
+														{c.body}
+													</p>
+												</div>
+											{/each}
 										</div>
-										<div class="min-w-0">
-											<p class="truncate text-sm font-medium">{comment.authorName}</p>
-											<p class="text-xs text-muted-foreground">{formatTime(comment.createdAt)}</p>
+									{:else}
+										{@const c = cluster.items[0]}
+										<div class="flex items-center gap-2">
+											<span
+												class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-xs font-bold text-white {avatarColorClass(
+													c.authorId
+												)}"
+												title={c.authorName}
+											>
+												{initials(c.authorName)}
+											</span>
+											<div class="min-w-0">
+												<p class="truncate text-sm font-medium">{c.authorName}</p>
+												<p class="text-xs text-muted-foreground">{formatTime(c.createdAt)}</p>
+											</div>
 										</div>
-									</div>
-									<p class="mt-2 text-sm leading-snug text-muted-foreground">{comment.body}</p>
+										<p class="mt-2 text-sm leading-snug text-muted-foreground">{c.body}</p>
+									{/if}
 									<!-- caret -->
 									{#if showBelow}
 										<div

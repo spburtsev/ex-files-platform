@@ -57,6 +57,7 @@ type Document struct {
 	MimeType     string         `gorm:"not null"`
 	Size         int64          `gorm:"not null"`
 	Hash         string         `gorm:"type:varchar(64);not null;index"`
+	StorageKey   string         `gorm:"not null"`
 	Status       DocumentStatus `gorm:"type:varchar(30);default:pending;not null"`
 	UploaderID   uint           `gorm:"not null;index"`
 	Uploader     User           `gorm:"foreignKey:UploaderID"`
@@ -65,16 +66,4 @@ type Document struct {
 	ReviewerID   *uint          `gorm:"index"`
 	Reviewer     User           `gorm:"foreignKey:ReviewerID"`
 	ReviewerNote string         `gorm:"type:text"`
-}
-
-type DocumentVersion struct {
-	gorm.Model
-	DocumentID uint     `gorm:"not null;index"`
-	Document   Document `gorm:"foreignKey:DocumentID"`
-	Version    int      `gorm:"not null"`
-	Hash       string   `gorm:"type:varchar(64);not null"`
-	Size       int64    `gorm:"not null"`
-	StorageKey string   `gorm:"not null"`
-	UploaderID uint     `gorm:"not null"`
-	Uploader   User     `gorm:"foreignKey:UploaderID"`
 }

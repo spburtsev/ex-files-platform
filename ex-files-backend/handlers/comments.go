@@ -3,16 +3,18 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 
 	"gorm.io/datatypes"
 
+	"github.com/spburtsev/ex-files-backend/logging"
 	"github.com/spburtsev/ex-files-backend/models"
 	"github.com/spburtsev/ex-files-backend/oapi"
 	"github.com/spburtsev/ex-files-backend/services"
 )
 
 // jsonNumberToFloat handles values from datatypes.JSONMap.Scan, which uses
-// json.Decoder.UseNumber() — numeric fields come back as json.Number (string),
+// json.Decoder.UseNumber() - numeric fields come back as json.Number (string),
 // not float64.
 func jsonNumberToFloat(v any) (float64, bool) {
 	switch n := v.(type) {
@@ -79,10 +81,11 @@ func (s *Server) CommentsCreate(ctx context.Context, req *oapi.CreateCommentRequ
 		logErr("comments.create", err)
 		return &oapi.CommentsCreateInternalServerError{Error: "failed to create comment"}, nil
 	}
-	logAudit(s.Audit, models.AuditActionCommentAdded, uid, uintPtr(docID), "document", map[string]any{
-		"comment_id":  c.ID,
-		"document_id": docID,
-	})
+	logging.Audit(ctx, "document.comment_added", uid,
+		slog.String("target_type", "document"),
+		slog.Uint64("target_id", uint64(docID)),
+		slog.Uint64("comment_id", uint64(c.ID)),
+	)
 	created, err := s.CommentRepo.FindByID(c.ID)
 	if err != nil {
 		logErr("comments.create.reload", err)
@@ -139,9 +142,11 @@ func (s *Server) CommentsDelete(ctx context.Context, params oapi.CommentsDeleteP
 		logErr("comments.delete", err)
 		return &oapi.CommentsDeleteInternalServerError{Error: "failed to delete comment"}, nil
 	}
-	logAudit(s.Audit, models.AuditActionCommentDeleted, uid, uintPtr(c.ID), "comment", map[string]any{
-		"document_id": c.DocumentID,
-	})
+	logging.Audit(ctx, "document.comment_deleted", uid,
+		slog.String("target_type", "comment"),
+		slog.Uint64("target_id", uint64(c.ID)),
+		slog.Uint64("document_id", uint64(c.DocumentID)),
+	)
 	if s.Hub != nil {
 		s.Hub.Broadcast(services.SSEEvent{
 			Type:       "comment.deleted",

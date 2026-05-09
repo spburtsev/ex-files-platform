@@ -20,10 +20,8 @@ func setupTestDB(t *testing.T) *gorm.DB {
 		&models.User{},
 		&models.Workspace{},
 		&models.WorkspaceMember{},
-		&models.AuditEntry{},
 		&models.Issue{},
 		&models.Document{},
-		&models.DocumentVersion{},
 		&models.Comment{},
 	)
 	require.NoError(t, err)
@@ -317,33 +315,6 @@ func TestGormDocumentRepo_CRUD(t *testing.T) {
 	assert.Len(t, docs3, 1)
 }
 
-func TestGormDocumentRepo_Versions(t *testing.T) {
-	db := setupTestDB(t)
-	docRepo := &GormDocumentRepository{DB: db}
-	userRepo := &GormUserRepository{DB: db}
-
-	user := &models.User{Email: "u@t.com", Name: "U", PasswordHash: "h"}
-	userRepo.Create(user)
-
-	doc := &models.Document{Name: "doc.pdf", Hash: "h1", Status: models.DocumentStatusPending, UploaderID: user.ID, IssueID: 1}
-	docRepo.Create(doc)
-
-	v := &models.DocumentVersion{DocumentID: doc.ID, Version: 1, Hash: "vh1", Size: 100, StorageKey: "key1", UploaderID: user.ID}
-	require.NoError(t, docRepo.CreateVersion(v))
-
-	versions, err := docRepo.GetVersions(doc.ID)
-	require.NoError(t, err)
-	assert.Len(t, versions, 1)
-
-	ver, err := docRepo.GetVersion(v.ID)
-	require.NoError(t, err)
-	assert.Equal(t, "vh1", ver.Hash)
-
-	latest, err := docRepo.LatestVersionNumber(doc.ID)
-	require.NoError(t, err)
-	assert.Equal(t, 1, latest)
-}
-
 func TestGormDocumentRepo_Delete(t *testing.T) {
 	db := setupTestDB(t)
 	docRepo := &GormDocumentRepository{DB: db}
@@ -465,69 +436,6 @@ func TestGormCommentRepo_CRUD(t *testing.T) {
 	comments, err := commentRepo.ListByDocument(1)
 	require.NoError(t, err)
 	assert.Len(t, comments, 1)
-}
-
-// --- Audit Repository ---
-
-func TestGormAuditRepo_AppendAndList(t *testing.T) {
-	db := setupTestDB(t)
-	auditRepo := &GormAuditRepository{DB: db}
-	userRepo := &GormUserRepository{DB: db}
-
-	user := &models.User{Email: "u@t.com", Name: "U", PasswordHash: "h"}
-	userRepo.Create(user)
-
-	entry := &models.AuditEntry{
-		Action:     models.AuditActionUserRegistered,
-		ActorID:    user.ID,
-		TargetType: "user",
-	}
-	require.NoError(t, auditRepo.Append(entry))
-
-	entries, total, err := auditRepo.List(AuditFilter{}, 10, 0)
-	require.NoError(t, err)
-	assert.Equal(t, int64(1), total)
-	assert.Len(t, entries, 1)
-	assert.Equal(t, models.AuditActionUserRegistered, entries[0].Action)
-}
-
-func TestGormAuditRepo_ListWithFilters(t *testing.T) {
-	db := setupTestDB(t)
-	auditRepo := &GormAuditRepository{DB: db}
-	userRepo := &GormUserRepository{DB: db}
-
-	user := &models.User{Email: "u@t.com", Name: "U", PasswordHash: "h"}
-	userRepo.Create(user)
-
-	auditRepo.Append(&models.AuditEntry{Action: models.AuditActionUserRegistered, ActorID: user.ID, TargetType: "user"})
-	auditRepo.Append(&models.AuditEntry{Action: models.AuditActionDocumentUploaded, ActorID: user.ID, TargetType: "document"})
-
-	// Filter by action
-	entries, total, err := auditRepo.List(AuditFilter{Action: string(models.AuditActionUserRegistered)}, 10, 0)
-	require.NoError(t, err)
-	assert.Equal(t, int64(1), total)
-	assert.Len(t, entries, 1)
-
-	// Filter by actor
-	entries2, total2, err := auditRepo.List(AuditFilter{ActorID: &user.ID}, 10, 0)
-	require.NoError(t, err)
-	assert.Equal(t, int64(2), total2)
-	assert.Len(t, entries2, 2)
-
-	// Filter by target type
-	entries3, total3, err := auditRepo.List(AuditFilter{TargetType: "document"}, 10, 0)
-	require.NoError(t, err)
-	assert.Equal(t, int64(1), total3)
-	assert.Len(t, entries3, 1)
-
-	// Filter by date range
-	now := time.Now()
-	past := now.Add(-1 * time.Hour)
-	future := now.Add(1 * time.Hour)
-	entries4, total4, err := auditRepo.List(AuditFilter{From: &past, To: &future}, 10, 0)
-	require.NoError(t, err)
-	assert.Equal(t, int64(2), total4)
-	assert.Len(t, entries4, 2)
 }
 
 func TestGormDocumentRepo_ListByIssue_ApprovedFirst(t *testing.T) {

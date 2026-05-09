@@ -21,7 +21,6 @@ func wsServer(tokens *mockTokens, repo *mockWorkspaceRepo, users *mockUserRepo) 
 		UserRepo:      users,
 		Tokens:        tokens,
 		Hasher:        stubHasher{},
-		Audit:         &dummyAudit{},
 		WorkspaceRepo: repo,
 	}
 }

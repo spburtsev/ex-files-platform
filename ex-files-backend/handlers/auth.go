@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/spburtsev/ex-files-backend/logging"
 	"github.com/spburtsev/ex-files-backend/middleware"
 	"github.com/spburtsev/ex-files-backend/models"
 	"github.com/spburtsev/ex-files-backend/oapi"
@@ -42,9 +43,11 @@ func (s *Server) AuthRegister(ctx context.Context, req *oapi.RegisterRequest) (o
 		return &oapi.AuthRegisterInternalServerError{Error: "failed to issue token"}, nil
 	}
 
-	logAudit(s.Audit, models.AuditActionUserRegistered, user.ID, uintPtr(user.ID), "user", map[string]any{
-		"email": user.Email,
-	})
+	logging.Audit(ctx, "user.registered", user.ID,
+		slog.String("target_type", "user"),
+		slog.Uint64("target_id", uint64(user.ID)),
+		slog.String("email", user.Email),
+	)
 
 	middleware.SetSessionCookie(ctx, token)
 	return &oapi.AuthResponse{
@@ -71,9 +74,11 @@ func (s *Server) AuthLogin(ctx context.Context, req *oapi.LoginRequest) (oapi.Au
 		return &oapi.AuthLoginInternalServerError{Error: "failed to issue token"}, nil
 	}
 
-	logAudit(s.Audit, models.AuditActionUserLoggedIn, user.ID, uintPtr(user.ID), "user", map[string]any{
-		"email": user.Email,
-	})
+	logging.Audit(ctx, "user.logged_in", user.ID,
+		slog.String("target_type", "user"),
+		slog.Uint64("target_id", uint64(user.ID)),
+		slog.String("email", user.Email),
+	)
 
 	middleware.SetSessionCookie(ctx, token)
 	return &oapi.AuthResponse{
@@ -201,7 +206,10 @@ func (s *Server) AuthChangePassword(ctx context.Context, req *oapi.ChangePasswor
 		logErr("auth.change.update", err)
 		return &oapi.AuthChangePasswordInternalServerError{Error: "internal error"}, nil
 	}
-	logAudit(s.Audit, models.AuditActionPasswordChanged, uid, uintPtr(uid), "user", nil)
+	logging.Audit(ctx, "user.password_changed", uid,
+		slog.String("target_type", "user"),
+		slog.Uint64("target_id", uint64(uid)),
+	)
 	return &oapi.MessageResponse{Message: "password updated"}, nil
 }
 

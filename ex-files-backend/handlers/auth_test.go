@@ -34,7 +34,6 @@ func TestAuthRegister_HappyPath(t *testing.T) {
 		UserRepo: users,
 		Tokens:   tokens,
 		Hasher:   stubHasher{},
-		Audit:    &dummyAudit{},
 	}
 	srv := newTestServer(t, s)
 	defer srv.Close()
@@ -67,7 +66,7 @@ func TestAuthRegister_DuplicateEmailReturns409(t *testing.T) {
 	users := &mockUserRepo{}
 	users.On("FindByEmail", "alice@example.com").Return(&models.User{Email: "alice@example.com"}, nil)
 
-	s := &handlers.Server{UserRepo: users, Tokens: &mockTokens{}, Hasher: stubHasher{}, Audit: &dummyAudit{}}
+	s := &handlers.Server{UserRepo: users, Tokens: &mockTokens{}, Hasher: stubHasher{}}
 	srv := newTestServer(t, s)
 	defer srv.Close()
 
@@ -94,7 +93,7 @@ func TestAuthLogin_WrongPasswordReturns401(t *testing.T) {
 		PasswordHash: "hashed:correct-password",
 	}, nil)
 
-	s := &handlers.Server{UserRepo: users, Tokens: &mockTokens{}, Hasher: stubHasher{}, Audit: &dummyAudit{}}
+	s := &handlers.Server{UserRepo: users, Tokens: &mockTokens{}, Hasher: stubHasher{}}
 	srv := newTestServer(t, s)
 	defer srv.Close()
 
@@ -121,7 +120,7 @@ func TestAuthMe_RoundtripsBearerAuth(t *testing.T) {
 		Role:  models.RoleEmployee,
 	}, nil)
 
-	s := &handlers.Server{UserRepo: users, Tokens: tokens, Hasher: stubHasher{}, Audit: &dummyAudit{}}
+	s := &handlers.Server{UserRepo: users, Tokens: tokens, Hasher: stubHasher{}}
 	srv := newTestServer(t, s)
 	defer srv.Close()
 
@@ -140,7 +139,7 @@ func TestAuthMe_RoundtripsBearerAuth(t *testing.T) {
 }
 
 func TestAuthMe_NoTokenReturns401(t *testing.T) {
-	s := &handlers.Server{UserRepo: &mockUserRepo{}, Tokens: &mockTokens{}, Hasher: stubHasher{}, Audit: &dummyAudit{}}
+	s := &handlers.Server{UserRepo: &mockUserRepo{}, Tokens: &mockTokens{}, Hasher: stubHasher{}}
 	srv := newTestServer(t, s)
 	defer srv.Close()
 
@@ -153,7 +152,7 @@ func TestAuthMe_NoTokenReturns401(t *testing.T) {
 func TestAuthLogout_ClearsCookie(t *testing.T) {
 	tokens := &mockTokens{}
 	tokens.On("Validate", "good-token").Return(&models.Claims{UserID: 1, Role: models.RoleEmployee}, nil)
-	s := &handlers.Server{UserRepo: &mockUserRepo{}, Tokens: tokens, Hasher: stubHasher{}, Audit: &dummyAudit{}}
+	s := &handlers.Server{UserRepo: &mockUserRepo{}, Tokens: tokens, Hasher: stubHasher{}}
 	srv := newTestServer(t, s)
 	defer srv.Close()
 
@@ -170,7 +169,7 @@ func TestAuthLogout_ClearsCookie(t *testing.T) {
 }
 
 func TestAuthListUsers_RequiresAuth(t *testing.T) {
-	s := &handlers.Server{UserRepo: &mockUserRepo{}, Tokens: &mockTokens{}, Hasher: stubHasher{}, Audit: &dummyAudit{}}
+	s := &handlers.Server{UserRepo: &mockUserRepo{}, Tokens: &mockTokens{}, Hasher: stubHasher{}}
 	srv := newTestServer(t, s)
 	defer srv.Close()
 
@@ -190,7 +189,7 @@ func TestAuthListUsers_ReturnsAll(t *testing.T) {
 		{Email: "b@x", Name: "B", Role: models.RoleManager},
 	}, nil)
 
-	s := &handlers.Server{UserRepo: users, Tokens: tokens, Hasher: stubHasher{}, Audit: &dummyAudit{}}
+	s := &handlers.Server{UserRepo: users, Tokens: tokens, Hasher: stubHasher{}}
 	srv := newTestServer(t, s)
 	defer srv.Close()
 
@@ -208,7 +207,7 @@ func TestAuthForgotPassword_AlwaysReturns200(t *testing.T) {
 	users := &mockUserRepo{}
 	users.On("FindByEmail", "nobody@example.com").Return(nil, errors.New("not found"))
 
-	s := &handlers.Server{UserRepo: users, Tokens: &mockTokens{}, Hasher: stubHasher{}, Audit: &dummyAudit{}}
+	s := &handlers.Server{UserRepo: users, Tokens: &mockTokens{}, Hasher: stubHasher{}}
 	srv := newTestServer(t, s)
 	defer srv.Close()
 

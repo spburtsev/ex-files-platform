@@ -129,25 +129,6 @@ func (stubHasher) Compare(h, p string) error {
 	return errors.New("mismatch")
 }
 
-// --- mocks: audit -------------------------------------------------------
-
-type dummyAudit struct{}
-
-func (dummyAudit) Append(*models.AuditEntry) error { return nil }
-func (dummyAudit) List(_ services.AuditFilter, _, _ int) ([]models.AuditEntry, int64, error) {
-	return nil, 0, nil
-}
-
-type mockAuditRepo struct{ mock.Mock }
-
-func (m *mockAuditRepo) Append(e *models.AuditEntry) error {
-	return m.Called(e).Error(0)
-}
-func (m *mockAuditRepo) List(f services.AuditFilter, limit, offset int) ([]models.AuditEntry, int64, error) {
-	a := m.Called(f, limit, offset)
-	return a.Get(0).([]models.AuditEntry), a.Get(1).(int64), a.Error(2)
-}
-
 // --- mocks: workspaces --------------------------------------------------
 
 type mockWorkspaceRepo struct{ mock.Mock }
@@ -229,6 +210,18 @@ func (m *mockIssueRepo) Create(issue *models.Issue) error {
 func (m *mockIssueRepo) Update(issue *models.Issue) error {
 	return m.Called(issue).Error(0)
 }
+func (m *mockIssueRepo) ListUnresolvedWithDeadline() ([]models.Issue, error) {
+	a := m.Called()
+	return a.Get(0).([]models.Issue), a.Error(1)
+}
+func (m *mockIssueRepo) ListMyCurrentIssues(userID uint, search string, limit, offset int) ([]models.Issue, int64, error) {
+	a := m.Called(userID, search, limit, offset)
+	return a.Get(0).([]models.Issue), a.Get(1).(int64), a.Error(2)
+}
+func (m *mockIssueRepo) DashboardSummary(userID uint, window time.Duration) (services.DashboardSummary, error) {
+	a := m.Called(userID, window)
+	return a.Get(0).(services.DashboardSummary), a.Error(1)
+}
 
 // --- mocks: documents ---------------------------------------------------
 
@@ -271,28 +264,6 @@ func (m *mockDocumentRepo) ListByIssue(issueID uint, search, status string, limi
 }
 func (m *mockDocumentRepo) Delete(id uint) error {
 	return m.Called(id).Error(0)
-}
-func (m *mockDocumentRepo) CreateVersion(v *models.DocumentVersion) error {
-	args := m.Called(v)
-	if id, ok := args.Get(0).(uint); ok {
-		v.ID = id
-	}
-	return args.Error(1)
-}
-func (m *mockDocumentRepo) GetVersions(documentID uint) ([]models.DocumentVersion, error) {
-	a := m.Called(documentID)
-	return a.Get(0).([]models.DocumentVersion), a.Error(1)
-}
-func (m *mockDocumentRepo) GetVersion(id uint) (*models.DocumentVersion, error) {
-	a := m.Called(id)
-	if v, ok := a.Get(0).(*models.DocumentVersion); ok {
-		return v, a.Error(1)
-	}
-	return nil, a.Error(1)
-}
-func (m *mockDocumentRepo) LatestVersionNumber(documentID uint) (int, error) {
-	a := m.Called(documentID)
-	return a.Int(0), a.Error(1)
 }
 
 // --- mocks: comments ----------------------------------------------------

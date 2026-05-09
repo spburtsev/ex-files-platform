@@ -19,6 +19,8 @@ func issueToOAPI(i *models.Issue) oapi.Issue {
 		Archived:      oapi.NewOptBool(i.Archived),
 		CommentsCount: int32(i.CommentsCount),
 		VersionsCount: int32(i.VersionsCount),
+		CreatedAt:     i.CreatedAt,
+		UpdatedAt:     i.UpdatedAt,
 	}
 	if i.Deadline != nil {
 		out.Deadline = oapi.NewOptNilDateTime(*i.Deadline)

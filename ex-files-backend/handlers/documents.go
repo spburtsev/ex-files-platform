@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/url"
 	"time"
 
 	"gorm.io/gorm"
 
+	"github.com/spburtsev/ex-files-backend/logging"
 	"github.com/spburtsev/ex-files-backend/models"
 	"github.com/spburtsev/ex-files-backend/oapi"
 )
@@ -37,20 +39,6 @@ func documentToOAPI(d *models.Document) oapi.Document {
 		out.ReviewerNote = oapi.NewOptString(d.ReviewerNote)
 	}
 	return out
-}
-
-func versionToOAPI(v *models.DocumentVersion) oapi.DocumentVersion {
-	return oapi.DocumentVersion{
-		ID:           formatID(v.ID),
-		DocumentId:   formatID(v.DocumentID),
-		Version:      int32(v.Version),
-		Hash:         v.Hash,
-		Size:         v.Size,
-		StorageKey:   v.StorageKey,
-		UploaderId:   formatID(v.UploaderID),
-		UploaderName: v.Uploader.Name,
-		CreatedAt:    v.CreatedAt,
-	}
 }
 
 // DocumentsList implements GET /issues/{id}/documents.
@@ -152,30 +140,25 @@ func (s *Server) DocumentsUpload(ctx context.Context, req *oapi.DocumentsUploadR
 		return &oapi.DocumentsUploadInternalServerError{Error: "failed to create document"}, nil
 	}
 
-	storageKey := fmt.Sprintf("issues/%d/documents/%d/v1/%s", issueID, doc.ID, mp.Name)
+	storageKey := fmt.Sprintf("issues/%d/documents/%d/%s", issueID, doc.ID, mp.Name)
 	if err := s.Storage.Upload(ctx, storageKey, mp.File, mp.Size, mimeType); err != nil {
 		logErr("documents.upload.storage", err)
 		return &oapi.DocumentsUploadInternalServerError{Error: "failed to upload file"}, nil
 	}
 
-	version := models.DocumentVersion{
-		DocumentID: doc.ID,
-		Version:    1,
-		Hash:       hash,
-		Size:       mp.Size,
-		StorageKey: storageKey,
-		UploaderID: uid,
-	}
-	if err := s.DocumentRepo.CreateVersion(&version); err != nil {
-		logErr("documents.upload.create_version", err)
-		return &oapi.DocumentsUploadInternalServerError{Error: "failed to create version"}, nil
+	doc.StorageKey = storageKey
+	if err := s.DocumentRepo.Update(&doc); err != nil {
+		logErr("documents.upload.update_key", err)
+		return &oapi.DocumentsUploadInternalServerError{Error: "failed to persist storage key"}, nil
 	}
 
-	logAudit(s.Audit, models.AuditActionDocumentUploaded, uid, uintPtr(doc.ID), "document", map[string]any{
-		"name":     doc.Name,
-		"hash":     hash,
-		"issue_id": issueID,
-	})
+	logging.Audit(ctx, "document.uploaded", uid,
+		slog.String("target_type", "document"),
+		slog.Uint64("target_id", uint64(doc.ID)),
+		slog.String("name", doc.Name),
+		slog.String("hash", hash),
+		slog.Uint64("issue_id", uint64(issueID)),
+	)
 
 	loaded, err := s.DocumentRepo.FindByID(doc.ID)
 	if err != nil {
@@ -185,78 +168,6 @@ func (s *Server) DocumentsUpload(ctx context.Context, req *oapi.DocumentsUploadR
 
 	return &oapi.UploadDocumentResponse{
 		Document: documentToOAPI(loaded),
-		Version:  versionToOAPI(&version),
-	}, nil
-}
-
-// DocumentsUploadVersion implements POST /documents/{id}/versions.
-func (s *Server) DocumentsUploadVersion(ctx context.Context, req *oapi.DocumentsUploadVersionReq, params oapi.DocumentsUploadVersionParams) (oapi.DocumentsUploadVersionRes, error) {
-	uid, err := s.callerID(ctx)
-	if err != nil {
-		return &oapi.DocumentsUploadVersionUnauthorized{Error: "unauthorized"}, nil
-	}
-	docID, ok := parseUintID(params.ID)
-	if !ok {
-		return &oapi.DocumentsUploadVersionBadRequest{Error: "invalid document id"}, nil
-	}
-	doc, err := s.DocumentRepo.FindByID(docID)
-	if err != nil {
-		return &oapi.DocumentsUploadVersionNotFound{Error: "document not found"}, nil
-	}
-
-	mp := req.File
-
-	hasher := sha256.New()
-	if _, err := io.Copy(hasher, mp.File); err != nil {
-		logErr("documents.upload_version.hash", err)
-		return &oapi.DocumentsUploadVersionInternalServerError{Error: "failed to hash file"}, nil
-	}
-	hash := fmt.Sprintf("%x", hasher.Sum(nil))
-
-	seeker, ok := mp.File.(io.Seeker)
-	if !ok {
-		return &oapi.DocumentsUploadVersionInternalServerError{Error: "uploaded file is not seekable"}, nil
-	}
-	if _, err := seeker.Seek(0, io.SeekStart); err != nil {
-		logErr("documents.upload_version.seek", err)
-		return &oapi.DocumentsUploadVersionInternalServerError{Error: "failed to read file"}, nil
-	}
-
-	latest, err := s.DocumentRepo.LatestVersionNumber(docID)
-	if err != nil {
-		logErr("documents.upload_version.latest", err)
-		return &oapi.DocumentsUploadVersionInternalServerError{Error: "failed to get version info"}, nil
-	}
-	newVersion := latest + 1
-
-	storageKey := fmt.Sprintf("issues/%d/documents/%d/v%d/%s", doc.IssueID, doc.ID, newVersion, mp.Name)
-	mimeType := mp.Header.Get("Content-Type")
-	if err := s.Storage.Upload(ctx, storageKey, mp.File, mp.Size, mimeType); err != nil {
-		logErr("documents.upload_version.storage", err)
-		return &oapi.DocumentsUploadVersionInternalServerError{Error: "failed to upload file"}, nil
-	}
-
-	version := models.DocumentVersion{
-		DocumentID: docID,
-		Version:    newVersion,
-		Hash:       hash,
-		Size:       mp.Size,
-		StorageKey: storageKey,
-		UploaderID: uid,
-	}
-	if err := s.DocumentRepo.CreateVersion(&version); err != nil {
-		logErr("documents.upload_version.create", err)
-		return &oapi.DocumentsUploadVersionInternalServerError{Error: "failed to create version"}, nil
-	}
-
-	logAudit(s.Audit, models.AuditActionVersionCreated, uid, uintPtr(doc.ID), "document", map[string]any{
-		"version": newVersion,
-		"hash":    hash,
-	})
-
-	return &oapi.UploadDocumentResponse{
-		Document: documentToOAPI(doc),
-		Version:  versionToOAPI(&version),
 	}, nil
 }
 
@@ -273,37 +184,23 @@ func (s *Server) DocumentsGet(ctx context.Context, params oapi.DocumentsGetParam
 	if err != nil {
 		return &oapi.DocumentsGetNotFound{Error: "document not found"}, nil
 	}
-	versions, err := s.DocumentRepo.GetVersions(docID)
-	if err != nil {
-		logErr("documents.get.versions", err)
-		return &oapi.DocumentsGetInternalServerError{Error: "failed to fetch versions"}, nil
-	}
-	out := make([]oapi.DocumentVersion, len(versions))
-	for i := range versions {
-		out[i] = versionToOAPI(&versions[i])
-	}
-	return &oapi.GetDocumentResponse{
-		Document: oapi.DocumentDetail{
-			Document: documentToOAPI(doc),
-			Versions: out,
-		},
-	}, nil
+	return &oapi.GetDocumentResponse{Document: documentToOAPI(doc)}, nil
 }
 
-// DocumentsGetFile implements GET /documents/{id}/versions/{versionId}/file.
+// DocumentsGetFile implements GET /documents/{id}/file.
 func (s *Server) DocumentsGetFile(ctx context.Context, params oapi.DocumentsGetFileParams) (oapi.DocumentsGetFileRes, error) {
 	if _, err := s.callerID(ctx); err != nil {
 		return &oapi.DocumentsGetFileUnauthorized{Error: "unauthorized"}, nil
 	}
-	versionID, ok := parseUintID(params.VersionId)
+	docID, ok := parseUintID(params.ID)
 	if !ok {
-		return &oapi.DocumentsGetFileNotFound{Error: "invalid version id"}, nil
+		return &oapi.DocumentsGetFileNotFound{Error: "invalid document id"}, nil
 	}
-	version, err := s.DocumentRepo.GetVersion(versionID)
+	doc, err := s.DocumentRepo.FindByID(docID)
 	if err != nil {
-		return &oapi.DocumentsGetFileNotFound{Error: "version not found"}, nil
+		return &oapi.DocumentsGetFileNotFound{Error: "document not found"}, nil
 	}
-	reader, err := s.Storage.Get(ctx, version.StorageKey)
+	reader, err := s.Storage.Get(ctx, doc.StorageKey)
 	if err != nil {
 		logErr("documents.file.read", err)
 		return &oapi.DocumentsGetFileInternalServerError{Error: "failed to read file"}, nil
@@ -311,26 +208,26 @@ func (s *Server) DocumentsGetFile(ctx context.Context, params oapi.DocumentsGetF
 	out := oapi.DocumentsGetFileOKHeaders{
 		Response: oapi.DocumentsGetFileOK{Data: reader},
 	}
-	if version.Size > 0 {
-		out.ContentLength = optInt64(version.Size)
+	if doc.Size > 0 {
+		out.ContentLength = optInt64(doc.Size)
 	}
 	return &out, nil
 }
 
-// DocumentsGetDownloadUrl implements GET /documents/{id}/versions/{versionId}/download.
+// DocumentsGetDownloadUrl implements GET /documents/{id}/download.
 func (s *Server) DocumentsGetDownloadUrl(ctx context.Context, params oapi.DocumentsGetDownloadUrlParams) (oapi.DocumentsGetDownloadUrlRes, error) {
 	if _, err := s.callerID(ctx); err != nil {
 		return &oapi.DocumentsGetDownloadUrlUnauthorized{Error: "unauthorized"}, nil
 	}
-	versionID, ok := parseUintID(params.VersionId)
+	docID, ok := parseUintID(params.ID)
 	if !ok {
-		return &oapi.DocumentsGetDownloadUrlNotFound{Error: "invalid version id"}, nil
+		return &oapi.DocumentsGetDownloadUrlNotFound{Error: "invalid document id"}, nil
 	}
-	version, err := s.DocumentRepo.GetVersion(versionID)
+	doc, err := s.DocumentRepo.FindByID(docID)
 	if err != nil {
-		return &oapi.DocumentsGetDownloadUrlNotFound{Error: "version not found"}, nil
+		return &oapi.DocumentsGetDownloadUrlNotFound{Error: "document not found"}, nil
 	}
-	signedURL, err := s.Storage.PresignedURL(ctx, version.StorageKey, 15*time.Minute)
+	signedURL, err := s.Storage.PresignedURL(ctx, doc.StorageKey, 15*time.Minute)
 	if err != nil {
 		logErr("documents.download.presign", err)
 		return &oapi.DocumentsGetDownloadUrlInternalServerError{Error: "failed to generate download URL"}, nil
@@ -369,9 +266,10 @@ func (s *Server) DocumentsSubmit(ctx context.Context, params oapi.DocumentsSubmi
 		logErr("documents.submit.update", err)
 		return &oapi.DocumentsSubmitInternalServerError{Error: "failed to update document"}, nil
 	}
-	logAudit(s.Audit, models.AuditActionDocumentSubmitted, uid, uintPtr(doc.ID), "document", map[string]any{
-		"document_id": doc.ID,
-	})
+	logging.Audit(ctx, "document.submitted", uid,
+		slog.String("target_type", "document"),
+		slog.Uint64("target_id", uint64(doc.ID)),
+	)
 	return &oapi.UpdateDocumentResponse{Document: documentToOAPI(doc)}, nil
 }
 
@@ -401,10 +299,11 @@ func (s *Server) DocumentsResubmit(ctx context.Context, params oapi.DocumentsRes
 		logErr("documents.resubmit.update", err)
 		return &oapi.DocumentsResubmitInternalServerError{Error: "failed to update document"}, nil
 	}
-	logAudit(s.Audit, models.AuditActionDocumentSubmitted, uid, uintPtr(doc.ID), "document", map[string]any{
-		"document_id": doc.ID,
-		"resubmit":    true,
-	})
+	logging.Audit(ctx, "document.submitted", uid,
+		slog.String("target_type", "document"),
+		slog.Uint64("target_id", uint64(doc.ID)),
+		slog.Bool("resubmit", true),
+	)
 	return &oapi.UpdateDocumentResponse{Document: documentToOAPI(doc)}, nil
 }
 
@@ -450,10 +349,11 @@ func (s *Server) DocumentsApprove(ctx context.Context, params oapi.DocumentsAppr
 		}
 	}
 
-	logAudit(s.Audit, models.AuditActionDocumentApproved, uid, uintPtr(doc.ID), "document", map[string]any{
-		"document_id": doc.ID,
-	})
-	notifyDocumentEvent(s.Email, s.UserRepo, s.Hub, doc, "document.approved",
+	logging.Audit(ctx, "document.approved", uid,
+		slog.String("target_type", "document"),
+		slog.Uint64("target_id", uint64(doc.ID)),
+	)
+	notifyDocumentEvent(s.Email, s.UserRepo, s.IssueRepo, s.Hub, doc, "document.approved",
 		fmt.Sprintf("Document approved: %s", doc.Name),
 		fmt.Sprintf("<p>Your document <strong>%s</strong> has been approved.</p>", doc.Name),
 	)
@@ -490,11 +390,12 @@ func (s *Server) DocumentsReject(ctx context.Context, req oapi.OptReviewNoteRequ
 		logErr("documents.reject.update", err)
 		return &oapi.DocumentsRejectInternalServerError{Error: "failed to update document"}, nil
 	}
-	logAudit(s.Audit, models.AuditActionDocumentRejected, uid, uintPtr(doc.ID), "document", map[string]any{
-		"document_id": doc.ID,
-		"note":        note,
-	})
-	notifyDocumentEvent(s.Email, s.UserRepo, s.Hub, doc, "document.rejected",
+	logging.Audit(ctx, "document.rejected", uid,
+		slog.String("target_type", "document"),
+		slog.Uint64("target_id", uint64(doc.ID)),
+		slog.String("note", note),
+	)
+	notifyDocumentEvent(s.Email, s.UserRepo, s.IssueRepo, s.Hub, doc, "document.rejected",
 		fmt.Sprintf("Document rejected: %s", doc.Name),
 		fmt.Sprintf("<p>Your document <strong>%s</strong> has been rejected.</p><p>Reason: %s</p>", doc.Name, note),
 	)
@@ -531,11 +432,12 @@ func (s *Server) DocumentsRequestChanges(ctx context.Context, req oapi.OptReview
 		logErr("documents.request_changes.update", err)
 		return &oapi.DocumentsRequestChangesInternalServerError{Error: "failed to update document"}, nil
 	}
-	logAudit(s.Audit, models.AuditActionDocumentChangesRequested, uid, uintPtr(doc.ID), "document", map[string]any{
-		"document_id": doc.ID,
-		"note":        note,
-	})
-	notifyDocumentEvent(s.Email, s.UserRepo, s.Hub, doc, "document.changes_requested",
+	logging.Audit(ctx, "document.changes_requested", uid,
+		slog.String("target_type", "document"),
+		slog.Uint64("target_id", uint64(doc.ID)),
+		slog.String("note", note),
+	)
+	notifyDocumentEvent(s.Email, s.UserRepo, s.IssueRepo, s.Hub, doc, "document.changes_requested",
 		fmt.Sprintf("Changes requested: %s", doc.Name),
 		fmt.Sprintf("<p>Changes have been requested for your document <strong>%s</strong>.</p><p>Note: %s</p>", doc.Name, note),
 	)
@@ -568,10 +470,12 @@ func (s *Server) DocumentsAssignReviewer(ctx context.Context, req *oapi.AssignRe
 		logErr("documents.assign_reviewer.update", err)
 		return &oapi.DocumentsAssignReviewerInternalServerError{Error: "failed to update document"}, nil
 	}
-	logAudit(s.Audit, models.AuditActionDocumentReviewerAssigned, uid, uintPtr(doc.ID), "document", map[string]any{
-		"reviewer_id": reviewerID,
-	})
-	notifyReviewerAssigned(s.Email, s.UserRepo, s.Hub, doc, reviewerID)
+	logging.Audit(ctx, "document.reviewer_assigned", uid,
+		slog.String("target_type", "document"),
+		slog.Uint64("target_id", uint64(doc.ID)),
+		slog.Uint64("reviewer_id", uint64(reviewerID)),
+	)
+	notifyReviewerAssigned(s.Email, s.UserRepo, s.IssueRepo, s.Hub, doc, reviewerID)
 	return &oapi.UpdateDocumentResponse{Document: documentToOAPI(doc)}, nil
 }
 
@@ -593,9 +497,10 @@ func (s *Server) DocumentsDelete(ctx context.Context, params oapi.DocumentsDelet
 		logErr("documents.delete", err)
 		return &oapi.DocumentsDeleteInternalServerError{Error: "failed to delete document"}, nil
 	}
-	logAudit(s.Audit, models.AuditActionDocumentDeleted, uid, uintPtr(docID), "document", map[string]any{
-		"name": doc.Name,
-	})
+	logging.Audit(ctx, "document.deleted", uid,
+		slog.String("target_type", "document"),
+		slog.Uint64("target_id", uint64(docID)),
+		slog.String("name", doc.Name),
+	)
 	return &oapi.MessageResponse{Message: "document deleted"}, nil
 }
-

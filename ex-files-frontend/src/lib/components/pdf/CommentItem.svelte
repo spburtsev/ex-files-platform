@@ -4,14 +4,19 @@
 	import * as AlertDialog from '$lib/components/ui/alert-dialog/index.js';
 	import { Trash2 } from '@lucide/svelte';
 	import { m } from '$lib/paraglide/messages.js';
+	import { avatarColorClass, initials } from '$lib/utils';
 
 	interface Props {
 		comment: Comment;
-		commentNumber: number;
+		currentUserId?: string;
 		ondelete: (id: string) => void;
 		ongotopage: (page: number) => void;
 	}
-	let { comment, commentNumber, ondelete, ongotopage }: Props = $props();
+	let { comment, currentUserId, ondelete, ongotopage }: Props = $props();
+
+	const canDelete = $derived(
+		currentUserId !== undefined && Number(currentUserId) === Number(comment.authorId)
+	);
 
 	let confirmOpen = $state(false);
 
@@ -24,20 +29,25 @@
 	<div class="flex items-start justify-between">
 		<div class="flex items-center gap-2">
 			<span
-				class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-400 text-[10px] font-bold text-white"
+				class="flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] font-bold text-white {avatarColorClass(
+					comment.authorId
+				)}"
+				title={comment.authorName}
 			>
-				{commentNumber}
+				{initials(comment.authorName)}
 			</span>
 			<p class="text-sm">{comment.body}</p>
 		</div>
-		<Button
-			variant="ghost"
-			size="icon"
-			class="size-6 hover:text-destructive"
-			onclick={() => (confirmOpen = true)}
-		>
-			<Trash2 class="size-3" />
-		</Button>
+		{#if canDelete}
+			<Button
+				variant="ghost"
+				size="icon"
+				class="size-6 hover:text-destructive"
+				onclick={() => (confirmOpen = true)}
+			>
+				<Trash2 class="size-3" />
+			</Button>
+		{/if}
 	</div>
 	<div class="mt-1.5 flex items-center gap-2 text-[10px] text-muted-foreground">
 		<span>{comment.authorName}, {formatTime(comment.createdAt)}</span>

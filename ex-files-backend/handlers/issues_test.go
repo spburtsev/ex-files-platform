@@ -22,7 +22,6 @@ func issuesServer(tokens *mockTokens, repo *mockIssueRepo, users *mockUserRepo) 
 		UserRepo:  users,
 		Tokens:    tokens,
 		Hasher:    stubHasher{},
-		Audit:     &dummyAudit{},
 		IssueRepo: repo,
 	}
 }

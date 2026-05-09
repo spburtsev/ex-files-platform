@@ -10,23 +10,24 @@ import (
 )
 
 // ResendEmailService sends emails via the Resend API (https://resend.com).
-// When APIKey is empty, it logs emails instead of sending them (dev mode).
 type ResendEmailService struct {
 	APIKey  string
 	From    string
 	BaseURL string
+	DevTrap string
 }
 
-func NewResendEmailService(apiKey, from string) *ResendEmailService {
+func NewResendEmailService(apiKey, from, devTrap string) *ResendEmailService {
 	baseURL := "https://api.resend.com"
-	return &ResendEmailService{APIKey: apiKey, From: from, BaseURL: baseURL}
+	return &ResendEmailService{APIKey: apiKey, From: from, BaseURL: baseURL, DevTrap: devTrap}
 }
 
 type resendPayload struct {
-	From    string   `json:"from"`
-	To      []string `json:"to"`
-	Subject string   `json:"subject"`
-	HTML    string   `json:"html"`
+	From    string            `json:"from"`
+	To      []string          `json:"to"`
+	Subject string            `json:"subject"`
+	HTML    string            `json:"html"`
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 func (r *ResendEmailService) Send(to, subject, body string) error {
@@ -36,11 +37,24 @@ func (r *ResendEmailService) Send(to, subject, body string) error {
 		return nil
 	}
 
+	originalTo := to
+	headers := map[string]string{}
+	if r.DevTrap != "" && r.DevTrap != to {
+		slog.Info("email rerouted to RESEND_DEV_TRAP",
+			"original_to", originalTo, "trap", r.DevTrap, "subject", subject)
+		to = r.DevTrap
+		subject = "[trap → " + originalTo + "] " + subject
+		headers["X-Original-To"] = originalTo
+	}
+
 	payload := resendPayload{
 		From:    r.From,
 		To:      []string{to},
 		Subject: subject,
 		HTML:    body,
+	}
+	if len(headers) > 0 {
+		payload.Headers = headers
 	}
 
 	jsonBody, err := json.Marshal(payload)
