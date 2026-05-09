@@ -38,6 +38,57 @@ func (r *GormIssueRepository) ListByWorkspace(workspaceID uint, search string, r
 	return issues, nil
 }
 
+// ListMyCurrentIssues returns issues where the caller is assignee OR creator
+// AND the issue is unresolved + unarchived, with optional case-insensitive
+// title search and offset pagination. Workspace + Workspace.Manager are
+// preloaded so the dashboard table can render workspace name + manager name
+// without extra queries. Ordering: deadline-bearing issues first, soonest
+// first, then by createdAt DESC for the rest.
+func (r *GormIssueRepository) ListMyCurrentIssues(userID uint, search string, limit, offset int) ([]models.Issue, int64, error) {
+	q := r.DB.Model(&models.Issue{}).
+		Where("(assignee_id = ? OR creator_id = ?)", userID, userID).
+		Where("resolved = ?", false).
+		Where("archived = ?", false)
+	if search != "" {
+		q = q.Where("LOWER(title) LIKE LOWER(?)", "%"+search+"%")
+	}
+
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var issues []models.Issue
+	if err := q.
+		Preload("Workspace").
+		Preload("Workspace.Manager").
+		Preload("Assignee").
+		Preload("Creator").
+		Order("CASE WHEN deadline IS NULL THEN 1 ELSE 0 END, deadline ASC, created_at DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&issues).Error; err != nil {
+		return nil, 0, err
+	}
+	return issues, total, nil
+}
+
+// ListUnresolvedWithDeadline returns every still-actionable issue that has
+// a deadline set. Used by the deadline scheduler to compute who needs a
+// reminder; no preloads to keep the per-tick query light.
+func (r *GormIssueRepository) ListUnresolvedWithDeadline() ([]models.Issue, error) {
+	var issues []models.Issue
+	err := r.DB.
+		Where("resolved = ?", false).
+		Where("archived = ?", false).
+		Where("deadline IS NOT NULL").
+		Find(&issues).Error
+	if err != nil {
+		return nil, err
+	}
+	return issues, nil
+}
+
 func (r *GormIssueRepository) FindByID(id uint) (*models.Issue, error) {
 	var issue models.Issue
 	err := r.DB.Preload("Creator").Preload("Assignee").First(&issue, id).Error

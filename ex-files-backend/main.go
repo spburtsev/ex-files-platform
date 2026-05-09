@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/rs/cors"
@@ -77,6 +78,15 @@ func main() {
 
 	emailSvc := newEmailService()
 	sseHub := services.NewSSEHub()
+
+	// Periodic deadline reminder scheduler. Runs in the background; cancelling
+	// ctx (set up just below) will stop it on shutdown.
+	deadlineSched := &services.DeadlineScheduler{
+		Hub:       sseHub,
+		IssueRepo: issueRepo,
+		Tick:      10 * time.Minute,
+	}
+	go deadlineSched.Run(ctx)
 
 	rdb, err := services.NewRedisClient(envOr("REDIS_ADDR", "localhost:6380"))
 	if err != nil {

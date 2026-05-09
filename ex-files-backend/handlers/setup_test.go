@@ -210,6 +210,14 @@ func (m *mockIssueRepo) Create(issue *models.Issue) error {
 func (m *mockIssueRepo) Update(issue *models.Issue) error {
 	return m.Called(issue).Error(0)
 }
+func (m *mockIssueRepo) ListUnresolvedWithDeadline() ([]models.Issue, error) {
+	a := m.Called()
+	return a.Get(0).([]models.Issue), a.Error(1)
+}
+func (m *mockIssueRepo) ListMyCurrentIssues(userID uint, search string, limit, offset int) ([]models.Issue, int64, error) {
+	a := m.Called(userID, search, limit, offset)
+	return a.Get(0).([]models.Issue), a.Get(1).(int64), a.Error(2)
+}
 func (m *mockIssueRepo) DashboardSummary(userID uint, window time.Duration) (services.DashboardSummary, error) {
 	a := m.Called(userID, window)
 	return a.Get(0).(services.DashboardSummary), a.Error(1)

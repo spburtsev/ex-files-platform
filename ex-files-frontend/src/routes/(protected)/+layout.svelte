@@ -22,6 +22,10 @@
 	} from '@lucide/svelte';
 	import { extraBreadcrumbs } from '$lib/stores/breadcrumbs.svelte';
 	import ErrorBoundary from '$lib/components/custom/ErrorBoundary.svelte';
+	import { browser } from '$app/environment';
+	import { goto } from '$app/navigation';
+	import { toast } from 'svelte-sonner';
+	import { getDashboard } from '$lib/queries.remote';
 
 	let { children, data } = $props();
 
@@ -54,6 +58,90 @@
 			match: (p: string) => p.startsWith('/check')
 		}
 	]);
+
+	// Global notifications: subscribe to the SSE stream scoped to the current
+	// user (the backend derives the userID from the session). Review-feedback
+	// events and deadline-reminder events route to toasts; other events
+	// (comment.added/.deleted) are filtered by the per-page subscription on
+	// the issue/workbench page and ignored here.
+	const REVIEW_TOAST_TYPES = new Set([
+		'document.approved',
+		'document.rejected',
+		'document.changes_requested',
+		'document.reviewer_assigned'
+	]);
+	$effect(() => {
+		if (!browser || !me) return;
+		const es = new EventSource('/api/events');
+		es.onmessage = (e) => {
+			try {
+				const ev = JSON.parse(e.data);
+				const t = ev?.type;
+				const p = ev?.payload ?? {};
+				if (typeof t !== 'string') return;
+
+				if (REVIEW_TOAST_TYPES.has(t)) {
+					const name = String(p.name ?? '');
+					const wsId = p.workspace_id != null ? String(p.workspace_id) : null;
+					const issueId = p.issue_id != null ? String(p.issue_id) : null;
+					const action =
+						wsId && issueId
+							? {
+									label: m.notif_view_action(),
+									onClick: () =>
+										goto(localizeHref(`/workspaces/${wsId}/issues/${issueId}`))
+								}
+							: undefined;
+					switch (t) {
+						case 'document.approved':
+							toast.success(m.notif_doc_approved({ name }), { action });
+							break;
+						case 'document.rejected':
+							toast.error(m.notif_doc_rejected({ name }), { action });
+							break;
+						case 'document.changes_requested':
+							toast.warning(m.notif_doc_changes_requested({ name }), { action });
+							break;
+						case 'document.reviewer_assigned':
+							toast.info(m.notif_reviewer_assigned({ name }), { action });
+							break;
+					}
+					// Keep the dashboard counts/lists in sync.
+					void getDashboard().refresh();
+					return;
+				}
+
+				if (t === 'deadline.approaching') {
+					const title = String(p.title ?? '');
+					const wsId = p.workspace_id != null ? String(p.workspace_id) : null;
+					const issueId = p.issue_id != null ? String(p.issue_id) : null;
+					const action =
+						wsId && issueId
+							? {
+									label: m.notif_view_action(),
+									onClick: () =>
+										goto(localizeHref(`/workspaces/${wsId}/issues/${issueId}`))
+								}
+							: undefined;
+					switch (p.threshold) {
+						case 'overdue':
+							toast.error(m.notif_deadline_overdue({ title }), { action });
+							break;
+						case '1h':
+							toast.warning(m.notif_deadline_1h({ title }), { action });
+							break;
+						case '24h':
+							toast.info(m.notif_deadline_24h({ title }), { action });
+							break;
+					}
+					void getDashboard().refresh();
+				}
+			} catch (err) {
+				console.error('global SSE parse error', err);
+			}
+		};
+		return () => es.close();
+	});
 
 	const cleanPathname = $derived(deLocalizeHref(page.url.pathname));
 	const pageLabel = $derived.by(() => {

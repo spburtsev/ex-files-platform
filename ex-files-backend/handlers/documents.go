@@ -353,7 +353,7 @@ func (s *Server) DocumentsApprove(ctx context.Context, params oapi.DocumentsAppr
 		slog.String("target_type", "document"),
 		slog.Uint64("target_id", uint64(doc.ID)),
 	)
-	notifyDocumentEvent(s.Email, s.UserRepo, s.Hub, doc, "document.approved",
+	notifyDocumentEvent(s.Email, s.UserRepo, s.IssueRepo, s.Hub, doc, "document.approved",
 		fmt.Sprintf("Document approved: %s", doc.Name),
 		fmt.Sprintf("<p>Your document <strong>%s</strong> has been approved.</p>", doc.Name),
 	)
@@ -395,7 +395,7 @@ func (s *Server) DocumentsReject(ctx context.Context, req oapi.OptReviewNoteRequ
 		slog.Uint64("target_id", uint64(doc.ID)),
 		slog.String("note", note),
 	)
-	notifyDocumentEvent(s.Email, s.UserRepo, s.Hub, doc, "document.rejected",
+	notifyDocumentEvent(s.Email, s.UserRepo, s.IssueRepo, s.Hub, doc, "document.rejected",
 		fmt.Sprintf("Document rejected: %s", doc.Name),
 		fmt.Sprintf("<p>Your document <strong>%s</strong> has been rejected.</p><p>Reason: %s</p>", doc.Name, note),
 	)
@@ -437,7 +437,7 @@ func (s *Server) DocumentsRequestChanges(ctx context.Context, req oapi.OptReview
 		slog.Uint64("target_id", uint64(doc.ID)),
 		slog.String("note", note),
 	)
-	notifyDocumentEvent(s.Email, s.UserRepo, s.Hub, doc, "document.changes_requested",
+	notifyDocumentEvent(s.Email, s.UserRepo, s.IssueRepo, s.Hub, doc, "document.changes_requested",
 		fmt.Sprintf("Changes requested: %s", doc.Name),
 		fmt.Sprintf("<p>Changes have been requested for your document <strong>%s</strong>.</p><p>Note: %s</p>", doc.Name, note),
 	)
@@ -475,7 +475,7 @@ func (s *Server) DocumentsAssignReviewer(ctx context.Context, req *oapi.AssignRe
 		slog.Uint64("target_id", uint64(doc.ID)),
 		slog.Uint64("reviewer_id", uint64(reviewerID)),
 	)
-	notifyReviewerAssigned(s.Email, s.UserRepo, s.Hub, doc, reviewerID)
+	notifyReviewerAssigned(s.Email, s.UserRepo, s.IssueRepo, s.Hub, doc, reviewerID)
 	return &oapi.UpdateDocumentResponse{Document: documentToOAPI(doc)}, nil
 }
 

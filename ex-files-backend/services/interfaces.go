@@ -58,6 +58,8 @@ type DocumentRepository interface {
 type IssueRepository interface {
 	ListAll() ([]models.Issue, error)
 	ListByWorkspace(workspaceID uint, search string, resolved *bool, archived bool) ([]models.Issue, error)
+	ListUnresolvedWithDeadline() ([]models.Issue, error)
+	ListMyCurrentIssues(userID uint, search string, limit, offset int) ([]models.Issue, int64, error)
 	FindByID(id uint) (*models.Issue, error)
 	Create(issue *models.Issue) error
 	Update(issue *models.Issue) error

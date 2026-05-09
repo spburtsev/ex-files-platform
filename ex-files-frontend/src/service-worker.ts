@@ -6,7 +6,7 @@ import { build, files, version } from '$service-worker';
 declare const self: ServiceWorkerGlobalScope;
 
 const CACHE = `app-${version}`;
-// Pre-built JS, CSS, fonts + static files. We only intercept these — anything
+// Pre-built JS, CSS, fonts + static files. We only intercept these - anything
 // else (HTML pages, /api/*, the SSE stream at /api/events, etc.) goes through
 // the browser's native fetch with no service-worker involvement. Intercepting
 // streaming responses (SSE) used to break the worker because cache.put would
@@ -35,7 +35,7 @@ self.addEventListener('fetch', (event) => {
 	if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
 
 	// Bypass anything we didn't ship as a build asset. Critically, this
-	// excludes /api/events (text/event-stream) — letting the SW touch a
+	// excludes /api/events (text/event-stream) - letting the SW touch a
 	// streaming body causes the request to be cancelled by the browser.
 	if (url.origin !== self.location.origin || !ASSETS.has(url.pathname)) return;
 

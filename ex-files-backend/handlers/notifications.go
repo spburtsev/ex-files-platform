@@ -9,26 +9,38 @@ import (
 )
 
 // notifyDocumentEvent sends an email to the uploader about a document status change
-// and broadcasts an SSE event. Failures are logged but never block the response.
+// and broadcasts an SSE event targeted at the uploader. Failures are logged but
+// never block the response. The issue lookup powers a deep-link payload so the
+// frontend toast can navigate straight to the workspace/issue.
 func notifyDocumentEvent(
 	email services.EmailService,
 	userRepo services.UserRepository,
+	issueRepo services.IssueRepository,
 	hub *services.SSEHub,
 	doc *models.Document,
 	eventType string,
 	subject string,
 	bodyHTML string,
 ) {
-	// SSE broadcast
 	if hub != nil {
+		payload := map[string]any{
+			"status":   string(doc.Status),
+			"name":     doc.Name,
+			"issue_id": doc.IssueID,
+		}
+		if issueRepo != nil {
+			if issue, err := issueRepo.FindByID(doc.IssueID); err == nil {
+				payload["workspace_id"] = issue.WorkspaceID
+			}
+		}
 		hub.Broadcast(services.SSEEvent{
 			Type:       eventType,
 			DocumentID: doc.ID,
-			Payload:    map[string]any{"status": string(doc.Status), "name": doc.Name},
+			UserID:     doc.UploaderID,
+			Payload:    payload,
 		})
 	}
 
-	// Email to uploader
 	if email == nil || userRepo == nil {
 		return
 	}
@@ -42,19 +54,32 @@ func notifyDocumentEvent(
 	}
 }
 
-// notifyReviewerAssigned sends an email to the assigned reviewer.
+// notifyReviewerAssigned sends an email to the assigned reviewer and a
+// targeted SSE event so their UI can toast the assignment immediately.
 func notifyReviewerAssigned(
 	email services.EmailService,
 	userRepo services.UserRepository,
+	issueRepo services.IssueRepository,
 	hub *services.SSEHub,
 	doc *models.Document,
 	reviewerID uint,
 ) {
 	if hub != nil {
+		payload := map[string]any{
+			"reviewer_id": reviewerID,
+			"name":        doc.Name,
+			"issue_id":    doc.IssueID,
+		}
+		if issueRepo != nil {
+			if issue, err := issueRepo.FindByID(doc.IssueID); err == nil {
+				payload["workspace_id"] = issue.WorkspaceID
+			}
+		}
 		hub.Broadcast(services.SSEEvent{
 			Type:       "document.reviewer_assigned",
 			DocumentID: doc.ID,
-			Payload:    map[string]any{"reviewer_id": reviewerID, "name": doc.Name},
+			UserID:     reviewerID,
+			Payload:    payload,
 		})
 	}
 

@@ -11,6 +11,7 @@ import {
 	documentsList,
 	issuesGet,
 	issuesListByWorkspace,
+	issuesListMine,
 	workspacesAssignableMembers,
 	workspacesGet,
 	workspacesList
@@ -161,3 +162,21 @@ export const getDashboard = query(async () => {
 	const r = await dashboardGet(apiOpts());
 	return r.data ?? null;
 });
+
+export const getMyIssues = query(
+	'unchecked',
+	async ({
+		page = 1,
+		perPage = 10,
+		search = ''
+	}: { page?: number; perPage?: number; search?: string } = {}) => {
+		const r = await issuesListMine({
+			...apiOpts(),
+			query: { page, perPage, search: search || undefined }
+		});
+		return {
+			issues: r.data?.issues ?? [],
+			...paginationFromHeaders(r.response)
+		};
+	}
+);

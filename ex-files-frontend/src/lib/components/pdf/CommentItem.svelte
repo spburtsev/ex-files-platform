@@ -8,9 +8,6 @@
 
 	interface Props {
 		comment: Comment;
-		// Used to gate the delete button. The backend already enforces "author
-		// only" with a 403, so omitting this just hides the affordance — never
-		// a security boundary.
 		currentUserId?: string;
 		ondelete: (id: string) => void;
 		ongotopage: (page: number) => void;

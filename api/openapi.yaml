@@ -873,6 +873,38 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  /issues/mine:
+    get:
+      tags: [issues]
+      operationId: issuesListMine
+      summary: Paginated list of the caller's current (open) issues
+      description: |
+        Returns issues where the caller is either assignee or creator and the
+        issue is unresolved + unarchived. Each item is denormalised with the
+        parent workspace's id, name, and manager name so the dashboard table
+        renders without a follow-up call.
+      parameters:
+        - $ref: '#/components/parameters/PageQuery'
+        - $ref: '#/components/parameters/PerPageQuery'
+        - name: search
+          in: query
+          description: Optional case-insensitive substring match against issue title.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Paginated current issues.
+          headers:
+            X-Total-Count: { $ref: '#/components/headers/XTotalCount' }
+            X-Total-Pages: { $ref: '#/components/headers/XTotalPages' }
+            X-Page:        { $ref: '#/components/headers/XPage' }
+            X-Per-Page:    { $ref: '#/components/headers/XPerPage' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetMyIssuesResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1354,3 +1386,29 @@ components:
         dueSoon:           { type: array, items: { $ref: '#/components/schemas/Issue' } }
         overdue:           { type: array, items: { $ref: '#/components/schemas/Issue' } }
         recent:            { type: array, items: { $ref: '#/components/schemas/Issue' } }
+
+    MyIssueListItem:
+      type: object
+      required:
+        - id
+        - title
+        - workspaceId
+        - workspaceName
+        - workspaceManagerName
+        - createdAt
+      properties:
+        id:                   { type: string }
+        title:                { type: string }
+        workspaceId:          { type: string }
+        workspaceName:        { type: string }
+        workspaceManagerName: { type: string }
+        deadline:             { type: string, format: date-time, nullable: true }
+        createdAt:            { type: string, format: date-time }
+
+    GetMyIssuesResponse:
+      type: object
+      required: [issues]
+      properties:
+        issues:
+          type: array
+          items: { $ref: '#/components/schemas/MyIssueListItem' }

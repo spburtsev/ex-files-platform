@@ -1,12 +1,23 @@
 <script lang="ts">
 	import { m } from '$lib/paraglide/messages.js';
 	import { localizeHref } from '$lib/paraglide/runtime';
-	import { getDashboard } from '$lib/queries.remote';
+	import { getDashboard, getMyIssues } from '$lib/queries.remote';
 	import { isManager, formatTimestamp } from '$lib/utils';
 	import { deadlineChip } from '$lib/deadline';
 	import * as Card from '$lib/components/ui/card/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
-	import { CalendarClock, AlertTriangle, Clock, Inbox, PencilLine, Activity } from '@lucide/svelte';
+	import { Button } from '$lib/components/ui/button/index.js';
+	import { Input } from '$lib/components/ui/input/index.js';
+	import {
+		CalendarClock,
+		AlertTriangle,
+		Clock,
+		Inbox,
+		PencilLine,
+		Activity,
+		ListChecks,
+		Search
+	} from '@lucide/svelte';
 	import type { Issue } from '$lib/api';
 
 	const { data } = $props();
@@ -15,6 +26,26 @@
 	const dashboardQuery = $derived(getDashboard());
 	const dash = $derived(dashboardQuery.current);
 	const showCreatedCard = $derived(isManager(me?.role));
+
+	const PER_PAGE = 10;
+	let searchInput = $state('');
+	let searchTerm = $state('');
+	let page = $state(1);
+	let debounceHandle: ReturnType<typeof setTimeout> | null = null;
+
+	function onSearchInput(value: string) {
+		searchInput = value;
+		if (debounceHandle) clearTimeout(debounceHandle);
+		debounceHandle = setTimeout(() => {
+			searchTerm = value.trim();
+			page = 1;
+		}, 250);
+	}
+
+	const myIssuesQuery = $derived(getMyIssues({ page, perPage: PER_PAGE, search: searchTerm }));
+	const myIssues = $derived(myIssuesQuery.current?.issues ?? []);
+	const myIssuesTotal = $derived(myIssuesQuery.current?.total ?? 0);
+	const myIssuesTotalPages = $derived(Math.max(1, myIssuesQuery.current?.totalPages ?? 1));
 
 	function relativeFromNow(iso?: string): string {
 		if (!iso) return '';
@@ -31,6 +62,10 @@
 
 	function issueHref(issue: Issue): string {
 		return localizeHref(`/workspaces/${issue.workspaceId}/issues/${issue.id}`);
+	}
+
+	function myIssueHref(workspaceId: string, issueId: string): string {
+		return localizeHref(`/workspaces/${workspaceId}/issues/${issueId}`);
 	}
 </script>
 
@@ -190,6 +225,120 @@
 						</li>
 					{/each}
 				</ul>
+			{/if}
+		</Card.Content>
+	</Card.Root>
+
+	<!-- My current issues (paginated, searchable) -->
+	<Card.Root>
+		<Card.Header>
+			<div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+				<div>
+					<Card.Title class="flex items-center gap-2 text-base">
+						<ListChecks class="size-4 text-muted-foreground" />
+						{m.dashboard_my_issues()}
+					</Card.Title>
+					<Card.Description class="text-xs">{m.dashboard_my_issues_hint()}</Card.Description>
+				</div>
+				<div class="relative w-full md:w-72">
+					<Search
+						class="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+					/>
+					<Input
+						type="text"
+						value={searchInput}
+						oninput={(e: Event) => onSearchInput((e.target as HTMLInputElement).value)}
+						placeholder={m.dashboard_search_placeholder()}
+						class="pl-7 h-9 text-sm"
+					/>
+				</div>
+			</div>
+		</Card.Header>
+		<Card.Content>
+			{#if myIssues.length === 0}
+				<p class="py-4 text-center text-sm text-muted-foreground">
+					{m.dashboard_no_my_issues()}
+				</p>
+			{:else}
+				<div class="overflow-x-auto">
+					<table class="w-full text-sm">
+						<thead>
+							<tr class="border-b text-xs text-muted-foreground">
+								<th class="px-2 py-2 text-left font-medium">{m.dashboard_col_title()}</th>
+								<th class="px-2 py-2 text-left font-medium">{m.dashboard_col_workspace()}</th>
+								<th class="px-2 py-2 text-left font-medium">{m.dashboard_col_owner()}</th>
+								<th class="px-2 py-2 text-left font-medium">{m.dashboard_col_due()}</th>
+							</tr>
+						</thead>
+						<tbody class="divide-y">
+							{#each myIssues as issue (issue.id)}
+								{@const chip = issue.deadline ? deadlineChip(new Date(issue.deadline)) : null}
+								<tr class="hover:bg-muted/40 transition-colors">
+									<td class="px-2 py-2 align-middle">
+										<a
+											href={myIssueHref(issue.workspaceId, issue.id)}
+											class="font-medium hover:underline"
+										>
+											{issue.title}
+										</a>
+										<span class="ml-2 text-[10px] text-muted-foreground">#{issue.id}</span>
+									</td>
+									<td class="px-2 py-2 align-middle">
+										<a
+											href={localizeHref(`/workspaces/${issue.workspaceId}`)}
+											class="hover:underline"
+										>
+											{issue.workspaceName}
+										</a>
+										<span class="ml-1 text-[10px] text-muted-foreground">#{issue.workspaceId}</span>
+									</td>
+									<td class="px-2 py-2 align-middle text-muted-foreground">
+										{issue.workspaceManagerName}
+									</td>
+									<td class="px-2 py-2 align-middle">
+										{#if chip}
+											<Badge variant="outline" class="gap-1 text-[11px] {chip.cls}">
+												<Clock class="size-3" />
+												{chip.label}
+											</Badge>
+										{:else}
+											<span class="text-[11px] text-muted-foreground">-</span>
+										{/if}
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			{/if}
+
+			{#if myIssuesTotal > 0}
+				<div class="mt-4 flex items-center justify-between text-xs text-muted-foreground">
+					<span>
+						{m.dashboard_pagination({
+							page: String(page),
+							total: String(myIssuesTotalPages)
+						})}
+					</span>
+					<div class="flex gap-2">
+						<Button
+							variant="outline"
+							size="sm"
+							disabled={page <= 1}
+							onclick={() => (page = Math.max(1, page - 1))}
+						>
+							{m.dashboard_prev()}
+						</Button>
+						<Button
+							variant="outline"
+							size="sm"
+							disabled={page >= myIssuesTotalPages}
+							onclick={() => (page = Math.min(myIssuesTotalPages, page + 1))}
+						>
+							{m.dashboard_next()}
+						</Button>
+					</div>
+				</div>
 			{/if}
 		</Card.Content>
 	</Card.Root>
