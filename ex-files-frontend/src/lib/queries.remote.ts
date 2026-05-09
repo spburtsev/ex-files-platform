@@ -5,6 +5,7 @@ import {
 	authListUsers,
 	authMe,
 	commentsList,
+	dashboardGet,
 	documentsGet,
 	documentsGetFile,
 	documentsList,
@@ -148,10 +149,15 @@ export const getDocumentBytes = query('unchecked', async (docId: string) => {
 });
 
 // ---------------------------------------------------------------------------
-// Comments
+// Comments, Dashboard
 // ---------------------------------------------------------------------------
 
 export const getComments = query('unchecked', async (docId: string) => {
 	const r = await commentsList({ ...apiOpts(), path: { id: docId } });
 	return r.data?.comments ?? [];
+});
+
+export const getDashboard = query(async () => {
+	const r = await dashboardGet(apiOpts());
+	return r.data ?? null;
 });

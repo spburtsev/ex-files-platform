@@ -30,6 +30,8 @@ tags:
     description: Comments on documents.
   - name: verify
     description: Public hash verification.
+  - name: dashboard
+    description: Aggregated home view for the current user.
 
 security:
   - bearerAuth: []
@@ -856,6 +858,21 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  /dashboard:
+    get:
+      tags: [dashboard]
+      operationId: dashboardGet
+      summary: Aggregated counts + lists for the current user
+      responses:
+        '200':
+          description: Dashboard payload.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1136,18 +1153,26 @@ components:
         - resolved
         - commentsCount
         - versionsCount
+        - createdAt
+        - updatedAt
       properties:
-        id:            { type: string }
-        workspaceId:   { type: string }
-        creatorId:     { type: string }
-        assigneeId:    { type: string }
-        title:         { type: string }
-        description:   { type: string }
-        deadline:      { type: string, format: date-time, nullable: true }
-        resolved:      { type: boolean }
-        archived:      { type: boolean }
-        commentsCount: { type: integer, format: int32 }
-        versionsCount: { type: integer, format: int32 }
+        id:             { type: string }
+        workspaceId:    { type: string }
+        creatorId:      { type: string }
+        assigneeId:     { type: string }
+        title:          { type: string }
+        description:    { type: string }
+        deadline:       { type: string, format: date-time, nullable: true }
+        resolved:       { type: boolean }
+        archived:       { type: boolean }
+        commentsCount:  { type: integer, format: int32 }
+        versionsCount:  { type: integer, format: int32 }
+        createdAt:      { type: string, format: date-time }
+        updatedAt:      { type: string, format: date-time }
+        # Populated by GET /dashboard for the recent-activity list. Reflects
+        # the latest of: issue UpdatedAt, child documents' UpdatedAt, child
+        # comments' CreatedAt.
+        lastActivityAt: { type: string, format: date-time }
 
     CreateIssueRequest:
       type: object
@@ -1314,3 +1339,18 @@ components:
         status:       { $ref: '#/components/schemas/DocumentStatus' }
         notarizedAt:  { type: string, format: date-time }
         hash:         { type: string }
+
+    DashboardResponse:
+      type: object
+      required:
+        - assignedOpenCount
+        - createdOpenCount
+        - dueSoon
+        - overdue
+        - recent
+      properties:
+        assignedOpenCount: { type: integer, format: int64 }
+        createdOpenCount:  { type: integer, format: int64 }
+        dueSoon:           { type: array, items: { $ref: '#/components/schemas/Issue' } }
+        overdue:           { type: array, items: { $ref: '#/components/schemas/Issue' } }
+        recent:            { type: array, items: { $ref: '#/components/schemas/Issue' } }

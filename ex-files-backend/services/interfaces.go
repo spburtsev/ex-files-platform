@@ -61,6 +61,23 @@ type IssueRepository interface {
 	FindByID(id uint) (*models.Issue, error)
 	Create(issue *models.Issue) error
 	Update(issue *models.Issue) error
+	DashboardSummary(userID uint, dueSoonWindow time.Duration) (DashboardSummary, error)
+}
+
+// IssueWithActivity wraps Issue with the latest activity timestamp aggregated
+// from the issue itself plus its child documents and comments. Used by the
+// dashboard endpoint's "recent" list.
+type IssueWithActivity struct {
+	models.Issue
+	LastActivityAt time.Time
+}
+
+type DashboardSummary struct {
+	AssignedOpenCount int64
+	CreatedOpenCount  int64
+	DueSoon           []models.Issue
+	Overdue           []models.Issue
+	Recent            []IssueWithActivity
 }
 
 type EmailService interface {

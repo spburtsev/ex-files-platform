@@ -17,6 +17,7 @@ import (
 	"github.com/spburtsev/ex-files-backend/middleware"
 	"github.com/spburtsev/ex-files-backend/models"
 	"github.com/spburtsev/ex-files-backend/oapi"
+	"github.com/spburtsev/ex-files-backend/services"
 )
 
 // gormModelID constructs a gorm.Model populated with the given primary key and
@@ -208,6 +209,10 @@ func (m *mockIssueRepo) Create(issue *models.Issue) error {
 }
 func (m *mockIssueRepo) Update(issue *models.Issue) error {
 	return m.Called(issue).Error(0)
+}
+func (m *mockIssueRepo) DashboardSummary(userID uint, window time.Duration) (services.DashboardSummary, error) {
+	a := m.Called(userID, window)
+	return a.Get(0).(services.DashboardSummary), a.Error(1)
 }
 
 // --- mocks: documents ---------------------------------------------------

@@ -15,6 +15,7 @@
 	import { uploadDocument, createComment, deleteComment } from '$lib/commands.remote';
 	import { MAX_UPLOAD_BYTES, MAX_UPLOAD_MB } from '$lib/upload';
 	import { isManager } from '$lib/utils';
+	import { deadlineChip } from '$lib/deadline';
 	import { m } from '$lib/paraglide/messages.js';
 	import { localizeHref } from '$lib/paraglide/runtime';
 	import { toast } from 'svelte-sonner';
@@ -327,29 +328,6 @@
 			workbenchStore.setDocumentStatus(docId, 'error', m.error_network_retry());
 			toast.error(m.error_network_retry());
 		}
-	}
-
-	function deadlineChip(d: Date) {
-		const h = (d.getTime() - Date.now()) / 3_600_000;
-		if (h < 0)
-			return { label: m.workbench_overdue(), cls: 'border-red-200 bg-red-50 text-red-600' };
-		if (h < 24)
-			return {
-				label: m.workbench_hours_left({ hours: String(Math.round(h)) }),
-				cls: 'border-red-200 bg-red-50 text-red-600'
-			};
-		if (h < 72)
-			return {
-				label: m.workbench_days_hours_left({
-					days: String(Math.floor(h / 24)),
-					hours: String(Math.round(h % 24))
-				}),
-				cls: 'border-amber-200 bg-amber-50 text-amber-700'
-			};
-		return {
-			label: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-			cls: 'border-border bg-muted/40 text-muted-foreground'
-		};
 	}
 
 	const dl = $derived.by(() => {
