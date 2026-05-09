@@ -40,7 +40,7 @@ rectangle "Platform Infrastructure\n<i>Docker Compose</i>\n" as platform #e8f4fd
 
 ' User  Application
 browser -down-> frontend : "HTTP + SSE\n"
-frontend -right-> backend : "  HTTP/JSON (OpenAPI)  \n"
+frontend -right-> backend : "  HTTP"
 
 ' Application  Data
 backend -down-> pg    : TCP
@@ -48,7 +48,7 @@ backend -down-> redis : TCP
 backend -down-> minio : S3 API
 
 ' Backend logs  Docker Socket (stdout captured by Docker daemon)
-backend  .down.> dockersock  : "stdout\n(JSON logs)"
+backend  .down.> dockersock  : "stdout"
 
 ' Observability
 promtail -up-> dockersock    : "reads container\nlogs"
@@ -56,6 +56,6 @@ promtail -right-> loki       : "push\n(HTTP)"
 grafana  -left-> loki        : "query\n(HTTP)"
 
 ' Admin access
-admin -down-> grafana        : "HTTP\n:3200"
+admin -down-> grafana        : "HTTP"
 
 @enduml

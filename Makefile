@@ -42,7 +42,7 @@ docs: openapi-docs
 # --- Local development ---
 
 infra-up:
-	docker compose up -d ex-files-pg redis ex-files-minio ex-files-minio-init
+	docker compose up -d ex-files-pg redis ex-files-minio ex-files-minio-init loki promtail grafana
 
 infra-down:
 	docker compose down
@@ -58,7 +58,8 @@ test:
 	cd $(BACKEND_DIR) && go test ./... -v -count=1
 
 test-cover:
-	cd $(BACKEND_DIR) && go test ./... -coverprofile=coverage.out -covermode=atomic
+	cd $(BACKEND_DIR) && go test ./... -coverprofile=coverage.raw.out -covermode=atomic
+	cd $(BACKEND_DIR) && grep -Ev '/oapi/|/seed/|/logging/|_gen\.go:|/main\.go:' coverage.raw.out > coverage.out
 	cd $(BACKEND_DIR) && go tool cover -func=coverage.out
 
 test-race:
