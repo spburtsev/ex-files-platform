@@ -26,10 +26,11 @@ rectangle "Platform Infrastructure\n<i>Docker Compose</i>\n" as platform #e8f4fd
         storage "MinIO\n<i>S3-compatible</i>\n:9002 / :9003" as minio <<Container>> #a3d9a3
     }
 
-    ' Observability Layer 
+    ' Observability Layer
     rectangle "Observability Layer" as obslayer #fce8d5 {
         node "Promtail\n<i>Log shipper</i>" as promtail <<Container>> #f5c89a
         node "Loki\n<i>Log aggregation</i>\n:3100" as loki <<Container>> #f5c89a
+        node "Tempo\n<i>Trace storage</i>\n:4317 (OTLP gRPC)" as tempo <<Container>> #f5c89a
         node "Grafana\n<i>Dashboards</i>\n:3200" as grafana <<Container>> #f5c89a
     }
 
@@ -53,7 +54,9 @@ backend  .down.> dockersock  : "stdout"
 ' Observability
 promtail -up-> dockersock    : "reads container\nlogs"
 promtail -right-> loki       : "push\n(HTTP)"
+backend  -down-> tempo       : "OTLP traces\n(gRPC)"
 grafana  -left-> loki        : "query\n(HTTP)"
+grafana  -left-> tempo       : "query\n(HTTP)"
 
 ' Admin access
 admin -down-> grafana        : "HTTP"
