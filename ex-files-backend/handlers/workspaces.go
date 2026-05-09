@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"context"
+	"log/slog"
 
+	"github.com/spburtsev/ex-files-backend/logging"
 	"github.com/spburtsev/ex-files-backend/models"
 	"github.com/spburtsev/ex-files-backend/oapi"
 )
@@ -42,9 +44,11 @@ func (s *Server) WorkspacesCreate(ctx context.Context, req *oapi.CreateWorkspace
 		ws.Manager = *mgr
 	}
 
-	logAudit(s.Audit, models.AuditActionWorkspaceCreated, uid, uintPtr(ws.ID), "workspace", map[string]any{
-		"name": ws.Name,
-	})
+	logging.Audit(ctx, "workspace.created", uid,
+		slog.String("target_type", "workspace"),
+		slog.Uint64("target_id", uint64(ws.ID)),
+		slog.String("name", ws.Name),
+	)
 
 	return &oapi.CreateWorkspaceResponse{Workspace: workspaceToOAPI(&ws)}, nil
 }
@@ -175,9 +179,11 @@ func (s *Server) WorkspacesUpdate(ctx context.Context, req *oapi.UpdateWorkspace
 	if mgr, err := s.UserRepo.FindByID(ws.ManagerID); err == nil && mgr != nil {
 		ws.Manager = *mgr
 	}
-	logAudit(s.Audit, models.AuditActionWorkspaceUpdated, uid, uintPtr(ws.ID), "workspace", map[string]any{
-		"name": ws.Name,
-	})
+	logging.Audit(ctx, "workspace.updated", uid,
+		slog.String("target_type", "workspace"),
+		slog.Uint64("target_id", uint64(ws.ID)),
+		slog.String("name", ws.Name),
+	)
 	return &oapi.UpdateWorkspaceResponse{Workspace: workspaceToOAPI(ws)}, nil
 }
 
@@ -202,9 +208,11 @@ func (s *Server) WorkspacesDelete(ctx context.Context, params oapi.WorkspacesDel
 		logErr("workspaces.delete", err)
 		return &oapi.WorkspacesDeleteInternalServerError{Error: "failed to delete workspace"}, nil
 	}
-	logAudit(s.Audit, models.AuditActionWorkspaceDeleted, uid, uintPtr(id), "workspace", map[string]any{
-		"name": ws.Name,
-	})
+	logging.Audit(ctx, "workspace.deleted", uid,
+		slog.String("target_type", "workspace"),
+		slog.Uint64("target_id", uint64(id)),
+		slog.String("name", ws.Name),
+	)
 	return &oapi.MessageResponse{Message: "workspace deleted"}, nil
 }
 
@@ -230,9 +238,12 @@ func (s *Server) WorkspacesArchive(ctx context.Context, params oapi.WorkspacesAr
 		logErr("workspaces.archive", err)
 		return &oapi.WorkspacesArchiveInternalServerError{Error: "failed to archive workspace"}, nil
 	}
-	logAudit(s.Audit, models.AuditActionWorkspaceUpdated, uid, uintPtr(id), "workspace", map[string]any{
-		"name": ws.Name, "status": "archived",
-	})
+	logging.Audit(ctx, "workspace.updated", uid,
+		slog.String("target_type", "workspace"),
+		slog.Uint64("target_id", uint64(id)),
+		slog.String("name", ws.Name),
+		slog.String("status", "archived"),
+	)
 	return &oapi.MessageResponse{Message: "workspace archived"}, nil
 }
 
@@ -265,9 +276,11 @@ func (s *Server) WorkspacesAddMember(ctx context.Context, req *oapi.AddMemberReq
 		logErr("workspaces.add_member", err)
 		return &oapi.WorkspacesAddMemberInternalServerError{Error: "failed to add member"}, nil
 	}
-	logAudit(s.Audit, models.AuditActionMemberAdded, uid, uintPtr(id), "workspace", map[string]any{
-		"member_user_id": memberID,
-	})
+	logging.Audit(ctx, "workspace.member_added", uid,
+		slog.String("target_type", "workspace"),
+		slog.Uint64("target_id", uint64(id)),
+		slog.Uint64("member_user_id", uint64(memberID)),
+	)
 	return &oapi.AddMemberResponse{
 		Member: oapi.WorkspaceMember{
 			ID:          formatID(member.ID),
@@ -303,8 +316,10 @@ func (s *Server) WorkspacesRemoveMember(ctx context.Context, params oapi.Workspa
 		logErr("workspaces.remove_member", err)
 		return &oapi.WorkspacesRemoveMemberInternalServerError{Error: "failed to remove member"}, nil
 	}
-	logAudit(s.Audit, models.AuditActionMemberRemoved, uid, uintPtr(id), "workspace", map[string]any{
-		"member_user_id": memberID,
-	})
+	logging.Audit(ctx, "workspace.member_removed", uid,
+		slog.String("target_type", "workspace"),
+		slog.Uint64("target_id", uint64(id)),
+		slog.Uint64("member_user_id", uint64(memberID)),
+	)
 	return &oapi.MessageResponse{Message: "member removed"}, nil
 }

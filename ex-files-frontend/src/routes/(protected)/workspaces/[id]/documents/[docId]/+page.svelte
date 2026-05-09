@@ -11,7 +11,6 @@
 		requestDocumentChanges,
 		assignDocumentReviewer,
 		getDocumentDownloadUrl,
-		uploadDocumentVersion,
 		deleteDocument
 	} from '$lib/commands.remote';
 	import { toast } from 'svelte-sonner';
@@ -23,14 +22,11 @@
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Textarea } from '$lib/components/ui/textarea/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
-	import UploadZone from '$lib/components/pdf/UploadZone.svelte';
 	import {
 		Download,
 		Trash2,
-		Clock,
 		Hash,
 		FileText,
-		Upload,
 		User,
 		Calendar,
 		CheckCircle,
@@ -41,15 +37,14 @@
 		UserCheck
 	} from '@lucide/svelte';
 	import { extraBreadcrumbs } from '$lib/stores/breadcrumbs.svelte';
-	import { onDestroy } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
+	import { browser } from '$app/environment';
 
 	const wsId = page.params.id ?? '';
 	const docId = page.params.docId ?? '';
 
 	const detailQuery = getDocumentDetail(docId);
-	const detail = $derived(detailQuery.current);
-	const doc = $derived(detail?.document);
-	const versions = $derived(detail?.versions ?? []);
+	const doc = $derived(detailQuery.current);
 
     const { data } = $props();
 	const me = $derived(data.user);
@@ -68,6 +63,30 @@
 	});
 	onDestroy(() => extraBreadcrumbs.set([]));
 
+	// Live updates: subscribe to backend SSE for this document's events and
+	// refresh the detail query whenever someone else changes its review state.
+	const REVIEW_EVENTS = new Set([
+		'document.approved',
+		'document.rejected',
+		'document.changes_requested',
+		'document.reviewer_assigned'
+	]);
+	onMount(() => {
+		if (!browser || !docId) return;
+		const es = new EventSource(`/api/events?documentId=${docId}`);
+		es.onmessage = (e) => {
+			try {
+				const ev = JSON.parse(e.data);
+				if (typeof ev?.type === 'string' && REVIEW_EVENTS.has(ev.type)) {
+					detailQuery.refresh();
+				}
+			} catch (err) {
+				console.error('SSE parse error', err);
+			}
+		};
+		return () => es.close();
+	});
+
 	// Permission flags
 	const isUploaderFlag = $derived(doc && me ? Number(me.id) === Number(doc.uploaderId) : false);
 	const isManagerFlag = $derived(isManager(me?.role));
@@ -84,9 +103,7 @@
 	let deleteOpen = $state(false);
 	let deleting = $state(false);
 
-	let uploadingVersion = $state(false);
-	let uploadVersionError = $state('');
-	let downloadingId = $state<string | null>(null);
+	let downloading = $state(false);
 
 	let rejectOpen = $state(false);
 	let rejectNote = $state('');
@@ -227,10 +244,10 @@
 		}
 	}
 
-	async function handleDownload(versionId: string) {
-		downloadingId = versionId;
+	async function handleDownload() {
+		downloading = true;
 		try {
-			const { url } = await getDocumentDownloadUrl({ docId, versionId });
+			const { url } = await getDocumentDownloadUrl(docId);
 			if (!url) {
 				toast.error(m.error_download_failed());
 				return;
@@ -239,24 +256,7 @@
 		} catch {
 			toast.error(m.error_download_failed());
 		} finally {
-			downloadingId = null;
-		}
-	}
-
-	async function handleUploadVersion(file: File) {
-		uploadingVersion = true;
-		uploadVersionError = '';
-		try {
-			const result = await uploadDocumentVersion({ docId, file });
-			if (!result.ok) {
-				uploadVersionError = result.error ?? m.error_upload_failed();
-				return;
-			}
-			await invalidateAll();
-		} catch {
-			uploadVersionError = m.error_network_retry();
-		} finally {
-			uploadingVersion = false;
+			downloading = false;
 		}
 	}
 
@@ -283,7 +283,7 @@
 </svelte:head>
 
 <div class="flex flex-1 flex-col gap-6 p-6">
-	{#if !detail}
+	{#if !doc}
 		<Card.Root class="flex items-center justify-center py-16">
 			<Card.Content>
 				<p class="text-sm text-muted-foreground">{m.doc_loading()}</p>
@@ -324,6 +324,16 @@
 						<Badge variant="secondary" class={`${statusVariant(doc?.status ?? '')}`}>
 							{statusLabel(doc?.status ?? 'pending')}
 						</Badge>
+						<Button
+							variant="outline"
+							size="sm"
+							class="gap-1.5"
+							disabled={downloading}
+							onclick={handleDownload}
+						>
+							<Download class="size-3.5" />
+							{downloading ? m.doc_getting_link() : m.doc_download()}
+						</Button>
 						<Button
 							variant="outline"
 							size="sm"
@@ -437,88 +447,6 @@
 			</Card.Root>
 		{/if}
 
-		<!-- Version history -->
-		<Card.Root>
-			<Card.Header>
-				<Card.Title class="text-sm">{m.doc_version_history()}</Card.Title>
-				<Card.Description class="text-xs">
-					{versions.length === 1
-						? m.doc_version_count({ count: String(versions.length) })
-						: m.doc_versions_count({ count: String(versions.length) })}
-				</Card.Description>
-			</Card.Header>
-			<Card.Content>
-				{#if versions.length === 0}
-					<p class="py-2 text-sm text-muted-foreground">{m.doc_no_versions()}</p>
-				{:else}
-					<ol class="relative border-l border-border">
-						{#each [...versions].sort((a, b) => b.version - a.version) as v (v.id)}
-							<li class="mb-6 ml-4 last:mb-0">
-								<div
-									class="absolute -left-1.5 mt-1 h-3 w-3 rounded-full border border-background bg-primary"
-								></div>
-								<div class="flex items-start justify-between gap-3">
-									<div class="min-w-0">
-										<p class="text-sm font-semibold">
-											{m.doc_version_label({ version: String(v.version) })}
-										</p>
-										<div
-											class="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
-										>
-											<span class="flex items-center gap-1">
-												<User class="size-3" />
-												{v.uploaderName}
-											</span>
-											<span class="flex items-center gap-1">
-												<Clock class="size-3" />
-												{formatTimestamp(v.createdAt, { withTime: true })}
-											</span>
-											<span>{formatSize(v.size)}</span>
-										</div>
-										<p class="mt-1 font-mono text-[10px] break-all text-muted-foreground">
-											{v.hash}
-										</p>
-									</div>
-									<Button
-										variant="outline"
-										size="sm"
-										class="shrink-0 gap-1.5"
-										disabled={downloadingId === v.id}
-										onclick={() => handleDownload(v.id)}
-									>
-										<Download class="size-3.5" />
-										{downloadingId === v.id ? m.doc_getting_link() : m.doc_download()}
-									</Button>
-								</div>
-							</li>
-						{/each}
-					</ol>
-				{/if}
-			</Card.Content>
-		</Card.Root>
-
-		<!-- Upload new version -->
-		<Card.Root>
-			<Card.Header class="pb-3">
-				<Card.Title class="text-sm">{m.doc_upload_new_version()}</Card.Title>
-				<Card.Description class="text-xs">
-					{m.doc_upload_description()}
-				</Card.Description>
-			</Card.Header>
-			<Card.Content>
-				{#if uploadingVersion}
-					<div class="flex items-center justify-center py-8">
-						<Upload class="mr-2 size-5 animate-pulse text-primary" />
-						<span class="text-sm text-muted-foreground">{m.common_uploading()}</span>
-					</div>
-				{:else}
-					<UploadZone onupload={handleUploadVersion} />
-				{/if}
-				{#if uploadVersionError}
-					<p class="mt-2 text-sm text-destructive">{uploadVersionError}</p>
-				{/if}
-			</Card.Content>
-		</Card.Root>
 	{/if}
 </div>
 

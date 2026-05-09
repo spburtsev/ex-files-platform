@@ -30,7 +30,6 @@ func docsServer(tokens *mockTokens, repo *mockDocumentRepo, storage *mockStorage
 		UserRepo:     &mockUserRepo{},
 		Tokens:       tokens,
 		Hasher:       stubHasher{},
-		Audit:        &dummyAudit{},
 		DocumentRepo: repo,
 		Storage:      storage,
 		IssueRepo:    ir,
@@ -103,7 +102,7 @@ func TestDocumentsUpload_HappyPath(t *testing.T) {
 	repo.On("FindByIssueAndHash", uint(7), mock.AnythingOfType("string")).Return(nil, gorm.ErrRecordNotFound)
 	repo.On("Create", mock.AnythingOfType("*models.Document")).Return(uint(100), nil)
 	storage.On("Upload", mock.Anything, mock.AnythingOfType("string"), mock.Anything, int64(5), "text/plain").Return(nil)
-	repo.On("CreateVersion", mock.AnythingOfType("*models.DocumentVersion")).Return(uint(200), nil)
+	repo.On("Update", mock.AnythingOfType("*models.Document")).Return(nil)
 	repo.On("FindByID", uint(100)).Return(&models.Document{
 		Model:      gormModelID(100),
 		Name:       "report.txt",
@@ -127,7 +126,6 @@ func TestDocumentsUpload_HappyPath(t *testing.T) {
 	assert.Equal(t, "100", got.Document.ID)
 	assert.Equal(t, "report.txt", got.Document.Name)
 	assert.Equal(t, oapi.DocumentStatusPending, got.Document.Status)
-	assert.Equal(t, "200", got.Version.ID)
 }
 
 func TestDocumentsUpload_DuplicateHashReturns409(t *testing.T) {
@@ -168,7 +166,7 @@ func TestDocumentsUpload_ResolvedIssueReturns422(t *testing.T) {
 	repo.AssertNotCalled(t, "FindByIssueAndHash", mock.Anything, mock.Anything)
 }
 
-func TestDocumentsGet_IncludesVersions(t *testing.T) {
+func TestDocumentsGet_HappyPath(t *testing.T) {
 	tokens := &mockTokens{}
 	stubTokenAccept(tokens, 1, models.RoleEmployee)
 	repo := &mockDocumentRepo{}
@@ -179,10 +177,6 @@ func TestDocumentsGet_IncludesVersions(t *testing.T) {
 		Status:     models.DocumentStatusPending,
 		UploaderID: 1,
 		IssueID:    7,
-	}, nil)
-	repo.On("GetVersions", uint(42)).Return([]models.DocumentVersion{
-		{Model: gormModelID(101), DocumentID: 42, Version: 1, Hash: "h1", Size: 100, StorageKey: "k1"},
-		{Model: gormModelID(102), DocumentID: 42, Version: 2, Hash: "h2", Size: 200, StorageKey: "k2"},
 	}, nil)
 
 	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}))
@@ -195,9 +189,8 @@ func TestDocumentsGet_IncludesVersions(t *testing.T) {
 	require.Equal(t, http.StatusOK, res.StatusCode)
 	var got oapi.GetDocumentResponse
 	require.NoError(t, json.NewDecoder(res.Body).Decode(&got))
-	assert.Equal(t, "42", got.Document.Document.ID)
-	assert.Len(t, got.Document.Versions, 2)
-	assert.Equal(t, int32(2), got.Document.Versions[1].Version)
+	assert.Equal(t, "42", got.Document.ID)
+	assert.Equal(t, "doc.pdf", got.Document.Name)
 }
 
 func TestDocumentsDelete_HappyPath(t *testing.T) {
@@ -216,49 +209,21 @@ func TestDocumentsDelete_HappyPath(t *testing.T) {
 	assert.Equal(t, http.StatusOK, res.StatusCode)
 }
 
-func TestDocumentsUploadVersion_BumpsVersionNumber(t *testing.T) {
-	tokens := &mockTokens{}
-	stubTokenAccept(tokens, 1, models.RoleEmployee)
-	repo := &mockDocumentRepo{}
-	storage := &mockStorage{}
-
-	repo.On("FindByID", uint(42)).Return(&models.Document{
-		Model:      gormModelID(42),
-		Name:       "doc.pdf",
-		MimeType:   "application/pdf",
-		IssueID:    7,
-		UploaderID: 1,
-	}, nil)
-	repo.On("LatestVersionNumber", uint(42)).Return(2, nil)
-	storage.On("Upload", mock.Anything, mock.AnythingOfType("string"), mock.Anything, int64(5), "application/pdf").Return(nil)
-	repo.On("CreateVersion", mock.AnythingOfType("*models.DocumentVersion")).Return(uint(300), nil).Run(func(a mock.Arguments) {
-		v := a.Get(0).(*models.DocumentVersion)
-		assert.Equal(t, 3, v.Version)
-	})
-
-	srv := newTestServer(t, docsServer(tokens, repo, storage))
-	defer srv.Close()
-
-	res := multipartUpload(t, srv.URL+"/documents/42/versions", "test-token", "doc.pdf", "application/pdf", []byte("hello"))
-	defer res.Body.Close()
-	assert.Equal(t, http.StatusCreated, res.StatusCode, "body=%s", readBody(res))
-}
-
 func TestDocumentsGetDownloadUrl_HappyPath(t *testing.T) {
 	tokens := &mockTokens{}
 	stubTokenAccept(tokens, 1, models.RoleEmployee)
 	repo := &mockDocumentRepo{}
 	storage := &mockStorage{}
 
-	repo.On("GetVersion", uint(101)).Return(&models.DocumentVersion{
-		Model: gormModelID(101), DocumentID: 42, StorageKey: "key/abc",
+	repo.On("FindByID", uint(42)).Return(&models.Document{
+		Model: gormModelID(42), StorageKey: "key/abc",
 	}, nil)
 	storage.On("PresignedURL", mock.Anything, "key/abc", mock.Anything).Return("https://minio.example/abc", nil)
 
 	srv := newTestServer(t, docsServer(tokens, repo, storage))
 	defer srv.Close()
 
-	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodGet, srv.URL+"/documents/42/versions/101/download", nil))
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodGet, srv.URL+"/documents/42/download", nil))
 	require.NoError(t, err)
 	defer res.Body.Close()
 
@@ -275,15 +240,15 @@ func TestDocumentsGetFile_StreamsBytes(t *testing.T) {
 	storage := &mockStorage{}
 
 	payload := []byte("file contents")
-	repo.On("GetVersion", uint(101)).Return(&models.DocumentVersion{
-		Model: gormModelID(101), DocumentID: 42, StorageKey: "k", Size: int64(len(payload)),
+	repo.On("FindByID", uint(42)).Return(&models.Document{
+		Model: gormModelID(42), StorageKey: "k", Size: int64(len(payload)),
 	}, nil)
 	storage.On("Get", mock.Anything, "k").Return(io.NopCloser(bytes.NewReader(payload)), nil)
 
 	srv := newTestServer(t, docsServer(tokens, repo, storage))
 	defer srv.Close()
 
-	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodGet, srv.URL+"/documents/42/versions/101/file", nil))
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodGet, srv.URL+"/documents/42/file", nil))
 	require.NoError(t, err)
 	defer res.Body.Close()
 

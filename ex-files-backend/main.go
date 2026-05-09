@@ -1,14 +1,17 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/joho/godotenv"
 	"github.com/rs/cors"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -20,6 +23,7 @@ import (
 	"github.com/spburtsev/ex-files-backend/oapi"
 	"github.com/spburtsev/ex-files-backend/seed"
 	"github.com/spburtsev/ex-files-backend/services"
+	"github.com/spburtsev/ex-files-backend/tracing"
 )
 
 func main() {
@@ -30,16 +34,25 @@ func main() {
 	logging.Init()
 	slog.Info("starting ex-files-backend")
 
+	ctx := context.Background()
+	tracingShutdown, err := tracing.Init(ctx)
+	if err != nil {
+		slog.Error("failed to init tracing", "error", err)
+		os.Exit(1)
+	}
+	defer func() { _ = tracingShutdown(context.Background()) }()
+
 	dsn := os.Getenv("DB_DSN")
 	if dsn == "" {
 		dsn = "host=localhost user=admin password=admin dbname=exfiles port=5433 sslmode=disable TimeZone=UTC"
 	}
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	var db *gorm.DB
+	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
 		slog.Error("failed to connect to database", "error", err)
 		os.Exit(1)
 	}
-	if err := db.AutoMigrate(&models.User{}, &models.Workspace{}, &models.WorkspaceMember{}, &models.AuditEntry{}, &models.Issue{}, &models.Document{}, &models.DocumentVersion{}, &models.Comment{}); err != nil {
+	if err := db.AutoMigrate(&models.User{}, &models.Workspace{}, &models.WorkspaceMember{}, &models.Issue{}, &models.Document{}, &models.Comment{}); err != nil {
 		slog.Error("auto-migrate failed", "error", err)
 		os.Exit(1)
 	}
@@ -47,7 +60,6 @@ func main() {
 	tokens := services.NewJWTTokenService(os.Getenv("JWT_SECRET"))
 	userRepo := &services.GormUserRepository{DB: db}
 	hasher := services.BcryptHasher{Cost: bcrypt.DefaultCost}
-	auditRepo := &services.GormAuditRepository{DB: db}
 	wsRepo := &services.GormWorkspaceRepository{DB: db}
 	issueRepo := &services.GormIssueRepository{DB: db}
 	docRepo := &services.GormDocumentRepository{DB: db}
@@ -63,9 +75,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	resendKey := os.Getenv("RESEND_API_KEY")
-	resendFrom := envOr("RESEND_FROM", "ex-files <noreply@ex-files.dev>")
-	emailSvc := services.NewResendEmailService(resendKey, resendFrom)
+	emailSvc := newEmailService()
 	sseHub := services.NewSSEHub()
 
 	rdb, err := services.NewRedisClient(envOr("REDIS_ADDR", "localhost:6380"))
@@ -78,7 +88,6 @@ func main() {
 		UserRepo:      userRepo,
 		Tokens:        tokens,
 		Hasher:        hasher,
-		Audit:         auditRepo,
 		Email:         emailSvc,
 		Cache:         rdb,
 		ResetTokens:   rdb,
@@ -121,6 +130,7 @@ func main() {
 
 	root := middleware.Chain(mux,
 		corsHandler.Handler,
+		func(h http.Handler) http.Handler { return otelhttp.NewHandler(h, "ex-files-backend") },
 		middleware.Recovery(),
 		middleware.RequestLogger(),
 		middleware.WithCookieJar,
@@ -139,4 +149,32 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// newEmailService picks the EmailService implementation based on the
+// EMAIL_PROVIDER env var. Defaults to Resend so existing deployments keep
+// working unchanged. Set EMAIL_PROVIDER=smtp to route through any SMTP
+// backend (Mailtrap sandbox in dev, etc.) using the SMTP_* env vars.
+func newEmailService() services.EmailService {
+	switch strings.ToLower(os.Getenv("EMAIL_PROVIDER")) {
+	case "smtp":
+		port, err := strconv.Atoi(envOr("SMTP_PORT", "587"))
+		if err != nil {
+			slog.Warn("invalid SMTP_PORT, falling back to 587", "error", err)
+			port = 587
+		}
+		return services.NewSMTPEmailService(
+			os.Getenv("SMTP_HOST"),
+			port,
+			os.Getenv("SMTP_USER"),
+			os.Getenv("SMTP_PASSWORD"),
+			envOr("SMTP_FROM", "ex-files <noreply@ex-files.local>"),
+		)
+	default:
+		return services.NewResendEmailService(
+			os.Getenv("RESEND_API_KEY"),
+			envOr("RESEND_FROM", "ex-files <noreply@ex-files.dev>"),
+			os.Getenv("RESEND_DEV_TRAP"),
+		)
+	}
 }

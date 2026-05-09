@@ -6,22 +6,18 @@
 	interface Props {
 		comments: Comment[];
 		currentPage: number;
+		currentUserId?: string;
 		ondelete: (id: string) => void;
 		ongotopage: (page: number) => void;
 	}
 
-	let { comments, currentPage, ondelete, ongotopage }: Props = $props();
+	let { comments, currentPage, currentUserId, ondelete, ongotopage }: Props = $props();
 
-	let filter = $state<'page' | 'all'>('page');
+	let filter = $state<'page' | 'all'>('all');
 
 	const visibleComments = $derived(
 		filter === 'page' ? comments.filter((c) => c.metadata.page === currentPage + 1) : [...comments]
 	);
-
-	function commentNumber(comment: Comment): number {
-		const pageComments = comments.filter((c) => c.metadata.page === comment.metadata.page);
-		return pageComments.indexOf(comment) + 1;
-	}
 </script>
 
 <div class="flex h-full flex-col">
@@ -63,7 +59,7 @@
 		{:else}
 			<div class="divide-y">
 				{#each visibleComments as comment (comment.id)}
-					<CommentItem {comment} commentNumber={commentNumber(comment)} {ondelete} {ongotopage} />
+					<CommentItem {comment} {currentUserId} {ondelete} {ongotopage} />
 				{/each}
 			</div>
 		{/if}

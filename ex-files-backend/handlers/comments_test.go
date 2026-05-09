@@ -21,7 +21,6 @@ func commentsServer(tokens *mockTokens, repo *mockCommentRepo) *handlers.Server 
 		UserRepo:    &mockUserRepo{},
 		Tokens:      tokens,
 		Hasher:      stubHasher{},
-		Audit:       &dummyAudit{},
 		CommentRepo: repo,
 		Hub:         services.NewSSEHub(),
 	}

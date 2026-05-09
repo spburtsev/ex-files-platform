@@ -71,32 +71,3 @@ func (r *GormDocumentRepository) Update(doc *models.Document) error {
 func (r *GormDocumentRepository) Delete(id uint) error {
 	return r.DB.Delete(&models.Document{}, id).Error
 }
-
-func (r *GormDocumentRepository) CreateVersion(version *models.DocumentVersion) error {
-	return r.DB.Create(version).Error
-}
-
-func (r *GormDocumentRepository) GetVersions(documentID uint) ([]models.DocumentVersion, error) {
-	var versions []models.DocumentVersion
-	if err := r.DB.Preload("Uploader").Where("document_id = ?", documentID).Order("version DESC").Find(&versions).Error; err != nil {
-		return nil, err
-	}
-	return versions, nil
-}
-
-func (r *GormDocumentRepository) GetVersion(id uint) (*models.DocumentVersion, error) {
-	var version models.DocumentVersion
-	if err := r.DB.First(&version, id).Error; err != nil {
-		return nil, err
-	}
-	return &version, nil
-}
-
-func (r *GormDocumentRepository) LatestVersionNumber(documentID uint) (int, error) {
-	var maxVersion int
-	err := r.DB.Model(&models.DocumentVersion{}).
-		Where("document_id = ?", documentID).
-		Select("COALESCE(MAX(version), 0)").
-		Scan(&maxVersion).Error
-	return maxVersion, err
-}

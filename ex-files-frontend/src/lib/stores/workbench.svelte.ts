@@ -6,7 +6,6 @@ export type ReviewStatus = ApiDocumentStatus;
 export interface Document {
 	id: string;
 	serverId?: string;
-	versionId?: string;
 	name: string;
 	size: number;
 	data: Uint8Array | null;
@@ -17,6 +16,7 @@ export interface Document {
 	mimeType: string;
 	uploaderName?: string;
 	reviewStatus?: ReviewStatus;
+	reviewerNote?: string;
 }
 
 export interface HydratedDocument {
@@ -26,6 +26,7 @@ export interface HydratedDocument {
 	mimeType: string;
 	uploaderName?: string;
 	reviewStatus?: ReviewStatus;
+	reviewerNote?: string;
 }
 
 interface IssueSlot {
@@ -85,14 +86,13 @@ function createWorkbenchStore() {
 		doc.error = error;
 	}
 
-	function setDocumentSaved(id: string, serverId: string, versionId: string) {
+	function setDocumentSaved(id: string, serverId: string) {
 		if (!currentIssueId) return;
 		const doc = slots[currentIssueId].documents.find((d) => d.id === id);
 		if (!doc) return;
 		doc.status = 'saved';
 		doc.error = undefined;
 		doc.serverId = serverId;
-		doc.versionId = versionId;
 	}
 
 	function setDocumentData(id: string, data: Uint8Array, pageCount: number) {
@@ -110,14 +110,24 @@ function createWorkbenchStore() {
 		doc.reviewStatus = reviewStatus;
 	}
 
+	// Idempotent: appends new docs and merges server-side fields onto existing
+	// docs (reviewStatus, reviewerNote, uploaderName). Safe to call repeatedly
+	// to re-sync after review actions or SSE-driven invalidations.
 	function hydrate(docs: HydratedDocument[]) {
 		if (!currentIssueId) return;
 		const s = slots[currentIssueId];
-		const existingServerIds = new Set(
-			s.documents.map((d) => d.serverId).filter((x): x is string => !!x)
-		);
+		const existingByServerId = new Map<string, Document>();
+		for (const d of s.documents) {
+			if (d.serverId) existingByServerId.set(d.serverId, d);
+		}
 		for (const d of docs) {
-			if (existingServerIds.has(d.serverId)) continue;
+			const existing = existingByServerId.get(d.serverId);
+			if (existing) {
+				existing.reviewStatus = d.reviewStatus;
+				existing.reviewerNote = d.reviewerNote;
+				existing.uploaderName = d.uploaderName;
+				continue;
+			}
 			s.documents.push({
 				id: crypto.randomUUID(),
 				serverId: d.serverId,
@@ -129,7 +139,8 @@ function createWorkbenchStore() {
 				status: 'saved',
 				mimeType: d.mimeType,
 				uploaderName: d.uploaderName,
-				reviewStatus: d.reviewStatus
+				reviewStatus: d.reviewStatus,
+				reviewerNote: d.reviewerNote
 			});
 		}
 		s.hydrated = true;

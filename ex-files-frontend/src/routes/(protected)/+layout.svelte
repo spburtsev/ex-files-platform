@@ -18,8 +18,7 @@
 		LogOut,
 		User,
 		FileCheck2,
-		ScrollText,
-		ChartColumn
+		BadgeCheck
 	} from '@lucide/svelte';
 	import { extraBreadcrumbs } from '$lib/stores/breadcrumbs.svelte';
 	import ErrorBoundary from '$lib/components/custom/ErrorBoundary.svelte';
@@ -48,22 +47,12 @@
 			Icon: Users,
 			match: (p: string) => p.startsWith('/users')
 		},
-		...(isManager(me?.role)
-			? [
-					{
-						href: localizeHref('/audit'),
-						label: m.nav_audit_log(),
-						Icon: ScrollText,
-						match: (p: string) => p === '/audit'
-					},
-					{
-						href: localizeHref('/analytics'),
-						label: m.nav_analytics(),
-						Icon: ChartColumn,
-						match: (p: string) => p.startsWith('/analytics')
-					}
-				]
-			: [])
+		{
+			href: localizeHref('/check'),
+			label: m.nav_verify(),
+			Icon: BadgeCheck,
+			match: (p: string) => p.startsWith('/check')
+		}
 	]);
 
 	const cleanPathname = $derived(deLocalizeHref(page.url.pathname));
@@ -76,7 +65,7 @@
 	});
 </script>
 
-<Sidebar.Provider>
+<Sidebar.Provider open={data.sidebarOpen}>
 	<Sidebar.Root collapsible="icon">
 		<!-- Header: brand -->
 		<Sidebar.Header>
@@ -210,11 +199,18 @@
 						</Breadcrumb.Item>
 						{#each extraBreadcrumbs.segments as segment (segment.label)}
 							<Breadcrumb.Separator />
-							<Breadcrumb.Item>
+							<Breadcrumb.Item class="gap-2">
 								{#if segment.href}
 									<Breadcrumb.Link href={segment.href}>{segment.label}</Breadcrumb.Link>
 								{:else}
 									<Breadcrumb.Page>{segment.label}</Breadcrumb.Page>
+								{/if}
+								{#if segment.badges?.length}
+									{#each segment.badges as b (b.label)}
+										<Badge variant="secondary" class="text-[10px] {b.cls ?? ''}">
+											{b.label}
+										</Badge>
+									{/each}
 								{/if}
 							</Breadcrumb.Item>
 						{/each}

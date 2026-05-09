@@ -25,11 +25,9 @@ tags:
   - name: issues
     description: Issues scoped to workspaces.
   - name: documents
-    description: Documents, versions, review workflow.
+    description: Documents and review workflow.
   - name: comments
     description: Comments on documents.
-  - name: audit
-    description: Audit log and statistics.
   - name: verify
     description: Public hash verification.
 
@@ -575,10 +573,10 @@ paths:
     get:
       tags: [documents]
       operationId: documentsGet
-      summary: Get a document with all its versions
+      summary: Get a document
       responses:
         '200':
-          description: Document detail.
+          description: Document.
           content:
             application/json:
               schema:
@@ -601,47 +599,13 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
 
-  /documents/{id}/versions:
+  /documents/{id}/download:
     parameters:
       - $ref: '#/components/parameters/IdPath'
-    post:
-      tags: [documents]
-      operationId: documentsUploadVersion
-      summary: Upload a new version of a document
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              required: [file]
-              properties:
-                file:
-                  type: string
-                  format: binary
-      responses:
-        '201':
-          description: Version uploaded.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UploadDocumentResponse'
-        '400': { $ref: '#/components/responses/BadRequest' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '500': { $ref: '#/components/responses/InternalError' }
-
-  /documents/{id}/versions/{versionId}/download:
-    parameters:
-      - $ref: '#/components/parameters/IdPath'
-      - name: versionId
-        in: path
-        required: true
-        schema: { type: string }
     get:
       tags: [documents]
       operationId: documentsGetDownloadUrl
-      summary: Get a presigned URL to download a version
+      summary: Get a presigned URL to download a document
       responses:
         '200':
           description: Presigned URL valid for ~15 minutes.
@@ -653,17 +617,13 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
 
-  /documents/{id}/versions/{versionId}/file:
+  /documents/{id}/file:
     parameters:
       - $ref: '#/components/parameters/IdPath'
-      - name: versionId
-        in: path
-        required: true
-        schema: { type: string }
     get:
       tags: [documents]
       operationId: documentsGetFile
-      summary: Stream the binary contents of a version
+      summary: Stream the binary contents of a document
       responses:
         '200':
           description: Binary file contents.
@@ -873,62 +833,6 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '500': { $ref: '#/components/responses/InternalError' }
-
-  /audit:
-    get:
-      tags: [audit]
-      operationId: auditList
-      summary: List audit entries with optional filters
-      parameters:
-        - name: action
-          in: query
-          schema: { type: string }
-        - name: targetType
-          in: query
-          schema: { type: string }
-        - name: actorId
-          in: query
-          schema: { type: string }
-        - name: targetId
-          in: query
-          schema: { type: string }
-        - name: from
-          in: query
-          schema: { type: string, format: date-time }
-        - name: to
-          in: query
-          schema: { type: string, format: date-time }
-        - $ref: '#/components/parameters/PageQuery'
-        - $ref: '#/components/parameters/PerPageQuery'
-      responses:
-        '200':
-          description: Paginated audit entries.
-          headers:
-            X-Total-Count: { $ref: '#/components/headers/XTotalCount' }
-            X-Total-Pages: { $ref: '#/components/headers/XTotalPages' }
-            X-Page:        { $ref: '#/components/headers/XPage' }
-            X-Per-Page:    { $ref: '#/components/headers/XPerPage' }
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/GetAuditLogResponse'
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '500': { $ref: '#/components/responses/InternalError' }
-
-  /audit/stats:
-    get:
-      tags: [audit]
-      operationId: auditStats
-      summary: Aggregated audit and document statistics
-      responses:
-        '200':
-          description: Stats payload.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AuditStatsResponse'
-        '401': { $ref: '#/components/responses/Unauthorized' }
         '500': { $ref: '#/components/responses/InternalError' }
 
   /verify:
@@ -1305,50 +1209,17 @@ components:
         createdAt:    { type: string, format: date-time }
         updatedAt:    { type: string, format: date-time }
 
-    DocumentVersion:
-      type: object
-      required:
-        - id
-        - documentId
-        - version
-        - hash
-        - size
-        - storageKey
-        - uploaderId
-        - uploaderName
-        - createdAt
-      properties:
-        id:           { type: string }
-        documentId:   { type: string }
-        version:      { type: integer, format: int32 }
-        hash:         { type: string }
-        size:         { type: integer, format: int64 }
-        storageKey:   { type: string }
-        uploaderId:   { type: string }
-        uploaderName: { type: string }
-        createdAt:    { type: string, format: date-time }
-
-    DocumentDetail:
-      type: object
-      required: [document, versions]
-      properties:
-        document: { $ref: '#/components/schemas/Document' }
-        versions:
-          type: array
-          items: { $ref: '#/components/schemas/DocumentVersion' }
-
     UploadDocumentResponse:
       type: object
-      required: [document, version]
+      required: [document]
       properties:
         document: { $ref: '#/components/schemas/Document' }
-        version:  { $ref: '#/components/schemas/DocumentVersion' }
 
     GetDocumentResponse:
       type: object
       required: [document]
       properties:
-        document: { $ref: '#/components/schemas/DocumentDetail' }
+        document: { $ref: '#/components/schemas/Document' }
 
     ListDocumentsResponse:
       type: object
@@ -1433,80 +1304,6 @@ components:
         comments:
           type: array
           items: { $ref: '#/components/schemas/Comment' }
-
-    AuditEntry:
-      type: object
-      required: [id, action, actorId, actorName, targetType, createdAt]
-      properties:
-        id:         { type: string }
-        action:     { type: string }
-        actorId:    { type: string }
-        actorName:  { type: string }
-        targetId:   { type: string, nullable: true }
-        targetType: { type: string }
-        metadata:
-          type: object
-          additionalProperties: true
-          nullable: true
-        createdAt:  { type: string, format: date-time }
-
-    GetAuditLogResponse:
-      type: object
-      required: [entries]
-      properties:
-        entries:
-          type: array
-          items: { $ref: '#/components/schemas/AuditEntry' }
-
-    AuditActionCount:
-      type: object
-      required: [action, count]
-      properties:
-        action: { type: string }
-        count:  { type: integer, format: int64 }
-
-    AuditDailyActivity:
-      type: object
-      required: [date, count]
-      properties:
-        date:  { type: string }
-        count: { type: integer, format: int64 }
-
-    DocumentStatusCount:
-      type: object
-      required: [status, count]
-      properties:
-        status: { type: string }
-        count:  { type: integer, format: int64 }
-
-    AuditTopActor:
-      type: object
-      required: [actorId, actorName, count]
-      properties:
-        actorId:   { type: string }
-        actorName: { type: string }
-        count:     { type: integer, format: int64 }
-
-    AuditStatsResponse:
-      type: object
-      required:
-        - actionsByType
-        - dailyActivity
-        - documentsByStatus
-        - topActors
-      properties:
-        actionsByType:
-          type: array
-          items: { $ref: '#/components/schemas/AuditActionCount' }
-        dailyActivity:
-          type: array
-          items: { $ref: '#/components/schemas/AuditDailyActivity' }
-        documentsByStatus:
-          type: array
-          items: { $ref: '#/components/schemas/DocumentStatusCount' }
-        topActors:
-          type: array
-          items: { $ref: '#/components/schemas/AuditTopActor' }
 
     VerifyResponse:
       type: object

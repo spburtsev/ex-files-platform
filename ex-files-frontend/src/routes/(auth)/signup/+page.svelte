@@ -108,6 +108,13 @@
 					>
 				</Card.Footer>
 			</Card.Root>
+
+			<a
+				href={localizeHref('/verify')}
+				class="self-center text-xs text-muted-foreground underline-offset-4 hover:underline"
+			>
+				{m.verify_link()}
+			</a>
 		</div>
 	</div>
 </div>

@@ -20,7 +20,6 @@ func verifyServer(repo *mockDocumentRepo) *handlers.Server {
 		UserRepo:     &mockUserRepo{},
 		Tokens:       &mockTokens{},
 		Hasher:       stubHasher{},
-		Audit:        &dummyAudit{},
 		DocumentRepo: repo,
 	}
 }

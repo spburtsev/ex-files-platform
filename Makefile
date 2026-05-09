@@ -48,7 +48,8 @@ infra-down:
 	docker compose down
 
 backend-dev:
-	cd $(BACKEND_DIR) && air
+	mkdir -p $(BACKEND_DIR)/tmp
+	cd $(BACKEND_DIR) && air 2>&1 | tee tmp/app.log
 
 dev: infra-up backend-dev
 

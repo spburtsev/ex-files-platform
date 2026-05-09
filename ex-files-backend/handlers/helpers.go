@@ -1,9 +1,7 @@
 package handlers
 
 import (
-	"fmt"
 	"math"
-	"time"
 
 	"github.com/spburtsev/ex-files-backend/oapi"
 )
@@ -52,14 +50,4 @@ func optInt64(v int64) oapi.OptInt64 {
 // optInt32 wraps an int from a clamped int (e.g. page) into OptInt32.
 func optInt32(v int) oapi.OptInt32 {
 	return oapi.NewOptInt32(int32(v))
-}
-
-// parseTime tolerates a few common shapes for incoming date strings.
-func parseTime(s string) (time.Time, error) {
-	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04:05", "2006-01-02"} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t, nil
-		}
-	}
-	return time.Time{}, fmt.Errorf("unrecognised time format: %s", s)
 }
