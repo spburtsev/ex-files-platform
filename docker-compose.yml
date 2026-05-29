@@ -1,7 +1,7 @@
 services:
   ex-files-pg:
     image: postgres:17
-    restart: always
+    restart: unless-stopped
     ports:
       - ${PG_PORT:-5433}:5432
     environment:
@@ -18,7 +18,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    restart: always
+    restart: unless-stopped
     ports:
       - ${REDIS_PORT:-6380}:6379
     volumes:
@@ -31,7 +31,7 @@ services:
 
   ex-files-minio:
     image: minio/minio
-    restart: always
+    restart: unless-stopped
     ports:
       - ${MINIO_PORT:-9002}:9000
       - ${MINIO_CONSOLE_PORT:-9003}:9001
@@ -61,7 +61,7 @@ services:
 
   ex-files-backend:
     build: ./ex-files-backend
-    restart: always
+    restart: unless-stopped
     ports:
       - ${BACKEND_PORT:-8080}:8080
     environment:
@@ -94,7 +94,7 @@ services:
 
   ex-files-frontend:
     build: ./ex-files-frontend
-    restart: always
+    restart: unless-stopped
     ports:
       - ${FRONTEND_PORT:-3003}:3000
     environment:
@@ -106,7 +106,7 @@ services:
 
   loki:
     image: grafana/loki:3.4
-    restart: always
+    restart: unless-stopped
     ports:
       - "3100:3100"
     command: -config.file=/etc/loki/local-config.yaml
@@ -115,7 +115,7 @@ services:
 
   promtail:
     image: grafana/promtail:3.4
-    restart: always
+    restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./infra/promtail/config.yml:/etc/promtail/config.yml:ro
@@ -126,7 +126,7 @@ services:
 
   tempo:
     image: grafana/tempo:2.7.0
-    restart: always
+    restart: unless-stopped
     user: "0:0"
     command: -config.file=/etc/tempo.yaml
     volumes:
@@ -137,7 +137,7 @@ services:
 
   grafana:
     image: grafana/grafana:11.6.0
-    restart: always
+    restart: unless-stopped
     ports:
       - ${GRAFANA_PORT:-3200}:3000
     environment:
