@@ -42,7 +42,7 @@ docs: openapi-docs
 # --- Local development ---
 
 infra-up:
-	docker compose up -d ex-files-pg redis ex-files-minio ex-files-minio-init loki promtail grafana
+	docker compose up -d ex-files-pg redis ex-files-minio loki promtail grafana
 
 infra-down:
 	docker compose down

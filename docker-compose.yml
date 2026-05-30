@@ -16,6 +16,21 @@ services:
       timeout: 3s
       retries: 5
 
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    restart: unless-stopped
+    ports:
+      - ${PGADMIN_PORT:-5050}:80
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@example.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+    depends_on:
+      ex-files-pg:
+        condition: service_healthy
+
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -47,18 +62,6 @@ services:
       timeout: 3s
       retries: 5
 
-  ex-files-minio-init:
-    image: minio/mc
-    depends_on:
-      ex-files-minio:
-        condition: service_healthy
-    entrypoint: >
-      /bin/sh -c "
-      mc alias set local http://ex-files-minio:9000 ${MINIO_USER:-minioadmin} ${MINIO_PASSWORD:-minioadmin};
-      mc mb --ignore-existing local/documents;
-      exit 0;
-      "
-
   ex-files-backend:
     build: ./ex-files-backend
     restart: unless-stopped
@@ -89,8 +92,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      ex-files-minio-init:
-        condition: service_completed_successfully
+      ex-files-minio:
+        condition: service_healthy
 
   ex-files-frontend:
     build: ./ex-files-frontend
@@ -154,6 +157,7 @@ services:
 
 volumes:
   pgdata:
+  pgadmin-data:
   miniodata:
   redisdata:
   loki-data:
