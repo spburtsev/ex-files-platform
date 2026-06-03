@@ -9,7 +9,7 @@ RUN bunx svelte-kit sync
 RUN bun run gen:api
 RUN bun run build
 
-FROM node:22-alpine
+FROM node:24-alpine
 WORKDIR /app
 COPY --from=build /src/build ./build
 COPY --from=build /src/package.json .
