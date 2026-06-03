@@ -1,4 +1,4 @@
-import type { DocumentStatus as ApiDocumentStatus } from '$lib/api';
+import type { DocumentStatus as ApiDocumentStatus, DocumentApproval } from '$lib/api';
 
 export type DocumentStatus = 'draft' | 'saving' | 'saved' | 'error';
 export type ReviewStatus = ApiDocumentStatus;
@@ -17,6 +17,10 @@ export interface Document {
 	uploaderName?: string;
 	reviewStatus?: ReviewStatus;
 	reviewerNote?: string;
+	// Multi-reviewer approval progress for this version.
+	approvals?: DocumentApproval[];
+	approvalCount?: number;
+	requiredApprovals?: number;
 }
 
 export interface HydratedDocument {
@@ -27,6 +31,9 @@ export interface HydratedDocument {
 	uploaderName?: string;
 	reviewStatus?: ReviewStatus;
 	reviewerNote?: string;
+	approvals?: DocumentApproval[];
+	approvalCount?: number;
+	requiredApprovals?: number;
 }
 
 interface IssueSlot {
@@ -126,6 +133,9 @@ function createWorkbenchStore() {
 				existing.reviewStatus = d.reviewStatus;
 				existing.reviewerNote = d.reviewerNote;
 				existing.uploaderName = d.uploaderName;
+				existing.approvals = d.approvals;
+				existing.approvalCount = d.approvalCount;
+				existing.requiredApprovals = d.requiredApprovals;
 				continue;
 			}
 			s.documents.push({
@@ -140,7 +150,10 @@ function createWorkbenchStore() {
 				mimeType: d.mimeType,
 				uploaderName: d.uploaderName,
 				reviewStatus: d.reviewStatus,
-				reviewerNote: d.reviewerNote
+				reviewerNote: d.reviewerNote,
+				approvals: d.approvals,
+				approvalCount: d.approvalCount,
+				requiredApprovals: d.requiredApprovals
 			});
 		}
 		s.hydrated = true;

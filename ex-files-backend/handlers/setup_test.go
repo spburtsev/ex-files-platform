@@ -222,6 +222,13 @@ func (m *mockIssueRepo) DashboardSummary(userID uint, window time.Duration) (ser
 	a := m.Called(userID, window)
 	return a.Get(0).(services.DashboardSummary), a.Error(1)
 }
+func (m *mockIssueRepo) GetReviewers(issueID uint) ([]models.User, error) {
+	a := m.Called(issueID)
+	return a.Get(0).([]models.User), a.Error(1)
+}
+func (m *mockIssueRepo) SetReviewers(issueID uint, userIDs []uint) error {
+	return m.Called(issueID, userIDs).Error(0)
+}
 
 // --- mocks: documents ---------------------------------------------------
 
@@ -264,6 +271,29 @@ func (m *mockDocumentRepo) ListByIssue(issueID uint, search, status string, limi
 }
 func (m *mockDocumentRepo) Delete(id uint) error {
 	return m.Called(id).Error(0)
+}
+
+// --- mocks: document approvals ------------------------------------------
+
+type mockDocumentApprovalRepo struct{ mock.Mock }
+
+func (m *mockDocumentApprovalRepo) Create(approval *models.DocumentApproval) error {
+	return m.Called(approval).Error(0)
+}
+func (m *mockDocumentApprovalRepo) ListByDocument(documentID uint) ([]models.DocumentApproval, error) {
+	a := m.Called(documentID)
+	return a.Get(0).([]models.DocumentApproval), a.Error(1)
+}
+func (m *mockDocumentApprovalRepo) ListByDocumentIDs(documentIDs []uint) ([]models.DocumentApproval, error) {
+	a := m.Called(documentIDs)
+	return a.Get(0).([]models.DocumentApproval), a.Error(1)
+}
+func (m *mockDocumentApprovalRepo) CountByReviewers(documentID uint, reviewerIDs []uint) (int64, error) {
+	a := m.Called(documentID, reviewerIDs)
+	return a.Get(0).(int64), a.Error(1)
+}
+func (m *mockDocumentApprovalRepo) DeleteByDocument(documentID uint) error {
+	return m.Called(documentID).Error(0)
 }
 
 // --- mocks: comments ----------------------------------------------------

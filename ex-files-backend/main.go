@@ -53,7 +53,7 @@ func main() {
 		slog.Error("failed to connect to database", "error", err)
 		os.Exit(1)
 	}
-	if err := db.AutoMigrate(&models.User{}, &models.Workspace{}, &models.WorkspaceMember{}, &models.Issue{}, &models.Document{}, &models.Comment{}); err != nil {
+	if err := db.AutoMigrate(&models.User{}, &models.Workspace{}, &models.WorkspaceMember{}, &models.Issue{}, &models.Document{}, &models.Comment{}, &models.IssueReviewer{}, &models.DocumentApproval{}); err != nil {
 		slog.Error("auto-migrate failed", "error", err)
 		os.Exit(1)
 	}
@@ -64,6 +64,7 @@ func main() {
 	wsRepo := &services.GormWorkspaceRepository{DB: db}
 	issueRepo := &services.GormIssueRepository{DB: db}
 	docRepo := &services.GormDocumentRepository{DB: db}
+	approvalRepo := &services.GormDocumentApprovalRepository{DB: db}
 	commentRepo := &services.GormCommentRepository{DB: db}
 
 	minioEndpoint := envOr("MINIO_ENDPOINT", "localhost:9002")
@@ -104,6 +105,7 @@ func main() {
 		WorkspaceRepo: wsRepo,
 		IssueRepo:     issueRepo,
 		DocumentRepo:  docRepo,
+		ApprovalRepo:  approvalRepo,
 		CommentRepo:   commentRepo,
 		Storage:       storage,
 		Hub:           sseHub,

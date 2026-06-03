@@ -2,7 +2,7 @@
 	import { page } from '$app/state';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { getWorkspaceDetail, getAssignableMembers, getIssues } from '$lib/queries.remote';
-	import { formatTimestamp, roleName, isManager, initials } from '$lib/utils';
+	import { formatTimestamp, isManager, initials, roleLabel } from '$lib/utils';
 	import {
 		updateWorkspace,
 		deleteWorkspace,
@@ -23,6 +23,7 @@
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
+	import ReviewerPicker from '$lib/components/ReviewerPicker.svelte';
 	import { Label } from '$lib/components/ui/label/index.js';
 	import { Skeleton } from '$lib/components/ui/skeleton/index.js';
 	import { Textarea } from '$lib/components/ui/textarea/index.js';
@@ -33,7 +34,6 @@
 		UserPlus,
 		UserMinus,
 		Calendar,
-		Crown,
 		FileText,
 		ArrowRight,
 		Plus,
@@ -173,6 +173,8 @@
 	let newIssueDesc = $state('');
 	let newIssueAssignee = $state('');
 	let newIssueDeadline = $state('');
+	let newIssueReviewers = $state<string[]>([]);
+	let newIssueRequired = $state(1);
 	let creatingIssue = $state(false);
 	let newIssueError = $state('');
 
@@ -284,7 +286,9 @@
 				title: newIssueTitle.trim(),
 				description: newIssueDesc.trim() || undefined,
 				assigneeId: newIssueAssignee,
-				deadline: newIssueDeadline || undefined
+				deadline: newIssueDeadline || undefined,
+				reviewerIds: newIssueReviewers.length ? newIssueReviewers : undefined,
+				requiredApprovals: newIssueReviewers.length ? newIssueRequired : undefined
 			});
 			if (!result.ok) {
 				newIssueError = result.error ?? m.ws_issue_create_error();
@@ -295,6 +299,8 @@
 			newIssueDesc = '';
 			newIssueAssignee = '';
 			newIssueDeadline = '';
+			newIssueReviewers = [];
+			newIssueRequired = 1;
 			await invalidateAll();
 		} catch {
 			newIssueError = m.error_network_retry();
@@ -346,7 +352,6 @@
 						<Card.Title class="text-base">{ws?.name}</Card.Title>
 						<Card.Description class="mt-1 flex flex-wrap gap-3 text-xs">
 							<span class="flex items-center gap-1">
-								<Crown class="size-3.5" />
 								{m.ws_manager_label({ name: manager?.name ?? '-' })}
 							</span>
 							<span class="flex items-center gap-1">
@@ -598,7 +603,6 @@
 						{:else}
 							<ul class="divide-y">
 								{#each members as member (member.id)}
-									{@const role = roleName(member.role)}
 									<li class="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
 										<Avatar.Root class="h-8 w-8 shrink-0">
 											<Avatar.Fallback
@@ -611,13 +615,13 @@
 											<p class="truncate text-sm font-medium">{member.name}</p>
 											<p class="truncate text-xs text-muted-foreground">{member.email}</p>
 										</div>
-										{#if role === 'manager'}
-											<Badge variant="secondary" class="shrink-0 text-[10px] text-violet-700">
-												{m.role_manager()}
+										{#if member.role === 'employee'}
+											<Badge variant="outline" class="shrink-0 text-[10px] text-muted-foreground">
+												{roleLabel(member.role)}
 											</Badge>
 										{:else}
-											<Badge variant="outline" class="shrink-0 text-[10px] text-muted-foreground">
-												{m.role_employee()}
+											<Badge variant="secondary" class="shrink-0 text-[10px] text-violet-700">
+												{roleLabel(member.role)}
 											</Badge>
 										{/if}
 										{#if isOwner}
@@ -794,6 +798,12 @@
 				<Label for="issue-deadline">{m.ws_issue_deadline_label()}</Label>
 				<Input id="issue-deadline" type="date" bind:value={newIssueDeadline} />
 			</div>
+			<ReviewerPicker
+				members={members.map((u) => ({ id: String(u.id), name: u.name }))}
+				excludeId={newIssueAssignee}
+				bind:selected={newIssueReviewers}
+				bind:required={newIssueRequired}
+			/>
 			{#if newIssueError}
 				<p class="text-sm text-destructive">{newIssueError}</p>
 			{/if}

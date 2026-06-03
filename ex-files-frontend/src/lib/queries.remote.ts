@@ -27,9 +27,7 @@ function paginationFromHeaders(res: Response | undefined) {
 	};
 }
 
-// ---------------------------------------------------------------------------
 // Auth
-// ---------------------------------------------------------------------------
 
 export const getMe = query(async () => {
 	try {
@@ -46,9 +44,7 @@ export const getUsers = query(async () => {
 	return r.data?.users ?? [];
 });
 
-// ---------------------------------------------------------------------------
 // Workspaces
-// ---------------------------------------------------------------------------
 
 export const getWorkspaces = query(
 	'unchecked',
@@ -78,9 +74,7 @@ export const getAssignableMembers = query('unchecked', async (workspaceId: strin
 	return r.data?.users ?? [];
 });
 
-// ---------------------------------------------------------------------------
 // Issues
-// ---------------------------------------------------------------------------
 
 export const getIssues = query(
 	'unchecked',
@@ -109,9 +103,7 @@ export const getIssue = query('unchecked', async (id: string) => {
 	return r.data ?? null;
 });
 
-// ---------------------------------------------------------------------------
 // Documents
-// ---------------------------------------------------------------------------
 
 export const getDocuments = query('unchecked', async (queryStr: string) => {
 	const sep = queryStr.indexOf('?');
@@ -149,14 +141,14 @@ export const getDocumentBytes = query('unchecked', async (docId: string) => {
 	return new Uint8Array(await blob.arrayBuffer());
 });
 
-// ---------------------------------------------------------------------------
-// Comments, Dashboard
-// ---------------------------------------------------------------------------
+// Comments
 
 export const getComments = query('unchecked', async (docId: string) => {
 	const r = await commentsList({ ...apiOpts(), path: { id: docId } });
 	return r.data?.comments ?? [];
 });
+
+// Dashboard
 
 export const getDashboard = query(async () => {
 	const r = await dashboardGet(apiOpts());

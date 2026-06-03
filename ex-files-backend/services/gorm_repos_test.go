@@ -23,6 +23,8 @@ func setupTestDB(t *testing.T) *gorm.DB {
 		&models.Issue{},
 		&models.Document{},
 		&models.Comment{},
+		&models.IssueReviewer{},
+		&models.DocumentApproval{},
 	)
 	require.NoError(t, err)
 	return db
@@ -353,6 +355,69 @@ func TestGormIssueRepo_CRUD(t *testing.T) {
 	allIssues, err := issueRepo.ListAll()
 	require.NoError(t, err)
 	assert.Len(t, allIssues, 1)
+}
+
+func TestGormIssueRepo_SetGetReviewers(t *testing.T) {
+	db := setupTestDB(t)
+	repo := &GormIssueRepository{DB: db}
+	userRepo := &GormUserRepository{DB: db}
+
+	for _, n := range []string{"A", "B", "C"} {
+		require.NoError(t, userRepo.Create(&models.User{Email: n + "@t.com", Name: n, PasswordHash: "h"}))
+	}
+	issue := &models.Issue{Title: "I", CreatorID: 1, AssigneeID: 1, WorkspaceID: 1}
+	require.NoError(t, repo.Create(issue))
+
+	require.NoError(t, repo.SetReviewers(issue.ID, []uint{1, 2}))
+	revs, err := repo.GetReviewers(issue.ID)
+	require.NoError(t, err)
+	assert.Len(t, revs, 2)
+
+	// Replace-set: {2,3} drops reviewer 1 and adds 3.
+	require.NoError(t, repo.SetReviewers(issue.ID, []uint{2, 3}))
+	revs2, err := repo.GetReviewers(issue.ID)
+	require.NoError(t, err)
+	ids := map[uint]bool{}
+	for _, u := range revs2 {
+		ids[u.ID] = true
+	}
+	assert.True(t, ids[2] && ids[3] && !ids[1])
+
+	// FindByID preloads the panel (with the related users).
+	found, err := repo.FindByID(issue.ID)
+	require.NoError(t, err)
+	assert.Len(t, found.Reviewers, 2)
+}
+
+// --- Document Approval Repository ---
+
+func TestGormDocumentApprovalRepo_IdempotentAndCount(t *testing.T) {
+	db := setupTestDB(t)
+	repo := &GormDocumentApprovalRepository{DB: db}
+
+	require.NoError(t, repo.Create(&models.DocumentApproval{DocumentID: 42, ReviewerID: 5}))
+	// Duplicate approval by the same reviewer is a no-op, not an error.
+	require.NoError(t, repo.Create(&models.DocumentApproval{DocumentID: 42, ReviewerID: 5}))
+	require.NoError(t, repo.Create(&models.DocumentApproval{DocumentID: 42, ReviewerID: 6}))
+
+	all, err := repo.ListByDocument(42)
+	require.NoError(t, err)
+	assert.Len(t, all, 2)
+
+	n, err := repo.CountByReviewers(42, []uint{5, 6, 7})
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), n)
+
+	// A reviewer no longer on the panel stops counting.
+	n2, err := repo.CountByReviewers(42, []uint{6})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), n2)
+
+	// DeleteByDocument clears the tally (used on resubmit).
+	require.NoError(t, repo.DeleteByDocument(42))
+	n3, err := repo.CountByReviewers(42, []uint{5, 6, 7})
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), n3)
 }
 
 func TestGormIssueRepo_FilterByStatus(t *testing.T) {

@@ -25,7 +25,15 @@ func docsServer(tokens *mockTokens, repo *mockDocumentRepo, storage *mockStorage
 		ir = issues[0]
 	} else {
 		ir = &mockIssueRepo{}
+		ir.On("FindByID", mock.Anything).Return(&models.Issue{Model: gormModelID(1), RequiredApprovals: 1}, nil).Maybe()
+		ir.On("GetReviewers", mock.Anything).Return([]models.User{}, nil).Maybe()
 	}
+	ar := &mockDocumentApprovalRepo{}
+	ar.On("Create", mock.Anything).Return(nil).Maybe()
+	ar.On("ListByDocument", mock.Anything).Return([]models.DocumentApproval{}, nil).Maybe()
+	ar.On("ListByDocumentIDs", mock.Anything).Return([]models.DocumentApproval{}, nil).Maybe()
+	ar.On("CountByReviewers", mock.Anything, mock.Anything).Return(int64(0), nil).Maybe()
+	ar.On("DeleteByDocument", mock.Anything).Return(nil).Maybe()
 	return &handlers.Server{
 		UserRepo:     &mockUserRepo{},
 		Tokens:       tokens,
@@ -33,6 +41,7 @@ func docsServer(tokens *mockTokens, repo *mockDocumentRepo, storage *mockStorage
 		DocumentRepo: repo,
 		Storage:      storage,
 		IssueRepo:    ir,
+		ApprovalRepo: ar,
 	}
 }
 
@@ -327,6 +336,7 @@ func TestDocumentsApprove_ManagerSucceeds(t *testing.T) {
 	}, nil)
 	repo.On("Update", mock.AnythingOfType("*models.Document")).Return(nil)
 	issues.On("FindByID", uint(7)).Return(&models.Issue{Model: gormModelID(7), Resolved: false}, nil)
+	issues.On("GetReviewers", uint(7)).Return([]models.User{}, nil)
 	issues.On("Update", mock.AnythingOfType("*models.Issue")).Return(nil)
 
 	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}, issues))
@@ -352,6 +362,7 @@ func TestDocumentsApprove_MarksIssueResolved(t *testing.T) {
 	}, nil)
 	repo.On("Update", mock.AnythingOfType("*models.Document")).Return(nil)
 	issues.On("FindByID", uint(7)).Return(&models.Issue{Model: gormModelID(7), Resolved: false}, nil)
+	issues.On("GetReviewers", uint(7)).Return([]models.User{}, nil)
 	issues.On("Update", mock.AnythingOfType("*models.Issue")).Return(nil).Run(func(a mock.Arguments) {
 		i := a.Get(0).(*models.Issue)
 		assert.True(t, i.Resolved, "issue must be marked resolved")
@@ -378,6 +389,7 @@ func TestDocumentsApprove_AlreadyResolvedIssueSkipsUpdate(t *testing.T) {
 	}, nil)
 	repo.On("Update", mock.AnythingOfType("*models.Document")).Return(nil)
 	issues.On("FindByID", uint(7)).Return(&models.Issue{Model: gormModelID(7), Resolved: true}, nil)
+	issues.On("GetReviewers", uint(7)).Return([]models.User{}, nil)
 	// IssueRepo.Update should NOT be called when issue already resolved.
 
 	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}, issues))

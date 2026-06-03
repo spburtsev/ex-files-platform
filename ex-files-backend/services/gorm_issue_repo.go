@@ -91,7 +91,9 @@ func (r *GormIssueRepository) ListUnresolvedWithDeadline() ([]models.Issue, erro
 
 func (r *GormIssueRepository) FindByID(id uint) (*models.Issue, error) {
 	var issue models.Issue
-	err := r.DB.Preload("Creator").Preload("Assignee").First(&issue, id).Error
+	err := r.DB.Preload("Creator").Preload("Assignee").
+		Preload("Reviewers").Preload("Reviewers.User").
+		First(&issue, id).Error
 	if err != nil {
 		return nil, err
 	}
@@ -103,17 +105,43 @@ func (r *GormIssueRepository) Create(issue *models.Issue) error {
 }
 
 func (r *GormIssueRepository) Update(issue *models.Issue) error {
-	return r.DB.Save(issue).Error
+	return r.DB.Omit("Reviewers").Save(issue).Error
 }
 
-// DashboardSummary aggregates everything the dashboard endpoint needs in five
-// queries. Relevance is "direct involvement": the user is either the assignee
-// or the creator of the issue.
-//
-// The "recent" list uses Postgres-specific GREATEST + correlated subqueries to
-// pick the latest of issue.updated_at, child documents' updated_at, and child
-// comments' created_at. SQLite (used in tests) doesn't ship GREATEST, so the
-// repo test exercising this path is gated to Postgres.
+func (r *GormIssueRepository) GetReviewers(issueID uint) ([]models.User, error) {
+	var rows []models.IssueReviewer
+	if err := r.DB.Preload("User").Where("issue_id = ?", issueID).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	users := make([]models.User, 0, len(rows))
+	for i := range rows {
+		users = append(users, rows[i].User)
+	}
+	return users, nil
+}
+
+func (r *GormIssueRepository) SetReviewers(issueID uint, userIDs []uint) error {
+	return r.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Unscoped().Where("issue_id = ?", issueID).
+			Delete(&models.IssueReviewer{}).Error; err != nil {
+			return err
+		}
+		seen := make(map[uint]bool, len(userIDs))
+		rows := make([]models.IssueReviewer, 0, len(userIDs))
+		for _, uid := range userIDs {
+			if uid == 0 || seen[uid] {
+				continue
+			}
+			seen[uid] = true
+			rows = append(rows, models.IssueReviewer{IssueID: issueID, UserID: uid})
+		}
+		if len(rows) == 0 {
+			return nil
+		}
+		return tx.Create(&rows).Error
+	})
+}
+
 func (r *GormIssueRepository) DashboardSummary(userID uint, dueSoonWindow time.Duration) (DashboardSummary, error) {
 	var sum DashboardSummary
 	now := time.Now()
@@ -185,8 +213,6 @@ func (r *GormIssueRepository) DashboardSummary(userID uint, dueSoonWindow time.D
 		return sum, err
 	}
 
-	// Hydrate Creator + Assignee on the recent list (the raw query doesn't
-	// preload). One round-trip, simple to reason about.
 	if len(sum.Recent) > 0 {
 		userIDs := make(map[uint]struct{}, len(sum.Recent)*2)
 		for _, iwa := range sum.Recent {

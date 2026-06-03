@@ -55,6 +55,14 @@ type DocumentRepository interface {
 	Delete(id uint) error
 }
 
+type DocumentApprovalRepository interface {
+	Create(approval *models.DocumentApproval) error
+	ListByDocument(documentID uint) ([]models.DocumentApproval, error)
+	ListByDocumentIDs(documentIDs []uint) ([]models.DocumentApproval, error)
+	CountByReviewers(documentID uint, reviewerIDs []uint) (int64, error)
+	DeleteByDocument(documentID uint) error
+}
+
 type IssueRepository interface {
 	ListAll() ([]models.Issue, error)
 	ListByWorkspace(workspaceID uint, search string, resolved *bool, archived bool) ([]models.Issue, error)
@@ -64,11 +72,10 @@ type IssueRepository interface {
 	Create(issue *models.Issue) error
 	Update(issue *models.Issue) error
 	DashboardSummary(userID uint, dueSoonWindow time.Duration) (DashboardSummary, error)
+	GetReviewers(issueID uint) ([]models.User, error)
+	SetReviewers(issueID uint, userIDs []uint) error
 }
 
-// IssueWithActivity wraps Issue with the latest activity timestamp aggregated
-// from the issue itself plus its child documents and comments. Used by the
-// dashboard endpoint's "recent" list.
 type IssueWithActivity struct {
 	models.Issue
 	LastActivityAt time.Time

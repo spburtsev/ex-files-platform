@@ -54,6 +54,23 @@ func notifyDocumentEvent(
 	}
 }
 
+func notifyApprovalProgress(hub *services.SSEHub, doc *models.Document, approvalCount, requiredApprovals int) {
+	if hub == nil {
+		return
+	}
+	hub.Broadcast(services.SSEEvent{
+		Type:       "document.approval_added",
+		DocumentID: doc.ID,
+		Payload: map[string]any{
+			"status":             string(doc.Status),
+			"name":               doc.Name,
+			"issue_id":           doc.IssueID,
+			"approval_count":     approvalCount,
+			"required_approvals": requiredApprovals,
+		},
+	})
+}
+
 // notifyReviewerAssigned sends an email to the assigned reviewer and a
 // targeted SSE event so their UI can toast the assignment immediately.
 func notifyReviewerAssigned(
