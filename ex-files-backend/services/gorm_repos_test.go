@@ -547,3 +547,113 @@ func TestGormDocumentRepo_ListByIssue_ApprovedFirst(t *testing.T) {
 	assert.Equal(t, "pending-2.pdf", docs[1].Name)
 	assert.Equal(t, "pending-1.pdf", docs[2].Name)
 }
+
+func TestGormIssueRepo_ListMyCurrentIssues(t *testing.T) {
+	db := setupTestDB(t)
+	issueRepo := &GormIssueRepository{DB: db}
+	userRepo := &GormUserRepository{DB: db}
+
+	me := &models.User{Email: "me@t.com", Name: "Me", PasswordHash: "h"}
+	other := &models.User{Email: "o@t.com", Name: "Other", PasswordHash: "h"}
+	require.NoError(t, userRepo.Create(me))
+	require.NoError(t, userRepo.Create(other))
+	ws := &models.Workspace{Name: "WS", ManagerID: other.ID}
+	require.NoError(t, db.Create(ws).Error)
+
+	mk := func(title string, assignee, creator uint, resolved, archived bool) {
+		require.NoError(t, db.Create(&models.Issue{
+			Title: title, AssigneeID: assignee, CreatorID: creator, WorkspaceID: ws.ID,
+			Resolved: resolved, Archived: archived,
+		}).Error)
+	}
+	mk("assignee-mine", me.ID, other.ID, false, false) // included (assignee)
+	mk("creator-mine", other.ID, me.ID, false, false)  // included (creator)
+	mk("resolved", me.ID, other.ID, true, false)       // excluded
+	mk("archived", me.ID, other.ID, false, true)       // excluded
+	mk("not-mine", other.ID, other.ID, false, false)   // excluded
+
+	got, total, err := issueRepo.ListMyCurrentIssues(me.ID, "", 10, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), total)
+	require.Len(t, got, 2)
+	// Workspace + manager preloads are populated for the dashboard table.
+	assert.Equal(t, "WS", got[0].Workspace.Name)
+	assert.Equal(t, "Other", got[0].Workspace.Manager.Name)
+}
+
+func TestGormIssueRepo_ListUnresolvedWithDeadline(t *testing.T) {
+	db := setupTestDB(t)
+	repo := &GormIssueRepository{DB: db}
+	dl := time.Now().Add(24 * time.Hour)
+	require.NoError(t, db.Create(&models.Issue{Title: "with-deadline", CreatorID: 1, AssigneeID: 1, WorkspaceID: 1, Deadline: &dl}).Error)
+	require.NoError(t, db.Create(&models.Issue{Title: "no-deadline", CreatorID: 1, AssigneeID: 1, WorkspaceID: 1}).Error)
+	require.NoError(t, db.Create(&models.Issue{Title: "resolved", CreatorID: 1, AssigneeID: 1, WorkspaceID: 1, Deadline: &dl, Resolved: true}).Error)
+
+	got, err := repo.ListUnresolvedWithDeadline()
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "with-deadline", got[0].Title)
+}
+
+func TestGormIssueRepo_Update(t *testing.T) {
+	db := setupTestDB(t)
+	repo := &GormIssueRepository{DB: db}
+	issue := &models.Issue{Title: "old", CreatorID: 1, AssigneeID: 1, WorkspaceID: 1}
+	require.NoError(t, repo.Create(issue))
+
+	issue.Title = "new"
+	issue.Resolved = true
+	require.NoError(t, repo.Update(issue))
+
+	got, err := repo.FindByID(issue.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "new", got.Title)
+	assert.True(t, got.Resolved)
+}
+
+func TestGormDocumentApprovalRepo_ListByDocumentIDs(t *testing.T) {
+	db := setupTestDB(t)
+	repo := &GormDocumentApprovalRepository{DB: db}
+	userRepo := &GormUserRepository{DB: db}
+	u := &models.User{Email: "r@t.com", Name: "Rev", PasswordHash: "h"}
+	require.NoError(t, userRepo.Create(u))
+
+	require.NoError(t, repo.Create(&models.DocumentApproval{DocumentID: 10, ReviewerID: u.ID}))
+	require.NoError(t, repo.Create(&models.DocumentApproval{DocumentID: 20, ReviewerID: u.ID}))
+	require.NoError(t, repo.Create(&models.DocumentApproval{DocumentID: 30, ReviewerID: u.ID}))
+
+	got, err := repo.ListByDocumentIDs([]uint{10, 20})
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, "Rev", got[0].Reviewer.Name) // preload populated
+
+	empty, err := repo.ListByDocumentIDs(nil)
+	require.NoError(t, err)
+	assert.Empty(t, empty)
+}
+
+func TestGormDocumentRepo_FindByIssueAndHash(t *testing.T) {
+	db := setupTestDB(t)
+	repo := &GormDocumentRepository{DB: db}
+	require.NoError(t, repo.Create(&models.Document{Name: "a", MimeType: "application/pdf", Size: 1, Hash: "dup", Status: models.DocumentStatusPending, UploaderID: 1, IssueID: 1}))
+	require.NoError(t, repo.Create(&models.Document{Name: "b", MimeType: "application/pdf", Size: 1, Hash: "dup", Status: models.DocumentStatusPending, UploaderID: 1, IssueID: 2}))
+
+	got, err := repo.FindByIssueAndHash(2, "dup")
+	require.NoError(t, err)
+	assert.Equal(t, uint(2), got.IssueID)
+	assert.Equal(t, "b", got.Name)
+
+	_, err = repo.FindByIssueAndHash(3, "dup")
+	assert.Error(t, err)
+}
+
+func TestGormCommentRepo_Delete(t *testing.T) {
+	db := setupTestDB(t)
+	repo := &GormCommentRepository{DB: db}
+	c := &models.Comment{DocumentID: 1, AuthorID: 1, Body: "to delete"}
+	require.NoError(t, repo.Create(c))
+
+	require.NoError(t, repo.Delete(c.ID))
+	_, err := repo.FindByID(c.ID)
+	assert.Error(t, err)
+}

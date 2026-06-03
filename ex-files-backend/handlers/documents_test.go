@@ -218,6 +218,49 @@ func TestDocumentsDelete_HappyPath(t *testing.T) {
 	assert.Equal(t, http.StatusOK, res.StatusCode)
 }
 
+func TestDocumentsDelete_NotFound(t *testing.T) {
+	tokens := &mockTokens{}
+	stubTokenAccept(tokens, 1, models.RoleManager)
+	repo := &mockDocumentRepo{}
+	repo.On("FindByID", uint(42)).Return(nil, assert.AnError)
+
+	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}))
+	defer srv.Close()
+
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodDelete, srv.URL+"/documents/42", nil))
+	require.NoError(t, err)
+	defer res.Body.Close()
+	assert.Equal(t, http.StatusNotFound, res.StatusCode)
+	repo.AssertNotCalled(t, "Delete", mock.Anything)
+}
+
+func TestDocumentsDelete_DeleteFailureReturns500(t *testing.T) {
+	tokens := &mockTokens{}
+	stubTokenAccept(tokens, 1, models.RoleManager)
+	repo := &mockDocumentRepo{}
+	repo.On("FindByID", uint(42)).Return(&models.Document{Model: gormModelID(42), Name: "x"}, nil)
+	repo.On("Delete", uint(42)).Return(assert.AnError)
+
+	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}))
+	defer srv.Close()
+
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodDelete, srv.URL+"/documents/42", nil))
+	require.NoError(t, err)
+	defer res.Body.Close()
+	assert.Equal(t, http.StatusInternalServerError, res.StatusCode)
+}
+
+func TestDocumentsDelete_Unauthorized(t *testing.T) {
+	srv := newTestServer(t, docsServer(&mockTokens{}, &mockDocumentRepo{}, &mockStorage{}))
+	defer srv.Close()
+
+	req, _ := http.NewRequest(http.MethodDelete, srv.URL+"/documents/42", nil)
+	res, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer res.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, res.StatusCode)
+}
+
 func TestDocumentsGetDownloadUrl_HappyPath(t *testing.T) {
 	tokens := &mockTokens{}
 	stubTokenAccept(tokens, 1, models.RoleEmployee)

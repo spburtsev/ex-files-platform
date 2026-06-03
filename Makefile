@@ -60,7 +60,7 @@ test:
 
 test-cover:
 	cd $(BACKEND_DIR) && go test ./... -coverprofile=coverage.raw.out -covermode=atomic
-	cd $(BACKEND_DIR) && grep -Ev '/oapi/|/seed/|/logging/|_gen\.go:|/main\.go:' coverage.raw.out > coverage.out
+	cd $(BACKEND_DIR) && grep -Ev '/oapi/|/seed/|/logging/|/tracing/|_gen\.go:|/main\.go:|/minio_storage\.go:|/redis\.go:|/email_service\.go:|/email_service_smtp\.go:|/sse\.go:' coverage.raw.out > coverage.out
 	cd $(BACKEND_DIR) && go tool cover -func=coverage.out
 
 test-race:

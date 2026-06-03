@@ -16,6 +16,7 @@ import (
 	"github.com/spburtsev/ex-files-backend/handlers"
 	"github.com/spburtsev/ex-files-backend/models"
 	"github.com/spburtsev/ex-files-backend/oapi"
+	"github.com/spburtsev/ex-files-backend/services"
 )
 
 func TestAuthRegister_HappyPath(t *testing.T) {
@@ -220,4 +221,166 @@ func TestAuthForgotPassword_AlwaysReturns200(t *testing.T) {
 	var msg oapi.MessageResponse
 	require.NoError(t, json.NewDecoder(res.Body).Decode(&msg))
 	assert.Contains(t, msg.Message, "if the email exists")
+}
+
+func TestAuthLogin_HappyPath(t *testing.T) {
+	users := &mockUserRepo{}
+	tokens := &mockTokens{}
+	users.On("FindByEmail", "alice@example.com").Return(&models.User{
+		Model: gormModelID(7), Email: "alice@example.com", Name: "Alice", PasswordHash: "hashed:correct",
+	}, nil)
+	tokens.On("Issue", mock.AnythingOfType("*models.User")).Return("test-token", nil)
+
+	s := &handlers.Server{UserRepo: users, Tokens: tokens, Hasher: stubHasher{}}
+	srv := newTestServer(t, s)
+	defer srv.Close()
+
+	body := strings.NewReader(`{"email":"alice@example.com","password":"correct"}`)
+	res, err := http.Post(srv.URL+"/auth/login", "application/json", body)
+	require.NoError(t, err)
+	defer res.Body.Close()
+
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	var got oapi.AuthResponse
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&got))
+	assert.Equal(t, "test-token", got.Token)
+	cookie := findCookie(res.Cookies(), "session")
+	require.NotNil(t, cookie)
+	assert.Equal(t, "test-token", cookie.Value)
+}
+
+func TestAuthLogin_UserNotFoundReturns401(t *testing.T) {
+	users := &mockUserRepo{}
+	users.On("FindByEmail", "ghost@example.com").Return(nil, errors.New("not found"))
+
+	s := &handlers.Server{UserRepo: users, Tokens: &mockTokens{}, Hasher: stubHasher{}}
+	srv := newTestServer(t, s)
+	defer srv.Close()
+
+	body := strings.NewReader(`{"email":"ghost@example.com","password":"x"}`)
+	res, err := http.Post(srv.URL+"/auth/login", "application/json", body)
+	require.NoError(t, err)
+	defer res.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, res.StatusCode)
+}
+
+func TestAuthChangePassword_Success(t *testing.T) {
+	users := &mockUserRepo{}
+	tokens := &mockTokens{}
+	stubTokenAccept(tokens, 7, models.RoleEmployee)
+	users.On("FindByID", uint(7)).Return(&models.User{Model: gormModelID(7), PasswordHash: "hashed:oldpass"}, nil)
+	users.On("UpdatePassword", uint(7), "hashed:newpass12").Return(nil)
+
+	s := &handlers.Server{UserRepo: users, Tokens: tokens, Hasher: stubHasher{}}
+	srv := newTestServer(t, s)
+	defer srv.Close()
+
+	body := strings.NewReader(`{"oldPassword":"oldpass","newPassword":"newpass12"}`)
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodPost, srv.URL+"/auth/change-password", body))
+	require.NoError(t, err)
+	defer res.Body.Close()
+
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	users.AssertCalled(t, "UpdatePassword", uint(7), "hashed:newpass12")
+}
+
+func TestAuthChangePassword_WrongOldReturns401(t *testing.T) {
+	users := &mockUserRepo{}
+	tokens := &mockTokens{}
+	stubTokenAccept(tokens, 7, models.RoleEmployee)
+	users.On("FindByID", uint(7)).Return(&models.User{Model: gormModelID(7), PasswordHash: "hashed:oldpass"}, nil)
+
+	s := &handlers.Server{UserRepo: users, Tokens: tokens, Hasher: stubHasher{}}
+	srv := newTestServer(t, s)
+	defer srv.Close()
+
+	body := strings.NewReader(`{"oldPassword":"wrong","newPassword":"newpass12"}`)
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodPost, srv.URL+"/auth/change-password", body))
+	require.NoError(t, err)
+	defer res.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, res.StatusCode)
+	users.AssertNotCalled(t, "UpdatePassword", mock.Anything, mock.Anything)
+}
+
+func TestAuthChangePassword_SameAsOldReturns400(t *testing.T) {
+	users := &mockUserRepo{}
+	tokens := &mockTokens{}
+	stubTokenAccept(tokens, 7, models.RoleEmployee)
+	users.On("FindByID", uint(7)).Return(&models.User{Model: gormModelID(7), PasswordHash: "hashed:samepass1"}, nil)
+
+	s := &handlers.Server{UserRepo: users, Tokens: tokens, Hasher: stubHasher{}}
+	srv := newTestServer(t, s)
+	defer srv.Close()
+
+	body := strings.NewReader(`{"oldPassword":"samepass1","newPassword":"samepass1"}`)
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodPost, srv.URL+"/auth/change-password", body))
+	require.NoError(t, err)
+	defer res.Body.Close()
+	assert.Equal(t, http.StatusBadRequest, res.StatusCode)
+}
+
+func TestAuthChangePassword_Unauthorized(t *testing.T) {
+	s := &handlers.Server{UserRepo: &mockUserRepo{}, Tokens: &mockTokens{}, Hasher: stubHasher{}}
+	srv := newTestServer(t, s)
+	defer srv.Close()
+
+	body := strings.NewReader(`{"oldPassword":"a","newPassword":"newpass12"}`)
+	res, err := http.Post(srv.URL+"/auth/change-password", "application/json", body)
+	require.NoError(t, err)
+	defer res.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, res.StatusCode)
+}
+
+func TestAuthResetPassword_ValidToken(t *testing.T) {
+	store := services.NewInMemoryResetTokenStore()
+	require.NoError(t, store.StoreResetToken("tok123", 7, time.Hour))
+	users := &mockUserRepo{}
+	users.On("UpdatePassword", uint(7), "hashed:newpass12").Return(nil)
+
+	s := &handlers.Server{UserRepo: users, Tokens: &mockTokens{}, Hasher: stubHasher{}, ResetTokens: store}
+	srv := newTestServer(t, s)
+	defer srv.Close()
+
+	body := strings.NewReader(`{"token":"tok123","password":"newpass12"}`)
+	res, err := http.Post(srv.URL+"/auth/reset-password", "application/json", body)
+	require.NoError(t, err)
+	defer res.Body.Close()
+
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	users.AssertCalled(t, "UpdatePassword", uint(7), "hashed:newpass12")
+	// token is consumed
+	_, err = store.GetResetTokenUserID("tok123")
+	assert.Error(t, err)
+}
+
+func TestAuthResetPassword_InvalidTokenReturns400(t *testing.T) {
+	store := services.NewInMemoryResetTokenStore()
+	s := &handlers.Server{UserRepo: &mockUserRepo{}, Tokens: &mockTokens{}, Hasher: stubHasher{}, ResetTokens: store}
+	srv := newTestServer(t, s)
+	defer srv.Close()
+
+	body := strings.NewReader(`{"token":"nope","password":"newpass12"}`)
+	res, err := http.Post(srv.URL+"/auth/reset-password", "application/json", body)
+	require.NoError(t, err)
+	defer res.Body.Close()
+	assert.Equal(t, http.StatusBadRequest, res.StatusCode)
+}
+
+func TestAuthForgotPassword_UserExistsStoresToken(t *testing.T) {
+	store := services.NewInMemoryResetTokenStore()
+	users := &mockUserRepo{}
+	users.On("FindByEmail", "alice@example.com").Return(&models.User{
+		Model: gormModelID(7), Email: "alice@example.com", Name: "Alice",
+	}, nil)
+
+	// Email is nil -> the send step is skipped; the token-store branch still runs.
+	s := &handlers.Server{UserRepo: users, Tokens: &mockTokens{}, Hasher: stubHasher{}, ResetTokens: store}
+	srv := newTestServer(t, s)
+	defer srv.Close()
+
+	body := strings.NewReader(`{"email":"alice@example.com"}`)
+	res, err := http.Post(srv.URL+"/auth/forgot-password", "application/json", body)
+	require.NoError(t, err)
+	defer res.Body.Close()
+	assert.Equal(t, http.StatusOK, res.StatusCode)
 }
