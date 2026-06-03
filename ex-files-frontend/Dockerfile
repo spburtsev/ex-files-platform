@@ -4,6 +4,8 @@ WORKDIR /src
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 COPY . .
+COPY --from=spec openapi.yaml /api/openapi.yaml
+RUN bun run gen:api
 RUN bun run build
 
 FROM node:22-alpine

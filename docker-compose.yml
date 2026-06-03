@@ -63,7 +63,10 @@ services:
       retries: 5
 
   ex-files-backend:
-    build: ./ex-files-backend
+    build:
+      context: ./ex-files-backend
+      additional_contexts:
+        spec: ./api
     restart: unless-stopped
     ports:
       - ${BACKEND_PORT:-8080}:8080
@@ -99,7 +102,10 @@ services:
         condition: service_healthy
 
   ex-files-frontend:
-    build: ./ex-files-frontend
+    build:
+      context: ./ex-files-frontend
+      additional_contexts:
+        spec: ./api
     restart: unless-stopped
     ports:
       - ${FRONTEND_PORT:-3003}:3000
