@@ -5,6 +5,7 @@ COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 COPY . .
 COPY --from=spec openapi.yaml /api/openapi.yaml
+RUN bunx svelte-kit sync
 RUN bun run gen:api
 RUN bun run build
 
