@@ -511,6 +511,33 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  /issues/{id}/review-config:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    put:
+      tags: [issues]
+      operationId: issuesUpdateReviewConfig
+      summary: Set the reviewer panel and required approvals (issue creator or workspace owner)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateReviewConfigRequest'
+      responses:
+        '200':
+          description: Updated issue.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetIssueResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   /issues/{id}/documents:
     parameters:
       - $ref: '#/components/parameters/IdPath'
@@ -1199,6 +1226,14 @@ components:
         archived:       { type: boolean }
         commentsCount:  { type: integer, format: int32 }
         versionsCount:  { type: integer, format: int32 }
+        # Number of distinct reviewer approvals a submission needs to resolve
+        # the issue. Defaults to 1.
+        requiredApprovals: { type: integer, format: int32 }
+        # The issue's review panel. Empty means no panel (managers / creator
+        # review, threshold 1).
+        reviewers:
+          type: array
+          items: { $ref: '#/components/schemas/ReviewerSummary' }
         createdAt:      { type: string, format: date-time }
         updatedAt:      { type: string, format: date-time }
         # Populated by GET /dashboard for the recent-activity list. Reflects
@@ -1214,6 +1249,10 @@ components:
         description: { type: string }
         assigneeId:  { type: string }
         deadline:    { type: string, format: date-time, nullable: true }
+        reviewerIds:
+          type: array
+          items: { type: string }
+        requiredApprovals: { type: integer, format: int32, minimum: 1 }
 
     GetIssuesResponse:
       type: object
@@ -1263,6 +1302,12 @@ components:
         reviewerId:   { type: string, nullable: true }
         reviewerName: { type: string, nullable: true }
         reviewerNote: { type: string }
+        # Multi-reviewer approval progress for this version.
+        approvalCount:     { type: integer, format: int32 }
+        requiredApprovals: { type: integer, format: int32 }
+        approvals:
+          type: array
+          items: { $ref: '#/components/schemas/DocumentApproval' }
         createdAt:    { type: string, format: date-time }
         updatedAt:    { type: string, format: date-time }
 
@@ -1314,6 +1359,30 @@ components:
       required: [assigneeId]
       properties:
         assigneeId: { type: string }
+
+    ReviewerSummary:
+      type: object
+      required: [id, name]
+      properties:
+        id:   { type: string }
+        name: { type: string }
+
+    DocumentApproval:
+      type: object
+      required: [reviewerId, reviewerName, createdAt]
+      properties:
+        reviewerId:   { type: string }
+        reviewerName: { type: string }
+        createdAt:    { type: string, format: date-time }
+
+    UpdateReviewConfigRequest:
+      type: object
+      required: [reviewerIds, requiredApprovals]
+      properties:
+        reviewerIds:
+          type: array
+          items: { type: string }
+        requiredApprovals: { type: integer, format: int32, minimum: 1 }
 
     ArchiveIssueRequest:
       type: object

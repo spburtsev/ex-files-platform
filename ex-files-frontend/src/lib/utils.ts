@@ -1,18 +1,27 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import type { Role } from '$lib/api';
+import { m } from '$lib/paraglide/messages.js';
 
-/** True for manager-level roles (manager or root). */
 export function isManager(role?: Role | string): boolean {
 	return role === 'manager' || role === 'root';
 }
 
-/** Pass-through helper kept for callers that previously mapped proto enum to string. */
 export function roleName(role?: Role | string): string {
 	return role ?? 'unknown';
 }
 
-/** Format an ISO 8601 date-time string for display. */
+export function roleLabel(role?: Role | string): string {
+	switch (role) {
+		case 'root':
+			return m.role_root();
+		case 'manager':
+			return m.role_manager();
+		default:
+			return m.role_employee();
+	}
+}
+
 export function formatTimestamp(
 	iso?: string,
 	opts?: { withTime?: boolean }

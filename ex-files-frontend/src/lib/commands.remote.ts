@@ -22,6 +22,7 @@ import {
 	issuesArchive,
 	issuesCreate,
 	issuesUpdateAssignee,
+	issuesUpdateReviewConfig,
 	workspacesAddMember,
 	workspacesArchive,
 	workspacesCreate,
@@ -35,13 +36,13 @@ import { getComments, getIssues } from './queries.remote';
 const NETWORK_ERROR = 'Unable to reach the server. Please try again later.';
 
 function errorMessage(error: unknown, fallback: string): string {
-	if (error && typeof error === 'object'){
-        if ('error' in error && typeof error.error === 'string') {
-            return error.error;
-        }
-        if ('error_message' in error && typeof error.error_message === 'string') {
-            return error.error_message;
-        }
+	if (error && typeof error === 'object') {
+		if ('error' in error && typeof error.error === 'string') {
+			return error.error;
+		}
+		if ('error_message' in error && typeof error.error_message === 'string') {
+			return error.error_message;
+		}
 	}
 	return fallback;
 }
@@ -119,12 +120,12 @@ export const forgotPassword = command('unchecked', async (email: string) => {
 	try {
 		const r = await authForgotPassword({ ...apiOpts(), body: { email } });
 		if (r.error) {
-            console.error('forgot password failed:', r.error);
+			console.error('forgot password failed:', r.error);
 			return { ok: false as const, error: errorMessage(r.error, 'Request failed') };
 		}
 		return { ok: true as const };
 	} catch (err: unknown) {
-        console.error('forgot password failed:', String(err));
+		console.error('forgot password failed:', String(err));
 		return { ok: false as const, error: NETWORK_ERROR };
 	}
 });
@@ -132,7 +133,10 @@ export const forgotPassword = command('unchecked', async (email: string) => {
 export const resetPassword = command(
 	'unchecked',
 	async (data: { token: string; password: string }) =>
-		runApi(authResetPassword({ ...apiOpts(), body: data }), 'Reset failed. Token may be invalid or expired.')
+		runApi(
+			authResetPassword({ ...apiOpts(), body: data }),
+			'Reset failed. Token may be invalid or expired.'
+		)
 );
 
 export const changePassword = command(
@@ -190,10 +194,10 @@ export const archiveIssue = command(
 	async ({ issueId, archived }: { issueId: string; archived: boolean }) => {
 		const r = await issuesArchive({ ...apiOpts(), path: { id: issueId }, body: { archived } });
 
-        for (const { query } of requested(getIssues, 2)) {
+		for (const { query } of requested(getIssues, 2)) {
 			void query.refresh();
 		}
-        return { ok: !r.error };
+		return { ok: !r.error };
 	}
 );
 
@@ -228,13 +232,17 @@ export const createIssue = command(
 		title,
 		description,
 		assigneeId,
-		deadline
+		deadline,
+		reviewerIds,
+		requiredApprovals
 	}: {
 		workspaceId: string;
 		title: string;
 		description?: string;
 		assigneeId: string;
 		deadline?: string;
+		reviewerIds?: string[];
+		requiredApprovals?: number;
 	}) =>
 		runApi(
 			issuesCreate({
@@ -244,10 +252,33 @@ export const createIssue = command(
 					title,
 					description,
 					assigneeId,
-					deadline: deadline ? new Date(deadline).toISOString() : null
+					deadline: deadline ? new Date(deadline).toISOString() : null,
+					reviewerIds,
+					requiredApprovals
 				}
 			}),
 			'Failed to create issue'
+		)
+);
+
+export const updateReviewConfig = command(
+	'unchecked',
+	async ({
+		id,
+		reviewerIds,
+		requiredApprovals
+	}: {
+		id: string;
+		reviewerIds: string[];
+		requiredApprovals: number;
+	}) =>
+		runApi(
+			issuesUpdateReviewConfig({
+				...apiOpts(),
+				path: { id },
+				body: { reviewerIds, requiredApprovals }
+			}),
+			'Failed to update review configuration'
 		)
 );
 
@@ -297,17 +328,14 @@ export const verifyDocumentHash = command('unchecked', async (hash: string) => {
 	return { ok: true as const, result: r.data };
 });
 
-export const getDocumentDownloadUrl = command(
-	'unchecked',
-	async (docId: string) => {
-		const r = await documentsGetDownloadUrl({
-			...apiOpts(),
-			path: { id: docId }
-		});
-		if (r.error || !r.data) return { url: null };
-		return { url: r.data.url };
-	}
-);
+export const getDocumentDownloadUrl = command('unchecked', async (docId: string) => {
+	const r = await documentsGetDownloadUrl({
+		...apiOpts(),
+		path: { id: docId }
+	});
+	if (r.error || !r.data) return { url: null };
+	return { url: r.data.url };
+});
 
 // ---------------------------------------------------------------------------
 // Document workflow
@@ -334,10 +362,7 @@ export const rejectDocument = command(
 export const requestDocumentChanges = command(
 	'unchecked',
 	async ({ id, note }: { id: string; note: string }) =>
-		runApi(
-			documentsRequestChanges({ ...apiOpts(), path: { id }, body: { note } }),
-			'Action failed'
-		)
+		runApi(documentsRequestChanges({ ...apiOpts(), path: { id }, body: { note } }), 'Action failed')
 );
 
 export const assignDocumentReviewer = command(

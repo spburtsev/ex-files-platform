@@ -3,8 +3,7 @@
 	import * as Avatar from '$lib/components/ui/avatar/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
 	import type { User } from '$lib/api';
-	import { m } from '$lib/paraglide/messages.js';
-	import { avatarColorClass, initials } from '$lib/utils';
+	import { avatarColorClass, initials, roleLabel } from '$lib/utils';
 
 	const { user }: { user: User } = $props();
 </script>
@@ -22,10 +21,10 @@
 		</div>
 	</Card.Header>
 	<Card.Content>
-		{#if user.role === 'manager' || user.role === 'root'}
-			<Badge variant="secondary" class="text-violet-700">{m.role_manager()}</Badge>
+		{#if user.role === 'employee'}
+			<Badge variant="outline">{roleLabel(user.role)}</Badge>
 		{:else}
-			<Badge variant="outline">{m.role_employee()}</Badge>
+			<Badge variant="secondary" class="text-violet-700">{roleLabel(user.role)}</Badge>
 		{/if}
 	</Card.Content>
 </Card.Root>

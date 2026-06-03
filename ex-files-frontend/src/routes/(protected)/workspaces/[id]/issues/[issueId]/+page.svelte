@@ -12,10 +12,16 @@
 		getDocumentBytes,
 		getComments
 	} from '$lib/queries.remote';
-	import { uploadDocument, createComment, deleteComment } from '$lib/commands.remote';
+	import {
+		uploadDocument,
+		createComment,
+		deleteComment,
+		approveDocument
+	} from '$lib/commands.remote';
 	import { MAX_UPLOAD_BYTES, MAX_UPLOAD_MB } from '$lib/upload';
-	import { isManager } from '$lib/utils';
+	import { isManager, initials, avatarColorClass } from '$lib/utils';
 	import { deadlineChip } from '$lib/deadline';
+	import { statusBadgeClass, statusLabel, canActOn } from '$lib/doc-status';
 	import { m } from '$lib/paraglide/messages.js';
 	import { localizeHref } from '$lib/paraglide/runtime';
 	import { toast } from 'svelte-sonner';
@@ -27,8 +33,8 @@
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Toggle } from '$lib/components/ui/toggle/index.js';
 	import { Badge } from '$lib/components/ui/badge/index.js';
-	import * as ScrollArea from '$lib/components/ui/scroll-area/index.js';
 	import * as Select from '$lib/components/ui/select/index.js';
+	import * as Sheet from '$lib/components/ui/sheet/index.js';
 	import {
 		ChevronRight,
 		ChevronLeft,
@@ -41,13 +47,17 @@
 		Minus,
 		Plus,
 		Trash2,
-		Pencil
+		Pencil,
+		CheckCircle,
+		XCircle,
+		Users
 	} from '@lucide/svelte';
 	import DetailsDialog from './DetailsDialog.svelte';
 	import ChangeAssignee from './ChangeAssignee.svelte';
 	import RejectDialog from './RejectDialog.svelte';
 	import RequestChanges from './RequestChanges.svelte';
 	import DocumentItem from './DocumentItem.svelte';
+	import ReviewConfig from './ReviewConfig.svelte';
 
 	const { data } = $props();
 	const me = $derived(data.user);
@@ -70,11 +80,16 @@
 	// them into the workbench store. Used both for the initial hydrate and for
 	// re-syncing after review actions / SSE-driven invalidations so reviewer
 	// notes and statuses stay current without a page refresh.
-	async function syncDocumentsFromServer() {
+	// A SvelteKit remote query must be awaited directly inside render/$effect,
+	// but executed via .run() from event handlers / SSE callbacks. `imperative`
+	// selects the right call so a single sync helper works from both - and so
+	// review-status / reviewer-panel / approval-progress changes reflect after
+	// review actions and SSE events without a full page reload.
+	async function syncDocumentsFromServer(imperative = false) {
 		if (!issueId) return;
 		const id = issueId;
 		try {
-			const res = await getDocuments(id);
+			const res = imperative ? await getDocuments(id).run() : await getDocuments(id);
 			if (workbenchStore.currentIssueId !== id) return;
 			workbenchStore.hydrate(
 				res.documents.map((d) => ({
@@ -84,7 +99,10 @@
 					mimeType: d.mimeType,
 					uploaderName: d.uploaderName,
 					reviewStatus: d.status,
-					reviewerNote: d.reviewerNote
+					reviewerNote: d.reviewerNote,
+					approvals: d.approvals,
+					approvalCount: d.approvalCount,
+					requiredApprovals: d.requiredApprovals
 				}))
 			);
 		} catch (err) {
@@ -128,9 +146,10 @@
 	} | null>(null);
 	let showUpload = $state(false);
 	let showMarkers = $state(true);
-	let rightCollapsed = $state(false);
 	let leftCollapsed = $state(false);
 	let detailsOpen = $state(false);
+	let versionsOpen = $state(false);
+	let reviewConfigOpen = $state(false);
 
 	const activeServerId = $derived(workbenchStore.activeDocument?.serverId);
 	const commentsQuery = $derived(activeServerId ? getComments(activeServerId) : null);
@@ -145,7 +164,8 @@
 		'document.approved',
 		'document.rejected',
 		'document.changes_requested',
-		'document.reviewer_assigned'
+		'document.reviewer_assigned',
+		'document.approval_added'
 	]);
 	$effect(() => {
 		if (!browser) return;
@@ -160,7 +180,7 @@
 				if (COMMENT_EVENTS.has(t)) commentsQuery?.refresh();
 				else if (REVIEW_EVENTS.has(t)) {
 					workbenchQuery.refresh();
-					void syncDocumentsFromServer();
+					void syncDocumentsFromServer(true);
 				}
 			} catch (err) {
 				console.error('SSE parse error', err);
@@ -197,7 +217,30 @@
 	}
 
 	const isIssueCreator = $derived(me && issue ? Number(me.id) === Number(issue.creatorId) : false);
-	const canReviewIssue = $derived(isManager(me?.role) || isIssueCreator);
+	// Reviewer panel: with a non-empty panel only its members may review; an
+	// empty panel falls back to managers / the issue creator (legacy behavior).
+	const reviewerIds = $derived(new Set((issue?.reviewers ?? []).map((r) => String(r.id))));
+	const panelEmpty = $derived(reviewerIds.size === 0);
+	const isPanelReviewer = $derived(me ? reviewerIds.has(String(me.id)) : false);
+	const canReviewIssue = $derived(
+		panelEmpty ? isManager(me?.role) || isIssueCreator : isPanelReviewer
+	);
+	// Whether the toolbar should expose review actions for the currently shown
+	// document: a saved (serverId) doc, the viewer can review, issue still open.
+	const canReviewActive = $derived(
+		canReviewIssue && !!workbenchStore.activeDocument?.serverId && !issue?.resolved
+	);
+	// Only the issue creator or workspace owner may configure the panel + N.
+	const canConfigureReview = $derived(
+		isIssueCreator || (!!workspace && !!me && String(workspace.managerId) === String(me.id))
+	);
+	// True once the current user has already approved the active version.
+	const alreadyApprovedActive = $derived(
+		!!me &&
+			!!workbenchStore.activeDocument?.approvals?.some(
+				(a) => String(a.reviewerId) === String(me.id)
+			)
+	);
 
 	let rejectTarget = $state<string | null>(null);
 	let changesTarget = $state<string | null>(null);
@@ -297,6 +340,20 @@
 		if (!r.ok) toast.error(r.error ?? m.error_action_failed());
 	}
 
+	// Approve the currently shown document from the toolbar (mirrors the
+	// per-version approve action that also lives in DocumentItem).
+	async function handleApproveActive() {
+		const doc = workbenchStore.activeDocument;
+		if (!doc?.serverId) return;
+		const r = await approveDocument(doc.serverId);
+		if (!r.ok) {
+			toast.error(r.error ?? m.error_action_failed());
+			return;
+		}
+		workbenchStore.setDocumentReviewStatus(doc.id, 'approved');
+		await workbenchQuery.refresh();
+	}
+
 	function handleDiscard(docId: string) {
 		const doc = workbenchStore.documents.find((d) => d.id === docId);
 		if (!doc) return;
@@ -349,7 +406,7 @@
 			<aside
 				class="relative flex shrink-0 flex-col border-r bg-card transition-all duration-200 {leftCollapsed
 					? 'w-10'
-					: 'w-64'}"
+					: 'w-80'}"
 			>
 				<!-- Clickable edge -->
 				<button
@@ -420,50 +477,93 @@
 						</Button>
 					</div>
 
-					<!-- Submissions list header -->
-					<div class="shrink-0 space-y-1.5 px-3 pt-3 pb-3">
+					<!-- Current version + older-versions drawer trigger -->
+					<div class="shrink-0 space-y-2 border-b px-3 py-3">
 						<p class="text-xs font-semibold text-muted-foreground">
-							{m.workbench_submissions()}
+							{m.workbench_current_version()}
 						</p>
-						<Select.Root bind:value={submissionFilter} type="single">
-							<Select.Trigger class="w-full">{displayedSubmissionFilter}</Select.Trigger>
-							<Select.Content>
-								<Select.Item value="all">{m.ws_status_all()}</Select.Item>
-								<Select.Item value="approved">{m.workbench_status_approved()}</Select.Item>
-								<Select.Item value="changes_requested"
-									>{m.workbench_status_changes_requested()}</Select.Item
+						{#if workbenchStore.activeDocument}
+							{@const ad = workbenchStore.activeDocument}
+							<div class="flex items-center gap-2">
+								<p class="min-w-0 flex-1 truncate text-xs font-medium">{ad.name}</p>
+								<Badge
+									variant="secondary"
+									class="h-4 shrink-0 px-1.5 text-[9px] font-semibold {statusBadgeClass(
+										ad.status,
+										ad.reviewStatus
+									)}"
 								>
-								<Select.Item value="rejected">{m.workbench_status_rejected()}</Select.Item>
-							</Select.Content>
-						</Select.Root>
+									{statusLabel(ad.status, ad.reviewStatus)}
+								</Badge>
+							</div>
+							{#if !panelEmpty && ad.serverId}
+								<div class="flex items-center gap-2 text-[11px] text-muted-foreground">
+									<span>
+										{m.workbench_approvals_progress({
+											count: String(ad.approvalCount ?? 0),
+											required: String(ad.requiredApprovals ?? 1)
+										})}
+									</span>
+									{#if ad.approvals && ad.approvals.length > 0}
+										<div class="flex -space-x-1">
+											{#each ad.approvals as a (a.reviewerId)}
+												<span
+													class="flex size-4 items-center justify-center rounded-full text-[8px] font-bold text-white ring-1 ring-card {avatarColorClass(
+														a.reviewerId
+													)}"
+													title={a.reviewerName}
+												>
+													{initials(a.reviewerName)}
+												</span>
+											{/each}
+										</div>
+									{/if}
+								</div>
+							{/if}
+						{:else}
+							<p class="text-xs text-muted-foreground">{m.workbench_no_submissions()}</p>
+						{/if}
+						{#if !panelEmpty}
+							<p
+								class="truncate text-[11px] text-muted-foreground"
+								title={(issue?.reviewers ?? []).map((r) => r.name).join(', ')}
+							>
+								<span class="font-medium">{m.review_config_reviewers()}:</span>
+								{(issue?.reviewers ?? []).map((r) => r.name).join(', ')}
+							</p>
+						{/if}
+						<Button
+							variant="ghost"
+							size="sm"
+							class="w-full justify-start gap-1.5 text-xs"
+							onclick={() => (versionsOpen = true)}
+						>
+							<Clock class="size-3.5" />
+							{m.workbench_show_older_versions()}
+						</Button>
+						{#if canConfigureReview && !issue?.resolved}
+							<Button
+								variant="ghost"
+								size="sm"
+								class="w-full justify-start gap-1.5 text-xs"
+								onclick={() => (reviewConfigOpen = true)}
+							>
+								<Users class="size-3.5" />
+								{m.review_config_title()}
+							</Button>
+						{/if}
 					</div>
 
-					<!-- Document list -->
-					<ScrollArea.Root class="min-h-0 flex-1">
-						{#if workbenchStore.documents.length === 0}
-							<p class="px-3 py-2 text-xs text-muted-foreground">{m.workbench_no_submissions()}</p>
-						{:else if filteredDocuments.length === 0}
-							<p class="px-3 py-2 text-xs text-muted-foreground">{m.ws_no_matches()}</p>
-						{:else}
-							<ul class="pb-1">
-								{#each filteredDocuments as doc, docIdx (docIdx)}
-									<DocumentItem
-										{doc}
-										{issue}
-                                        {canReviewIssue}
-										onSelect={() => selectDocument(doc.id)}
-										onApproved={() => workbenchQuery.refresh()}
-										onRequestChangesClick={(doc) => {
-											changesTarget = doc.id;
-										}}
-										onRejectClick={(doc) => {
-											rejectTarget = doc.id;
-										}}
-									/>
-								{/each}
-							</ul>
-						{/if}
-					</ScrollArea.Root>
+					<!-- Comments -->
+					<div class="flex min-h-0 flex-1 flex-col">
+						<CommentPanel
+							{comments}
+							{currentPage}
+							currentUserId={me?.id}
+							ondelete={handleCommentDelete}
+							ongotopage={(p) => (currentPage = p)}
+						/>
+					</div>
 
 					<!-- Upload -->
 					<div class="shrink-0 border-t p-3">
@@ -604,6 +704,38 @@
 											{m.workbench_save_button()}
 										{/if}
 									</Button>
+								{:else if canReviewActive}
+									{@const ad = workbenchStore.activeDocument}
+									<Button
+										size="xs"
+										class="gap-1.5"
+										disabled={!canActOn(ad.reviewStatus) || alreadyApprovedActive}
+										title={alreadyApprovedActive ? m.workbench_already_approved() : undefined}
+										onclick={handleApproveActive}
+									>
+										<CheckCircle class="size-3.5" />
+										{m.doc_approve()}
+									</Button>
+									<Button
+										variant="outline"
+										size="xs"
+										class="gap-1.5"
+										disabled={!canActOn(ad.reviewStatus)}
+										onclick={() => (changesTarget = ad.id)}
+									>
+										<MessageSquare class="size-3.5" />
+										{m.doc_request_changes()}
+									</Button>
+									<Button
+										variant="outline"
+										size="xs"
+										class="gap-1.5 text-red-600 hover:text-red-600"
+										disabled={!canActOn(ad.reviewStatus)}
+										onclick={() => (rejectTarget = ad.id)}
+									>
+										<XCircle class="size-3.5" />
+										{m.doc_reject()}
+									</Button>
 								{/if}
 							</div>
 						</div>
@@ -643,43 +775,6 @@
 							{/if}
 						</div>
 					</div>
-
-					<!-- Right Panel -->
-					<div
-						class="relative flex shrink-0 border-l bg-card transition-all duration-200 {rightCollapsed
-							? 'w-10'
-							: 'w-72'}"
-					>
-						<!-- Clickable edge -->
-						<button
-							title={m.workbench_toggle_activity()}
-							class="absolute inset-y-0 left-0 z-10 w-1 cursor-col-resize transition-all hover:bg-primary/20"
-							onclick={() => (rightCollapsed = !rightCollapsed)}
-						></button>
-
-						{#if rightCollapsed}
-							<div class="flex w-full flex-col items-center gap-1 pt-2">
-								<Button
-									variant="outline"
-									size="icon"
-									title={m.workbench_expand_sidebar()}
-									onclick={() => (rightCollapsed = false)}
-								>
-									<ChevronLeft class="size-4" />
-								</Button>
-							</div>
-						{:else}
-							<div class="flex min-h-0 w-full flex-col">
-								<CommentPanel
-									{comments}
-									{currentPage}
-									currentUserId={me?.id}
-									ondelete={handleCommentDelete}
-									ongotopage={(p) => (currentPage = p)}
-								/>
-							</div>
-						{/if}
-					</div>
 				{/if}
 			</div>
 		</div>
@@ -698,6 +793,56 @@
 		/>
 	{/if}
 
+	<!-- Older versions drawer -->
+	<Sheet.Root bind:open={versionsOpen}>
+		<Sheet.Content side="right" class="w-full gap-0 p-0 sm:max-w-md">
+			<Sheet.Header class="border-b px-4 py-3">
+				<Sheet.Title>{m.workbench_all_versions()}</Sheet.Title>
+			</Sheet.Header>
+			<div class="shrink-0 border-b px-4 py-3">
+				<Select.Root bind:value={submissionFilter} type="single">
+					<Select.Trigger class="w-full">{displayedSubmissionFilter}</Select.Trigger>
+					<Select.Content>
+						<Select.Item value="all">{m.ws_status_all()}</Select.Item>
+						<Select.Item value="approved">{m.workbench_status_approved()}</Select.Item>
+						<Select.Item value="changes_requested"
+							>{m.workbench_status_changes_requested()}</Select.Item
+						>
+						<Select.Item value="rejected">{m.workbench_status_rejected()}</Select.Item>
+					</Select.Content>
+				</Select.Root>
+			</div>
+			<div class="min-h-0 flex-1 overflow-y-auto">
+				{#if workbenchStore.documents.length === 0}
+					<p class="px-4 py-3 text-xs text-muted-foreground">{m.workbench_no_submissions()}</p>
+				{:else if filteredDocuments.length === 0}
+					<p class="px-4 py-3 text-xs text-muted-foreground">{m.ws_no_matches()}</p>
+				{:else}
+					<ul class="pb-1">
+						{#each filteredDocuments as doc, docIdx (docIdx)}
+							<DocumentItem
+								{doc}
+								{issue}
+								{canReviewIssue}
+								onSelect={() => {
+									selectDocument(doc.id);
+									versionsOpen = false;
+								}}
+								onApproved={() => workbenchQuery.refresh()}
+								onRequestChangesClick={(doc) => {
+									changesTarget = doc.id;
+								}}
+								onRejectClick={(doc) => {
+									rejectTarget = doc.id;
+								}}
+							/>
+						{/each}
+					</ul>
+				{/if}
+			</div>
+		</Sheet.Content>
+	</Sheet.Root>
+
 	<!-- Details Dialog -->
 	<DetailsDialog bind:open={detailsOpen} {issue} />
 
@@ -714,7 +859,7 @@
 		bind:target={rejectTarget}
 		onSuccess={async () => {
 			await workbenchQuery.refresh();
-			await syncDocumentsFromServer();
+			await syncDocumentsFromServer(true);
 		}}
 	/>
 	<!-- Request Changes Dialog -->
@@ -722,7 +867,20 @@
 		bind:target={changesTarget}
 		onSuccess={async () => {
 			await workbenchQuery.refresh();
-			await syncDocumentsFromServer();
+			await syncDocumentsFromServer(true);
+		}}
+	/>
+	<!-- Review Config Dialog -->
+	<ReviewConfig
+		bind:open={reviewConfigOpen}
+		{issueId}
+		{workspaceMembers}
+		assigneeId={issue?.assigneeId ?? ''}
+		currentReviewerIds={(issue?.reviewers ?? []).map((r) => String(r.id))}
+		currentRequiredApprovals={issue?.requiredApprovals ?? 1}
+		onSuccess={async () => {
+			await workbenchQuery.refresh();
+			await syncDocumentsFromServer(true);
 		}}
 	/>
 {/if}

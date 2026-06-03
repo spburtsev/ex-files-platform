@@ -3,7 +3,7 @@
 	import { localizeHref, deLocalizeHref } from '$lib/paraglide/runtime';
 	import { m } from '$lib/paraglide/messages.js';
 	import { logout } from '$lib/commands.remote';
-	import { isManager, initials as getInitials } from '$lib/utils';
+	import { isManager, initials as getInitials, roleLabel } from '$lib/utils';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import * as Avatar from '$lib/components/ui/avatar/index.js';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
@@ -205,7 +205,7 @@
 									<div class="grid flex-1 text-left text-xs leading-tight">
 										<span class="truncate font-semibold">{me?.name ?? ''}</span>
 										{#if isManager(me?.role)}
-											<span class="text-muted-foreground">{m.role_manager()}</span>
+											<span class="text-muted-foreground">{roleLabel(me?.role)}</span>
 										{:else}
 											<span class="truncate text-muted-foreground">{me?.email ?? ''}</span>
 										{/if}
@@ -234,7 +234,7 @@
 											<span class="truncate font-semibold">{me?.name}</span>
 											{#if isManager(me?.role)}
 												<Badge variant="secondary" class="h-4 px-1 text-[10px] text-violet-700"
-													>{m.role_manager()}</Badge
+													>{roleLabel(me?.role)}</Badge
 												>
 											{/if}
 										</div>

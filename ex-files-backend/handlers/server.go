@@ -26,6 +26,7 @@ type Server struct {
 	WorkspaceRepo services.WorkspaceRepository
 	IssueRepo     services.IssueRepository
 	DocumentRepo  services.DocumentRepository
+	ApprovalRepo  services.DocumentApprovalRepository
 	CommentRepo   services.CommentRepository
 	Storage       services.StorageService
 	Hub           *services.SSEHub

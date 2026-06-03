@@ -17,19 +17,24 @@ import (
 	"github.com/spburtsev/ex-files-backend/oapi"
 )
 
-func documentToOAPI(d *models.Document) oapi.Document {
+func documentToOAPI(d *models.Document, approvals []models.DocumentApproval, requiredApprovals int) oapi.Document {
+	if requiredApprovals < 1 {
+		requiredApprovals = 1
+	}
 	out := oapi.Document{
-		ID:           formatID(d.ID),
-		Name:         d.Name,
-		MimeType:     d.MimeType,
-		Size:         d.Size,
-		Hash:         d.Hash,
-		Status:       oapi.DocumentStatus(d.Status),
-		UploaderId:   formatID(d.UploaderID),
-		UploaderName: d.Uploader.Name,
-		IssueId:      formatID(d.IssueID),
-		CreatedAt:    d.CreatedAt,
-		UpdatedAt:    d.UpdatedAt,
+		ID:                formatID(d.ID),
+		Name:              d.Name,
+		MimeType:          d.MimeType,
+		Size:              d.Size,
+		Hash:              d.Hash,
+		Status:            oapi.DocumentStatus(d.Status),
+		UploaderId:        formatID(d.UploaderID),
+		UploaderName:      d.Uploader.Name,
+		IssueId:           formatID(d.IssueID),
+		CreatedAt:         d.CreatedAt,
+		UpdatedAt:         d.UpdatedAt,
+		RequiredApprovals: oapi.NewOptInt32(int32(requiredApprovals)),
+		ApprovalCount:     oapi.NewOptInt32(int32(len(approvals))),
 	}
 	if d.ReviewerID != nil {
 		out.ReviewerId = oapi.NewOptNilString(formatID(*d.ReviewerID))
@@ -38,7 +43,37 @@ func documentToOAPI(d *models.Document) oapi.Document {
 	if d.ReviewerNote != "" {
 		out.ReviewerNote = oapi.NewOptString(d.ReviewerNote)
 	}
+	if len(approvals) > 0 {
+		list := make([]oapi.DocumentApproval, 0, len(approvals))
+		for i := range approvals {
+			list = append(list, oapi.DocumentApproval{
+				ReviewerId:   formatID(approvals[i].ReviewerID),
+				ReviewerName: approvals[i].Reviewer.Name,
+				CreatedAt:    approvals[i].CreatedAt,
+			})
+		}
+		out.Approvals = list
+	}
 	return out
+}
+
+func requiredApprovalsOf(issue *models.Issue) int {
+	if issue == nil || issue.RequiredApprovals < 1 {
+		return 1
+	}
+	return issue.RequiredApprovals
+}
+
+func (s *Server) documentResponse(doc *models.Document, issue *models.Issue) oapi.Document {
+	var approvals []models.DocumentApproval
+	if s.ApprovalRepo != nil {
+		if a, err := s.ApprovalRepo.ListByDocument(doc.ID); err == nil {
+			approvals = a
+		} else {
+			logErr("documents.response.approvals", err)
+		}
+	}
+	return documentToOAPI(doc, approvals, requiredApprovalsOf(issue))
 }
 
 // DocumentsList implements GET /issues/{id}/documents.
@@ -64,9 +99,28 @@ func (s *Server) DocumentsList(ctx context.Context, params oapi.DocumentsListPar
 		return &oapi.DocumentsListInternalServerError{Error: "failed to fetch documents"}, nil
 	}
 
+	required := 1
+	if issue, err := s.IssueRepo.FindByID(issueID); err == nil {
+		required = requiredApprovalsOf(issue)
+	}
+	approvalsByDoc := make(map[uint][]models.DocumentApproval)
+	if s.ApprovalRepo != nil && len(docs) > 0 {
+		ids := make([]uint, len(docs))
+		for i := range docs {
+			ids[i] = docs[i].ID
+		}
+		if all, err := s.ApprovalRepo.ListByDocumentIDs(ids); err == nil {
+			for _, a := range all {
+				approvalsByDoc[a.DocumentID] = append(approvalsByDoc[a.DocumentID], a)
+			}
+		} else {
+			logErr("documents.list.approvals", err)
+		}
+	}
+
 	out := make([]oapi.Document, len(docs))
 	for i := range docs {
-		out[i] = documentToOAPI(&docs[i])
+		out[i] = documentToOAPI(&docs[i], approvalsByDoc[docs[i].ID], required)
 	}
 	return &oapi.ListDocumentsResponseHeaders{
 		XPage:       optInt32(page),
@@ -167,7 +221,7 @@ func (s *Server) DocumentsUpload(ctx context.Context, req *oapi.DocumentsUploadR
 	}
 
 	return &oapi.UploadDocumentResponse{
-		Document: documentToOAPI(loaded),
+		Document: s.documentResponse(loaded, issue),
 	}, nil
 }
 
@@ -184,7 +238,7 @@ func (s *Server) DocumentsGet(ctx context.Context, params oapi.DocumentsGetParam
 	if err != nil {
 		return &oapi.DocumentsGetNotFound{Error: "document not found"}, nil
 	}
-	return &oapi.GetDocumentResponse{Document: documentToOAPI(doc)}, nil
+	return &oapi.GetDocumentResponse{Document: s.documentResponse(doc, nil)}, nil
 }
 
 // DocumentsGetFile implements GET /documents/{id}/file.
@@ -270,7 +324,7 @@ func (s *Server) DocumentsSubmit(ctx context.Context, params oapi.DocumentsSubmi
 		slog.String("target_type", "document"),
 		slog.Uint64("target_id", uint64(doc.ID)),
 	)
-	return &oapi.UpdateDocumentResponse{Document: documentToOAPI(doc)}, nil
+	return &oapi.UpdateDocumentResponse{Document: s.documentResponse(doc, nil)}, nil
 }
 
 // DocumentsResubmit implements POST /documents/{id}/resubmit.
@@ -299,19 +353,41 @@ func (s *Server) DocumentsResubmit(ctx context.Context, params oapi.DocumentsRes
 		logErr("documents.resubmit.update", err)
 		return &oapi.DocumentsResubmitInternalServerError{Error: "failed to update document"}, nil
 	}
+	if s.ApprovalRepo != nil {
+		if err := s.ApprovalRepo.DeleteByDocument(doc.ID); err != nil {
+			logErr("documents.resubmit.clear_approvals", err)
+		}
+	}
 	logging.Audit(ctx, "document.submitted", uid,
 		slog.String("target_type", "document"),
 		slog.Uint64("target_id", uint64(doc.ID)),
 		slog.Bool("resubmit", true),
 	)
-	return &oapi.UpdateDocumentResponse{Document: documentToOAPI(doc)}, nil
+	return &oapi.UpdateDocumentResponse{Document: s.documentResponse(doc, nil)}, nil
 }
 
-func canReview(doc *models.Document, callerID uint, role models.Role) bool {
-	if role.CanManageWorkspaces() {
-		return true
+func (s *Server) issuePanel(issueID uint) (map[uint]bool, []uint, error) {
+	reviewers, err := s.IssueRepo.GetReviewers(issueID)
+	if err != nil {
+		return nil, nil, err
 	}
-	return doc.ReviewerID != nil && *doc.ReviewerID == callerID
+	set := make(map[uint]bool, len(reviewers))
+	ids := make([]uint, 0, len(reviewers))
+	for i := range reviewers {
+		if set[reviewers[i].ID] {
+			continue
+		}
+		set[reviewers[i].ID] = true
+		ids = append(ids, reviewers[i].ID)
+	}
+	return set, ids, nil
+}
+
+func canReviewPanel(panel map[uint]bool, issueCreatorID, callerID uint, role models.Role) bool {
+	if len(panel) == 0 {
+		return role.CanManageWorkspaces() || issueCreatorID == callerID
+	}
+	return panel[callerID]
 }
 
 // DocumentsApprove implements POST /documents/{id}/approve.
@@ -328,36 +404,84 @@ func (s *Server) DocumentsApprove(ctx context.Context, params oapi.DocumentsAppr
 	if err != nil {
 		return &oapi.DocumentsApproveNotFound{Error: "document not found"}, nil
 	}
-	if !canReview(doc, uid, role) {
+	issue, err := s.IssueRepo.FindByID(doc.IssueID)
+	if err != nil {
+		logErr("documents.approve.issue_lookup", err)
+		return &oapi.DocumentsApproveInternalServerError{Error: "failed to load issue"}, nil
+	}
+	panel, panelIDs, err := s.issuePanel(doc.IssueID)
+	if err != nil {
+		logErr("documents.approve.panel", err)
+		return &oapi.DocumentsApproveInternalServerError{Error: "failed to load reviewers"}, nil
+	}
+	if !canReviewPanel(panel, issue.CreatorID, uid, role) {
 		return &oapi.DocumentsApproveForbidden{Error: "not authorized to review this document"}, nil
 	}
 	if !doc.CanTransitionTo(models.DocumentStatusApproved) {
 		return &oapi.DocumentsApproveUnprocessableEntity{Error: "document cannot be approved from its current status"}, nil
 	}
-	doc.Status = models.DocumentStatusApproved
-	if err := s.DocumentRepo.Update(doc); err != nil {
-		logErr("documents.approve.update", err)
-		return &oapi.DocumentsApproveInternalServerError{Error: "failed to update document"}, nil
-	}
 
-	if issue, err := s.IssueRepo.FindByID(doc.IssueID); err != nil {
-		logErr("documents.approve.issue_lookup", err)
-	} else if !issue.Resolved {
-		issue.Resolved = true
-		if err := s.IssueRepo.Update(issue); err != nil {
-			logErr("documents.approve.issue_resolve", err)
+	// Record this reviewer's approval (idempotent on the unique index).
+	if s.ApprovalRepo != nil {
+		if err := s.ApprovalRepo.Create(&models.DocumentApproval{DocumentID: doc.ID, ReviewerID: uid}); err != nil {
+			logErr("documents.approve.record", err)
+			return &oapi.DocumentsApproveInternalServerError{Error: "failed to record approval"}, nil
 		}
 	}
 
-	logging.Audit(ctx, "document.approved", uid,
-		slog.String("target_type", "document"),
-		slog.Uint64("target_id", uint64(doc.ID)),
-	)
-	notifyDocumentEvent(s.Email, s.UserRepo, s.IssueRepo, s.Hub, doc, "document.approved",
-		fmt.Sprintf("Document approved: %s", doc.Name),
-		fmt.Sprintf("<p>Your document <strong>%s</strong> has been approved.</p>", doc.Name),
-	)
-	return &oapi.UpdateDocumentResponse{Document: documentToOAPI(doc)}, nil
+	threshold := requiredApprovalsOf(issue)
+	count := 1
+	if len(panel) == 0 {
+		threshold = 1 // empty panel: a single manager/creator approval resolves
+	} else if s.ApprovalRepo != nil {
+		c, err := s.ApprovalRepo.CountByReviewers(doc.ID, panelIDs)
+		if err != nil {
+			logErr("documents.approve.count", err)
+			return &oapi.DocumentsApproveInternalServerError{Error: "failed to count approvals"}, nil
+		}
+		count = int(c)
+	}
+
+	if count >= threshold {
+		doc.Status = models.DocumentStatusApproved
+		if err := s.DocumentRepo.Update(doc); err != nil {
+			logErr("documents.approve.update", err)
+			return &oapi.DocumentsApproveInternalServerError{Error: "failed to update document"}, nil
+		}
+		if !issue.Resolved {
+			issue.Resolved = true
+			if err := s.IssueRepo.Update(issue); err != nil {
+				logErr("documents.approve.issue_resolve", err)
+			}
+		}
+		logging.Audit(ctx, "document.approved", uid,
+			slog.String("target_type", "document"),
+			slog.Uint64("target_id", uint64(doc.ID)),
+			slog.Int("approval_count", count),
+			slog.Int("required_approvals", threshold),
+		)
+		notifyDocumentEvent(s.Email, s.UserRepo, s.IssueRepo, s.Hub, doc, "document.approved",
+			fmt.Sprintf("Document approved: %s", doc.Name),
+			fmt.Sprintf("<p>Your document <strong>%s</strong> has been approved.</p>", doc.Name),
+		)
+		notifyApprovalProgress(s.Hub, doc, count, threshold)
+	} else {
+		if doc.Status != models.DocumentStatusInReview {
+			doc.Status = models.DocumentStatusInReview
+			if err := s.DocumentRepo.Update(doc); err != nil {
+				logErr("documents.approve.promote", err)
+				return &oapi.DocumentsApproveInternalServerError{Error: "failed to update document"}, nil
+			}
+		}
+		logging.Audit(ctx, "document.approval_added", uid,
+			slog.String("target_type", "document"),
+			slog.Uint64("target_id", uint64(doc.ID)),
+			slog.Int("approval_count", count),
+			slog.Int("required_approvals", threshold),
+		)
+		notifyApprovalProgress(s.Hub, doc, count, threshold)
+	}
+	return &oapi.UpdateDocumentResponse{Document: s.documentResponse(doc, issue)}, nil
 }
 
 // DocumentsReject implements POST /documents/{id}/reject.
@@ -374,7 +498,17 @@ func (s *Server) DocumentsReject(ctx context.Context, req oapi.OptReviewNoteRequ
 	if err != nil {
 		return &oapi.DocumentsRejectNotFound{Error: "document not found"}, nil
 	}
-	if !canReview(doc, uid, role) {
+	issue, err := s.IssueRepo.FindByID(doc.IssueID)
+	if err != nil {
+		logErr("documents.reject.issue_lookup", err)
+		return &oapi.DocumentsRejectInternalServerError{Error: "failed to load issue"}, nil
+	}
+	panel, _, err := s.issuePanel(doc.IssueID)
+	if err != nil {
+		logErr("documents.reject.panel", err)
+		return &oapi.DocumentsRejectInternalServerError{Error: "failed to load reviewers"}, nil
+	}
+	if !canReviewPanel(panel, issue.CreatorID, uid, role) {
 		return &oapi.DocumentsRejectForbidden{Error: "not authorized to review this document"}, nil
 	}
 	if !doc.CanTransitionTo(models.DocumentStatusRejected) {
@@ -399,7 +533,7 @@ func (s *Server) DocumentsReject(ctx context.Context, req oapi.OptReviewNoteRequ
 		fmt.Sprintf("Document rejected: %s", doc.Name),
 		fmt.Sprintf("<p>Your document <strong>%s</strong> has been rejected.</p><p>Reason: %s</p>", doc.Name, note),
 	)
-	return &oapi.UpdateDocumentResponse{Document: documentToOAPI(doc)}, nil
+	return &oapi.UpdateDocumentResponse{Document: s.documentResponse(doc, issue)}, nil
 }
 
 // DocumentsRequestChanges implements POST /documents/{id}/request-changes.
@@ -416,7 +550,17 @@ func (s *Server) DocumentsRequestChanges(ctx context.Context, req oapi.OptReview
 	if err != nil {
 		return &oapi.DocumentsRequestChangesNotFound{Error: "document not found"}, nil
 	}
-	if !canReview(doc, uid, role) {
+	issue, err := s.IssueRepo.FindByID(doc.IssueID)
+	if err != nil {
+		logErr("documents.request_changes.issue_lookup", err)
+		return &oapi.DocumentsRequestChangesInternalServerError{Error: "failed to load issue"}, nil
+	}
+	panel, _, err := s.issuePanel(doc.IssueID)
+	if err != nil {
+		logErr("documents.request_changes.panel", err)
+		return &oapi.DocumentsRequestChangesInternalServerError{Error: "failed to load reviewers"}, nil
+	}
+	if !canReviewPanel(panel, issue.CreatorID, uid, role) {
 		return &oapi.DocumentsRequestChangesForbidden{Error: "not authorized to review this document"}, nil
 	}
 	if !doc.CanTransitionTo(models.DocumentStatusChangesRequested) {
@@ -441,7 +585,7 @@ func (s *Server) DocumentsRequestChanges(ctx context.Context, req oapi.OptReview
 		fmt.Sprintf("Changes requested: %s", doc.Name),
 		fmt.Sprintf("<p>Changes have been requested for your document <strong>%s</strong>.</p><p>Note: %s</p>", doc.Name, note),
 	)
-	return &oapi.UpdateDocumentResponse{Document: documentToOAPI(doc)}, nil
+	return &oapi.UpdateDocumentResponse{Document: s.documentResponse(doc, issue)}, nil
 }
 
 // DocumentsAssignReviewer implements PUT /documents/{id}/reviewer.
@@ -476,7 +620,7 @@ func (s *Server) DocumentsAssignReviewer(ctx context.Context, req *oapi.AssignRe
 		slog.Uint64("reviewer_id", uint64(reviewerID)),
 	)
 	notifyReviewerAssigned(s.Email, s.UserRepo, s.IssueRepo, s.Hub, doc, reviewerID)
-	return &oapi.UpdateDocumentResponse{Document: documentToOAPI(doc)}, nil
+	return &oapi.UpdateDocumentResponse{Document: s.documentResponse(doc, nil)}, nil
 }
 
 // DocumentsDelete implements DELETE /documents/{id}.

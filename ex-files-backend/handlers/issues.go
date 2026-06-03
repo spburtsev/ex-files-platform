@@ -2,30 +2,86 @@ package handlers
 
 import (
 	"context"
+	"log/slog"
 
+	"github.com/spburtsev/ex-files-backend/logging"
 	"github.com/spburtsev/ex-files-backend/models"
 	"github.com/spburtsev/ex-files-backend/oapi"
 )
 
 func issueToOAPI(i *models.Issue) oapi.Issue {
 	out := oapi.Issue{
-		ID:            formatID(i.ID),
-		WorkspaceId:   formatID(i.WorkspaceID),
-		CreatorId:     formatID(i.CreatorID),
-		AssigneeId:    formatID(i.AssigneeID),
-		Title:         i.Title,
-		Description:   i.Description,
-		Resolved:      i.Resolved,
-		Archived:      oapi.NewOptBool(i.Archived),
-		CommentsCount: int32(i.CommentsCount),
-		VersionsCount: int32(i.VersionsCount),
-		CreatedAt:     i.CreatedAt,
-		UpdatedAt:     i.UpdatedAt,
+		ID:                formatID(i.ID),
+		WorkspaceId:       formatID(i.WorkspaceID),
+		CreatorId:         formatID(i.CreatorID),
+		AssigneeId:        formatID(i.AssigneeID),
+		Title:             i.Title,
+		Description:       i.Description,
+		Resolved:          i.Resolved,
+		Archived:          oapi.NewOptBool(i.Archived),
+		CommentsCount:     int32(i.CommentsCount),
+		VersionsCount:     int32(i.VersionsCount),
+		RequiredApprovals: oapi.NewOptInt32(int32(requiredApprovalsOf(i))),
+		CreatedAt:         i.CreatedAt,
+		UpdatedAt:         i.UpdatedAt,
 	}
 	if i.Deadline != nil {
 		out.Deadline = oapi.NewOptNilDateTime(*i.Deadline)
 	}
+	if len(i.Reviewers) > 0 {
+		revs := make([]oapi.ReviewerSummary, 0, len(i.Reviewers))
+		for j := range i.Reviewers {
+			revs = append(revs, oapi.ReviewerSummary{
+				ID:   formatID(i.Reviewers[j].UserID),
+				Name: i.Reviewers[j].User.Name,
+			})
+		}
+		out.Reviewers = revs
+	}
 	return out
+}
+
+func (s *Server) resolveReviewerIDs(ws *models.Workspace, raw []string) ([]uint, bool) {
+	if len(raw) == 0 {
+		return nil, true
+	}
+	members, err := s.WorkspaceRepo.GetMembers(ws.ID)
+	if err != nil {
+		logErr("issues.reviewers.members", err)
+		return nil, false
+	}
+	allowed := make(map[uint]bool, len(members)+1)
+	for i := range members {
+		allowed[members[i].ID] = true
+	}
+	allowed[ws.ManagerID] = true
+	seen := make(map[uint]bool, len(raw))
+	ids := make([]uint, 0, len(raw))
+	for _, r := range raw {
+		id, ok := parseUintID(r)
+		if !ok || !allowed[id] {
+			return nil, false
+		}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	return ids, true
+}
+
+func clampRequiredApprovals(n, panelSize int) int {
+	if panelSize == 0 {
+		return 1
+	}
+	if n < 1 {
+		return 1
+	}
+	if n > panelSize {
+		return panelSize
+	}
+	return n
 }
 
 // IssuesGet implements GET /issues/{id}.
@@ -140,12 +196,26 @@ func (s *Server) IssuesCreate(ctx context.Context, req *oapi.CreateIssueRequest,
 		return &oapi.IssuesCreateBadRequest{Error: "invalid assigneeId"}, nil
 	}
 
+	var reviewerIDs []uint
+	if len(req.ReviewerIds) > 0 {
+		ws, err := s.WorkspaceRepo.FindByID(wsID)
+		if err != nil {
+			return &oapi.IssuesCreateBadRequest{Error: "workspace not found"}, nil
+		}
+		ids, ok := s.resolveReviewerIDs(ws, req.ReviewerIds)
+		if !ok {
+			return &oapi.IssuesCreateBadRequest{Error: "invalid reviewerIds"}, nil
+		}
+		reviewerIDs = ids
+	}
+
 	issue := models.Issue{
-		WorkspaceID: wsID,
-		CreatorID:   uid,
-		AssigneeID:  assigneeID,
-		Title:       req.Title,
-		Description: req.Description.Or(""),
+		WorkspaceID:       wsID,
+		CreatorID:         uid,
+		AssigneeID:        assigneeID,
+		Title:             req.Title,
+		Description:       req.Description.Or(""),
+		RequiredApprovals: clampRequiredApprovals(int(req.RequiredApprovals.Or(1)), len(reviewerIDs)),
 	}
 	if d, ok := req.Deadline.Get(); ok {
 		issue.Deadline = &d
@@ -154,7 +224,74 @@ func (s *Server) IssuesCreate(ctx context.Context, req *oapi.CreateIssueRequest,
 		logErr("issues.create", err)
 		return &oapi.IssuesCreateInternalServerError{Error: "failed to create issue"}, nil
 	}
+	if len(reviewerIDs) > 0 {
+		if err := s.IssueRepo.SetReviewers(issue.ID, reviewerIDs); err != nil {
+			logErr("issues.create.reviewers", err)
+			return &oapi.IssuesCreateInternalServerError{Error: "failed to set reviewers"}, nil
+		}
+		if refreshed, err := s.IssueRepo.FindByID(issue.ID); err == nil {
+			issue = *refreshed
+		}
+	}
 	return &oapi.CreateIssueResponse{Issue: issueToOAPI(&issue)}, nil
+}
+
+func (s *Server) IssuesUpdateReviewConfig(ctx context.Context, req *oapi.UpdateReviewConfigRequest, params oapi.IssuesUpdateReviewConfigParams) (oapi.IssuesUpdateReviewConfigRes, error) {
+	uid, _, err := s.callerIDAndRole(ctx)
+	if err != nil {
+		return &oapi.IssuesUpdateReviewConfigUnauthorized{Error: "unauthorized"}, nil
+	}
+	id, ok := parseUintID(params.ID)
+	if !ok {
+		return &oapi.IssuesUpdateReviewConfigNotFound{Error: "issue not found"}, nil
+	}
+	issue, err := s.IssueRepo.FindByID(id)
+	if err != nil {
+		return &oapi.IssuesUpdateReviewConfigNotFound{Error: "issue not found"}, nil
+	}
+	ws, err := s.WorkspaceRepo.FindByID(issue.WorkspaceID)
+	if err != nil {
+		logErr("issues.review_config.workspace", err)
+		return &oapi.IssuesUpdateReviewConfigInternalServerError{Error: "failed to load workspace"}, nil
+	}
+	if issue.CreatorID != uid && !ws.IsOwnedBy(uid) {
+		return &oapi.IssuesUpdateReviewConfigForbidden{Error: "only the issue creator or workspace owner may configure reviewers"}, nil
+	}
+	if issue.Resolved {
+		return &oapi.IssuesUpdateReviewConfigUnprocessableEntity{Error: "cannot configure reviewers of a resolved issue"}, nil
+	}
+	reviewerIDs, ok := s.resolveReviewerIDs(ws, req.ReviewerIds)
+	if !ok {
+		return &oapi.IssuesUpdateReviewConfigBadRequest{Error: "invalid reviewerIds"}, nil
+	}
+	n := int(req.RequiredApprovals)
+	if len(reviewerIDs) > 0 && (n < 1 || n > len(reviewerIDs)) {
+		return &oapi.IssuesUpdateReviewConfigUnprocessableEntity{Error: "requiredApprovals must be between 1 and the number of reviewers"}, nil
+	}
+	if err := s.IssueRepo.SetReviewers(id, reviewerIDs); err != nil {
+		logErr("issues.review_config.set_reviewers", err)
+		return &oapi.IssuesUpdateReviewConfigInternalServerError{Error: "failed to update reviewers"}, nil
+	}
+	issue.RequiredApprovals = clampRequiredApprovals(n, len(reviewerIDs))
+	if err := s.IssueRepo.Update(issue); err != nil {
+		logErr("issues.review_config.update", err)
+		return &oapi.IssuesUpdateReviewConfigInternalServerError{Error: "failed to update issue"}, nil
+	}
+	logging.Audit(ctx, "issue.review_config_updated", uid,
+		slog.String("target_type", "issue"),
+		slog.Uint64("target_id", uint64(id)),
+		slog.Int("reviewer_count", len(reviewerIDs)),
+		slog.Int("required_approvals", issue.RequiredApprovals),
+	)
+	refreshed, err := s.IssueRepo.FindByID(id)
+	if err != nil {
+		logErr("issues.review_config.refetch", err)
+		return &oapi.IssuesUpdateReviewConfigInternalServerError{Error: "failed to load updated issue"}, nil
+	}
+	return &oapi.GetIssueResponse{
+		Issue: issueToOAPI(refreshed),
+		User:  userToOAPI(&refreshed.Assignee),
+	}, nil
 }
 
 // IssuesArchive implements PUT /issues/{id}/archive.
