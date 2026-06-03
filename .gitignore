@@ -3,3 +3,9 @@ ex-files-backend/oapi/
 ex-files-frontend/src/lib/api/
 docs/api/
 .DS_Store
+
+# Local env files (secrets) — never commit; keep the *.example templates
+.env
+.env.*
+!.env.example
+!.env.prod.example
