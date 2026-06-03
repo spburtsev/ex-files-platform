@@ -90,8 +90,11 @@
 						canvas.width = viewport.width;
 						canvas.height = viewport.height;
 						await p.render({ canvas, viewport }).promise;
+						if (!cancelled) error = null;
 					} catch (e) {
-						if (!cancelled) {
+						const isCancelledRender =
+							e instanceof Error && e.name === 'RenderingCancelledException';
+						if (!cancelled && !isCancelledRender) {
 							error = e instanceof Error ? e.message : 'Failed to render page';
 						}
 					}
