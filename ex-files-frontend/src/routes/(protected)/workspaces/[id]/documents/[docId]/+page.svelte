@@ -10,7 +10,6 @@
 		rejectDocument,
 		requestDocumentChanges,
 		assignDocumentReviewer,
-		getDocumentDownloadUrl,
 		deleteDocument
 	} from '$lib/commands.remote';
 	import { toast } from 'svelte-sonner';
@@ -247,12 +246,20 @@
 	async function handleDownload() {
 		downloading = true;
 		try {
-			const { url } = await getDocumentDownloadUrl(docId);
-			if (!url) {
+			const res = await fetch(`/api/documents/${docId}/content`);
+			if (!res.ok) {
 				toast.error(m.error_download_failed());
 				return;
 			}
-			window.open(url, '_blank');
+			const blob = await res.blob();
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = doc?.name ?? 'document';
+			document.body.appendChild(a);
+			a.click();
+			a.remove();
+			URL.revokeObjectURL(url);
 		} catch {
 			toast.error(m.error_download_failed());
 		} finally {
