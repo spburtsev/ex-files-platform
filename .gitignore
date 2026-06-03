@@ -2,3 +2,4 @@
 ex-files-backend/oapi/
 ex-files-frontend/src/lib/api/
 docs/api/
+.DS_Store
