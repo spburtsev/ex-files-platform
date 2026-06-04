@@ -15,7 +15,6 @@ import (
 	"github.com/spburtsev/ex-files-backend/oapi"
 )
 
-// AuthRegister implements POST /auth/register.
 func (s *Server) AuthRegister(ctx context.Context, req *oapi.RegisterRequest) (oapi.AuthRegisterRes, error) {
 	if _, err := s.UserRepo.FindByEmail(req.Email); err == nil {
 		return &oapi.AuthRegisterConflict{Error: "email already registered"}, nil
@@ -54,6 +53,46 @@ func (s *Server) AuthRegister(ctx context.Context, req *oapi.RegisterRequest) (o
 		User:  userToOAPI(&user),
 		Token: token,
 	}, nil
+}
+
+func (s *Server) UsersCreate(ctx context.Context, req *oapi.CreateUserRequest) (oapi.UsersCreateRes, error) {
+	callerID, role, err := s.callerIDAndRole(ctx)
+	if err != nil {
+		return &oapi.UsersCreateUnauthorized{Error: "unauthorized"}, nil
+	}
+	if role != models.RoleRoot {
+		return &oapi.UsersCreateForbidden{Error: "only root may create users"}, nil
+	}
+
+	if _, err := s.UserRepo.FindByEmail(req.Email); err == nil {
+		return &oapi.UsersCreateConflict{Error: "email already registered"}, nil
+	}
+
+	hash, err := s.Hasher.Hash(req.Password)
+	if err != nil {
+		logErr("users.create.hash", err)
+		return &oapi.UsersCreateInternalServerError{Error: "internal error"}, nil
+	}
+
+	user := models.User{
+		Email:        req.Email,
+		Name:         req.Name,
+		PasswordHash: hash,
+		Role:         models.Role(req.Role),
+	}
+	if err := s.UserRepo.Create(&user); err != nil {
+		logErr("users.create.create", err)
+		return &oapi.UsersCreateInternalServerError{Error: "failed to create user"}, nil
+	}
+
+	logging.Audit(ctx, "user.created", callerID,
+		slog.String("target_type", "user"),
+		slog.Uint64("target_id", uint64(user.ID)),
+		slog.String("email", user.Email),
+		slog.String("role", string(user.Role)),
+	)
+
+	return &oapi.CreateUserResponse{User: userToOAPI(&user)}, nil
 }
 
 // AuthLogin implements POST /auth/login.

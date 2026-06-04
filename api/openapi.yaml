@@ -193,6 +193,28 @@ paths:
                 $ref: '#/components/schemas/GetUsersResponse'
         '401': { $ref: '#/components/responses/Unauthorized' }
         '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      tags: [auth]
+      operationId: usersCreate
+      summary: Create a user with a specified role (root only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+      responses:
+        '201':
+          description: User created. Does not affect the caller's session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateUserResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '500': { $ref: '#/components/responses/InternalError' }
 
   /workspaces:
     get:
@@ -1081,6 +1103,21 @@ components:
         email:    { type: string, format: email }
         password: { type: string, minLength: 8 }
         name:     { type: string, minLength: 1 }
+
+    CreateUserRequest:
+      type: object
+      required: [email, password, name, role]
+      properties:
+        email:    { type: string, format: email }
+        password: { type: string, minLength: 8 }
+        name:     { type: string, minLength: 1 }
+        role:     { $ref: '#/components/schemas/Role' }
+
+    CreateUserResponse:
+      type: object
+      required: [user]
+      properties:
+        user: { $ref: '#/components/schemas/User' }
 
     LoginRequest:
       type: object

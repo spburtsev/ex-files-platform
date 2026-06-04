@@ -23,6 +23,7 @@ import {
 	issuesCreate,
 	issuesUpdateAssignee,
 	issuesUpdateReviewConfig,
+	usersCreate,
 	workspacesAddMember,
 	workspacesArchive,
 	workspacesCreate,
@@ -110,6 +111,29 @@ export const register = command(
 			}
 			setSessionCookie(r.data.token);
 			return { ok: true as const };
+		} catch {
+			return { ok: false as const, error: NETWORK_ERROR };
+		}
+	}
+);
+
+export const createUser = command(
+	'unchecked',
+	async (details: {
+		name: string;
+		email: string;
+		password: string;
+		role: 'employee' | 'manager' | 'root';
+	}) => {
+		try {
+			const r = await usersCreate({ ...apiOpts(), body: details });
+			if (r.error || !r.data) {
+				return {
+					ok: false as const,
+					error: errorMessage(r.error, 'Could not create the user. Please try again.')
+				};
+			}
+			return { ok: true as const, user: r.data.user };
 		} catch {
 			return { ok: false as const, error: NETWORK_ERROR };
 		}
