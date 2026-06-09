@@ -89,8 +89,18 @@
 		}
 
 		phase = 'verifying';
-		const r = await verifyDocumentHash(hash);
-		phase = 'idle';
+		let r: Awaited<ReturnType<typeof verifyDocumentHash>>;
+		try {
+			r = await verifyDocumentHash(hash);
+		} catch (err) {
+			console.error('verify failed', err);
+			inlineError = m.error_network_retry();
+			return;
+		} finally {
+			// Always leave the verifying state, or the form stays dead after a
+			// transport failure until a full reload.
+			phase = 'idle';
+		}
 
 		if (!r.ok) {
 			inlineError = r.error;
@@ -144,13 +154,7 @@
 						<p class="truncate text-sm">
 							{m.verify_file_selected({ name: stagedFile.name })}
 						</p>
-						<Button
-							type="button"
-							variant="ghost"
-							size="sm"
-							class="gap-1.5"
-							onclick={clearFile}
-						>
+						<Button type="button" variant="ghost" size="sm" class="gap-1.5" onclick={clearFile}>
 							<X class="size-3.5" />
 							{m.verify_file_clear()}
 						</Button>
@@ -188,7 +192,7 @@
 				{/if}
 			</div>
 
-			<div class="flex items-center gap-3 text-xs uppercase text-muted-foreground">
+			<div class="flex items-center gap-3 text-xs text-muted-foreground uppercase">
 				<span class="h-px flex-1 bg-border"></span>
 				{m.verify_or()}
 				<span class="h-px flex-1 bg-border"></span>
@@ -222,10 +226,7 @@
 	</Card.Content>
 	{#if showLoginLink}
 		<Card.Footer class="justify-center text-sm text-muted-foreground">
-			<a
-				href={localizeHref('/login')}
-				class="text-foreground underline-offset-4 hover:underline"
-			>
+			<a href={localizeHref('/login')} class="text-foreground underline-offset-4 hover:underline">
 				{m.signup_login_link()}
 			</a>
 		</Card.Footer>
@@ -272,7 +273,7 @@
 					<dd>{formatTimestamp(result.notarizedAt, { withTime: true })}</dd>
 				{/if}
 				<dt class="text-muted-foreground">{m.verify_result_hash()}</dt>
-				<dd class="break-all font-mono text-[11px]">{result.hash}</dd>
+				<dd class="font-mono text-[11px] break-all">{result.hash}</dd>
 			</dl>
 		{/if}
 

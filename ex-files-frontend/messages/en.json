@@ -1,6 +1,5 @@
 {
 	"$schema": "https://inlang.com/schema/inlang-message-format",
-
 	"common_cancel": "Cancel",
 	"common_close": "Close",
 	"common_save": "Save",
@@ -22,7 +21,6 @@
 	"common_uploading": "Uploading...",
 	"common_page_of": "Page {current} of {total}",
 	"common_loading": "Loading...",
-
 	"error_network": "Could not reach the server. Please try again.",
 	"error_network_retry": "Network error, please try again",
 	"error_action_failed": "Action failed",
@@ -30,23 +28,19 @@
 	"error_delete_workspace": "Failed to delete workspace",
 	"error_delete_document": "Failed to delete document",
 	"error_download_failed": "Failed to download file",
-
 	"status_pending": "Pending",
 	"status_in_review": "In Review",
 	"status_changes_requested": "Changes Requested",
 	"status_approved": "Approved",
 	"status_rejected": "Rejected",
-
 	"role_manager": "Manager",
 	"role_employee": "Employee",
 	"role_root": "Root",
-
 	"nav_dashboard": "Dashboard",
 	"nav_workspaces": "Workspaces",
 	"nav_users": "Users",
 	"nav_profile": "Profile",
 	"nav_logout": "Log out",
-
 	"login_page_title": "Log in - ex-files",
 	"login_welcome": "Welcome back",
 	"login_description": "Log in to your ex-files account",
@@ -58,7 +52,6 @@
 	"login_invalid_credentials": "Invalid email or password.",
 	"login_no_account": "Don't have an account?",
 	"login_signup_link": "Sign up",
-
 	"forgot_page_title": "Forgot Password - ex-files",
 	"forgot_heading": "Forgot your password?",
 	"forgot_description": "Enter your email and we'll send you a reset link.",
@@ -66,7 +59,6 @@
 	"forgot_submitting": "Sending...",
 	"forgot_success": "If an account with that email exists, a reset link has been sent.",
 	"forgot_back_to_login": "Back to login",
-
 	"reset_page_title": "Reset Password - ex-files",
 	"reset_heading": "Reset your password",
 	"reset_description": "Enter the token from your email and choose a new password.",
@@ -78,7 +70,6 @@
 	"reset_submitting": "Resetting...",
 	"reset_success": "Your password has been reset. You can now log in.",
 	"reset_invalid_token": "Invalid or expired token.",
-
 	"profile_page_title": "Profile - ex-files",
 	"profile_heading": "Profile",
 	"profile_change_password_heading": "Change password",
@@ -96,7 +87,6 @@
 	"profile_reset_desc": "We'll email you a reset link so you can set a new one.",
 	"profile_reset_button": "Send reset link to my email",
 	"profile_reset_sent": "If your account exists, a reset link has been sent.",
-
 	"signup_page_title": "Sign up - ex-files",
 	"signup_heading": "Create an account",
 	"signup_description": "Enter your details to get started",
@@ -110,7 +100,6 @@
 	"signup_error": "Registration failed. Please try again.",
 	"signup_has_account": "Already have an account?",
 	"signup_login_link": "Log in",
-
 	"dashboard_page_title": "Dashboard - ex-files",
 	"dashboard_greeting": "Hello, {name}!",
 	"dashboard_assigned_open": "Assigned to you",
@@ -146,7 +135,6 @@
 	"notif_deadline_1h": "{title} is due in 1 hour",
 	"notif_deadline_24h": "{title} is due within 24 hours",
 	"notif_view_action": "View",
-
 	"ws_page_title": "Workspaces - ex-files",
 	"ws_heading": "Workspaces",
 	"ws_description": "Organize related documents into workspaces for streamlined review.",
@@ -160,13 +148,10 @@
 	"ws_no_workspaces_employee": "You have not been added to any workspaces.",
 	"ws_created_date": "Created {date}",
 	"ws_manager_label": "Manager: {name}",
-
 	"ws_edit_title": "Edit Workspace",
 	"ws_update_error": "Failed to update workspace",
-
 	"ws_delete_title": "Delete Workspace",
 	"ws_delete_confirm": "Are you sure you want to delete {name}? This action cannot be undone.",
-
 	"ws_issues_tab": "Issues",
 	"ws_members_tab": "Members",
 	"ws_no_issues": "No issues yet",
@@ -203,7 +188,6 @@
 	"ws_status_all": "All",
 	"ws_status_active": "Active",
 	"ws_status_archived": "Archived",
-
 	"doc_page_title": "{name} - ex-files",
 	"doc_loading": "Loading document...",
 	"doc_reviewer_label": "Reviewer: {name}",
@@ -218,25 +202,19 @@
 	"doc_request_changes": "Request Changes",
 	"doc_reject": "Reject",
 	"doc_rejecting": "Rejecting...",
-
 	"doc_download": "Download",
 	"doc_getting_link": "Getting link...",
-
-
 	"doc_delete_title": "Delete Document",
 	"doc_delete_confirm": "Are you sure you want to delete {name}? All versions will be removed. This action cannot be undone.",
-
 	"doc_reject_title": "Reject Document",
 	"doc_reject_description": "Provide a reason so the submitter knows what to address.",
 	"doc_reject_reason_label": "Reason (optional)",
 	"doc_reject_placeholder": "Describe why the document is being rejected...",
-
 	"doc_changes_title": "Request Changes",
 	"doc_changes_description": "Describe what changes are needed before this document can be approved.",
 	"doc_changes_notes_label": "Notes (optional)",
 	"doc_changes_placeholder": "Describe the changes required...",
 	"doc_changes_sending": "Sending...",
-
 	"doc_assign_title": "Assign Reviewer",
 	"doc_assign_description": "Choose a workspace member to review this document.",
 	"doc_assign_reviewer_label": "Reviewer",
@@ -244,7 +222,6 @@
 	"doc_assigning": "Assigning...",
 	"doc_assign": "Assign",
 	"doc_assign_error": "Failed to assign reviewer",
-
 	"users_page_title": "Users - ex-files",
 	"users_heading": "Users",
 	"users_description": "Manage platform members and their roles.",
@@ -258,7 +235,6 @@
 	"users_create_success": "User created.",
 	"users_create_error": "Could not create the user.",
 	"users_create_back": "Back to users",
-
 	"audit_page_title": "Audit Log - ex-files",
 	"audit_heading": "Audit Log",
 	"audit_description": "Immutable record of all platform actions.",
@@ -274,7 +250,6 @@
 	"audit_no_entries": "No entries found",
 	"audit_adjust_filters": "Try adjusting your filters.",
 	"audit_empty": "Actions will appear here as they occur.",
-
 	"workbench_page_title": "ex-files - Document Review",
 	"workbench_toggle_sidebar": "Toggle Sidebar",
 	"workbench_expand_sidebar": "Expand sidebar",
@@ -317,10 +292,10 @@
 	"workbench_save_success": "Saved \"{name}\"",
 	"workbench_save_error": "Failed to save document",
 	"workbench_file_too_large": "File too large. Maximum size is {mb} MB.",
+	"workbench_invalid_pdf": "This file doesn't look like a valid PDF.",
 	"workbench_no_description": "No description provided",
 	"workbench_discard_button": "Discard",
 	"workbench_discard_success": "Discarded \"{name}\"",
-
 	"pdf_click_to_upload": "Click to upload",
 	"pdf_or_drag_drop": "or drag and drop",
 	"pdf_files_only": "PDF files only",
@@ -337,7 +312,6 @@
 	"pdf_zoom_in": "Zoom In",
 	"pdf_page_back": "Go One Page Back",
 	"pdf_page_forward": "Go One Page Forward",
-
 	"issue_open": "Open",
 	"issue_resolved": "Resolved",
 	"issues_search_placeholder": "Search issues...",
@@ -354,7 +328,7 @@
 	"issue_archive": "Archive",
 	"issue_archived": "Issue archived",
 	"issue_unarchive": "Unarchive",
-    "issue_unarchived": "Issue unarchived",
+	"issue_unarchived": "Issue unarchived",
 	"ws_no_archived_issues": "No archived issues.",
 	"ws_no_archived_issues_hint": "Issues you archive will appear here.",
 	"error_archive_issue": "Failed to archive issue",
@@ -364,7 +338,6 @@
 	"issue_unarchive_confirm_desc": "This issue will be restored to the Issues tab.",
 	"comment_delete_confirm_title": "Delete comment?",
 	"comment_delete_confirm_desc": "This comment will be permanently removed. This action cannot be undone.",
-
 	"analytics_page_title": "Analytics - ex-files",
 	"analytics_heading": "Analytics",
 	"analytics_description": "Overview of platform activity and document status.",

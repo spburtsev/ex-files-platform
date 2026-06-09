@@ -58,7 +58,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	tokens := services.NewJWTTokenService(os.Getenv("JWT_SECRET"))
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if jwtSecret == "" {
+		slog.Error("JWT_SECRET must be set: an empty secret would let anyone forge session tokens")
+		os.Exit(1)
+	}
+	tokens := services.NewJWTTokenService(jwtSecret)
 	userRepo := &services.GormUserRepository{DB: db}
 	hasher := services.BcryptHasher{Cost: bcrypt.DefaultCost}
 	wsRepo := &services.GormWorkspaceRepository{DB: db}
@@ -147,6 +152,8 @@ func main() {
 		middleware.RequestLogger(),
 		middleware.WithCookieJar,
 	)
+
+	middleware.SessionCookieSecure = envOr("COOKIE_SECURE", "true") == "true"
 
 	port := envOr("PORT", "8080")
 	slog.Info("listening", "addr", ":"+port)

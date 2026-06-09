@@ -22,9 +22,16 @@ var seedUsers = []seedUser{
 }
 
 func Run(db *gorm.DB, hasher services.Hasher) {
-	users := seedUsers
+	var users []seedUser
 	if root, ok := rootSeedUser(); ok {
-		users = append([]seedUser{root}, users...)
+		users = append(users, root)
+	}
+	// Demo accounts use a well-known password; never create them unless the
+	// deployment opts in explicitly (local dev, integration tests).
+	if os.Getenv("SEED_DEMO_USERS") == "true" {
+		users = append(users, seedUsers...)
+	} else {
+		slog.Info("skipping demo user seed: set SEED_DEMO_USERS=true to create demo accounts", "component", "seed")
 	}
 
 	for _, su := range users {

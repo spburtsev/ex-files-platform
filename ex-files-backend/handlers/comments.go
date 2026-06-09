@@ -59,13 +59,23 @@ func commentToOAPI(c *models.Comment) oapi.Comment {
 
 // CommentsCreate implements POST /documents/{id}/comments.
 func (s *Server) CommentsCreate(ctx context.Context, req *oapi.CreateCommentRequest, params oapi.CommentsCreateParams) (oapi.CommentsCreateRes, error) {
-	uid, err := s.callerID(ctx)
+	uid, role, err := s.callerIDAndRole(ctx)
 	if err != nil {
 		return &oapi.CommentsCreateUnauthorized{Error: "unauthorized"}, nil
 	}
 	docID, ok := parseUintID(params.ID)
 	if !ok {
 		return &oapi.CommentsCreateBadRequest{Error: "invalid document id"}, nil
+	}
+	doc, err := s.DocumentRepo.FindByID(docID)
+	if err != nil {
+		return &oapi.CommentsCreateNotFound{Error: "document not found"}, nil
+	}
+	if allowed, _, err := s.canViewDocument(doc, uid, role); err != nil {
+		logErr("comments.create.authz", err)
+		return &oapi.CommentsCreateInternalServerError{Error: "failed to check access"}, nil
+	} else if !allowed {
+		return &oapi.CommentsCreateNotFound{Error: "document not found"}, nil
 	}
 	c := models.Comment{
 		DocumentID: docID,
@@ -102,12 +112,23 @@ func (s *Server) CommentsCreate(ctx context.Context, req *oapi.CreateCommentRequ
 
 // CommentsList implements GET /documents/{id}/comments.
 func (s *Server) CommentsList(ctx context.Context, params oapi.CommentsListParams) (oapi.CommentsListRes, error) {
-	if _, err := s.callerID(ctx); err != nil {
+	uid, role, err := s.callerIDAndRole(ctx)
+	if err != nil {
 		return &oapi.CommentsListUnauthorized{Error: "unauthorized"}, nil
 	}
 	docID, ok := parseUintID(params.ID)
 	if !ok {
-		return &oapi.CommentsListInternalServerError{Error: "invalid document id"}, nil
+		return &oapi.CommentsListNotFound{Error: "document not found"}, nil
+	}
+	doc, err := s.DocumentRepo.FindByID(docID)
+	if err != nil {
+		return &oapi.CommentsListNotFound{Error: "document not found"}, nil
+	}
+	if allowed, _, err := s.canViewDocument(doc, uid, role); err != nil {
+		logErr("comments.list.authz", err)
+		return &oapi.CommentsListInternalServerError{Error: "failed to check access"}, nil
+	} else if !allowed {
+		return &oapi.CommentsListNotFound{Error: "document not found"}, nil
 	}
 	comments, err := s.CommentRepo.ListByDocument(docID)
 	if err != nil {

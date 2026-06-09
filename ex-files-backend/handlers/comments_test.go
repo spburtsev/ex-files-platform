@@ -18,12 +18,19 @@ import (
 )
 
 func commentsServer(tokens *mockTokens, repo *mockCommentRepo) *handlers.Server {
+	// CommentsCreate/List resolve the document first; uploader = caller (uid 1)
+	// so canViewDocument short-circuits without issue/workspace lookups.
+	docs := &mockDocumentRepo{}
+	docs.On("FindByID", mock.Anything).Return(&models.Document{
+		Model: gormModelID(42), UploaderID: 1, IssueID: 7,
+	}, nil).Maybe()
 	return &handlers.Server{
-		UserRepo:    &mockUserRepo{},
-		Tokens:      tokens,
-		Hasher:      stubHasher{},
-		CommentRepo: repo,
-		Hub:         services.NewSSEHub(),
+		UserRepo:     &mockUserRepo{},
+		Tokens:       tokens,
+		Hasher:       stubHasher{},
+		CommentRepo:  repo,
+		DocumentRepo: docs,
+		Hub:          services.NewSSEHub(),
 	}
 }
 

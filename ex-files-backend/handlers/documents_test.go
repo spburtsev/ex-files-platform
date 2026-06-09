@@ -19,14 +19,20 @@ import (
 	"github.com/spburtsev/ex-files-backend/oapi"
 )
 
-func docsServer(tokens *mockTokens, repo *mockDocumentRepo, storage *mockStorage, issues ...*mockIssueRepo) *handlers.Server {
-	var ir *mockIssueRepo
-	if len(issues) > 0 && issues[0] != nil {
-		ir = issues[0]
-	} else {
-		ir = &mockIssueRepo{}
-		ir.On("FindByID", mock.Anything).Return(&models.Issue{Model: gormModelID(1), RequiredApprovals: 1}, nil).Maybe()
-		ir.On("GetReviewers", mock.Anything).Return([]models.User{}, nil).Maybe()
+// docsServer wires a document-handler test server. Pass nil for issues/ws to
+// get permissive defaults: any issue resolves to a stub issue in workspace 1
+// whose manager is user 1, so callers with uid 1 pass the new view checks.
+func docsServer(tokens *mockTokens, repo *mockDocumentRepo, storage *mockStorage, issues *mockIssueRepo, ws *mockWorkspaceRepo) *handlers.Server {
+	if issues == nil {
+		issues = &mockIssueRepo{}
+		issues.On("FindByID", mock.Anything).Return(&models.Issue{Model: gormModelID(1), WorkspaceID: 1, RequiredApprovals: 1}, nil).Maybe()
+		issues.On("GetReviewers", mock.Anything).Return([]models.User{}, nil).Maybe()
+	}
+	if ws == nil {
+		ws = &mockWorkspaceRepo{}
+		ws.On("FindByID", mock.Anything).Return(&models.Workspace{Model: gormModelID(1), ManagerID: 1}, nil).Maybe()
+		ws.On("GetMembers", mock.Anything).Return([]models.User{}, nil).Maybe()
+		ws.On("IsMember", mock.Anything, mock.Anything).Return(true, nil).Maybe()
 	}
 	ar := &mockDocumentApprovalRepo{}
 	ar.On("Create", mock.Anything).Return(nil).Maybe()
@@ -35,13 +41,14 @@ func docsServer(tokens *mockTokens, repo *mockDocumentRepo, storage *mockStorage
 	ar.On("CountByReviewers", mock.Anything, mock.Anything).Return(int64(0), nil).Maybe()
 	ar.On("DeleteByDocument", mock.Anything).Return(nil).Maybe()
 	return &handlers.Server{
-		UserRepo:     &mockUserRepo{},
-		Tokens:       tokens,
-		Hasher:       stubHasher{},
-		DocumentRepo: repo,
-		Storage:      storage,
-		IssueRepo:    ir,
-		ApprovalRepo: ar,
+		UserRepo:      &mockUserRepo{},
+		Tokens:        tokens,
+		Hasher:        stubHasher{},
+		DocumentRepo:  repo,
+		Storage:       storage,
+		IssueRepo:     issues,
+		WorkspaceRepo: ws,
+		ApprovalRepo:  ar,
 	}
 }
 
@@ -83,8 +90,10 @@ func TestDocumentsList_PaginationAndFilters(t *testing.T) {
 	repo.On("ListByIssue", uint(7), "report", "pending", 20, 0).Return([]models.Document{
 		{Model: gormModelID(1), Name: "report-q1.pdf", IssueID: 7, Status: models.DocumentStatusPending},
 	}, int64(1), nil)
+	issues := &mockIssueRepo{}
+	issues.On("FindByID", uint(7)).Return(&models.Issue{Model: gormModelID(7), CreatorID: 1, RequiredApprovals: 1}, nil)
 
-	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}))
+	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}, issues, nil))
 	defer srv.Close()
 
 	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodGet,
@@ -107,7 +116,9 @@ func TestDocumentsUpload_HappyPath(t *testing.T) {
 	storage := &mockStorage{}
 	issues := &mockIssueRepo{}
 
-	issues.On("FindByID", uint(7)).Return(&models.Issue{Model: gormModelID(7), Resolved: false}, nil)
+	// caller (uid 1) is the issue creator, so canViewIssue short-circuits
+	// without any workspace lookup.
+	issues.On("FindByID", uint(7)).Return(&models.Issue{Model: gormModelID(7), CreatorID: 1, Resolved: false}, nil)
 	repo.On("FindByIssueAndHash", uint(7), mock.AnythingOfType("string")).Return(nil, gorm.ErrRecordNotFound)
 	repo.On("Create", mock.AnythingOfType("*models.Document")).Return(uint(100), nil)
 	storage.On("Upload", mock.Anything, mock.AnythingOfType("string"), mock.Anything, int64(5), "text/plain").Return(nil)
@@ -123,7 +134,7 @@ func TestDocumentsUpload_HappyPath(t *testing.T) {
 		IssueID:    7,
 	}, nil)
 
-	srv := newTestServer(t, docsServer(tokens, repo, storage, issues))
+	srv := newTestServer(t, docsServer(tokens, repo, storage, issues, nil))
 	defer srv.Close()
 
 	res := multipartUpload(t, srv.URL+"/issues/7/documents", "test-token", "report.txt", "text/plain", []byte("hello"))
@@ -142,13 +153,13 @@ func TestDocumentsUpload_DuplicateHashReturns409(t *testing.T) {
 	stubTokenAccept(tokens, 1, models.RoleEmployee)
 	repo := &mockDocumentRepo{}
 	issues := &mockIssueRepo{}
-	issues.On("FindByID", uint(7)).Return(&models.Issue{Model: gormModelID(7), Resolved: false}, nil)
+	issues.On("FindByID", uint(7)).Return(&models.Issue{Model: gormModelID(7), CreatorID: 1, Resolved: false}, nil)
 	repo.On("FindByIssueAndHash", uint(7), mock.AnythingOfType("string")).Return(&models.Document{
 		Model: gormModelID(50),
 		Name:  "existing.txt",
 	}, nil)
 
-	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}, issues))
+	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}, issues, nil))
 	defer srv.Close()
 
 	res := multipartUpload(t, srv.URL+"/issues/7/documents", "test-token", "report.txt", "text/plain", []byte("hello"))
@@ -162,9 +173,9 @@ func TestDocumentsUpload_ResolvedIssueReturns422(t *testing.T) {
 	stubTokenAccept(tokens, 1, models.RoleEmployee)
 	repo := &mockDocumentRepo{}
 	issues := &mockIssueRepo{}
-	issues.On("FindByID", uint(7)).Return(&models.Issue{Model: gormModelID(7), Resolved: true}, nil)
+	issues.On("FindByID", uint(7)).Return(&models.Issue{Model: gormModelID(7), CreatorID: 1, Resolved: true}, nil)
 
-	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}, issues))
+	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}, issues, nil))
 	defer srv.Close()
 
 	res := multipartUpload(t, srv.URL+"/issues/7/documents", "test-token", "report.txt", "text/plain", []byte("hello"))
@@ -188,7 +199,7 @@ func TestDocumentsGet_HappyPath(t *testing.T) {
 		IssueID:    7,
 	}, nil)
 
-	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}))
+	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}, nil, nil))
 	defer srv.Close()
 
 	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodGet, srv.URL+"/documents/42", nil))
@@ -202,20 +213,87 @@ func TestDocumentsGet_HappyPath(t *testing.T) {
 	assert.Equal(t, "doc.pdf", got.Document.Name)
 }
 
+// TestDocumentsGet_NonMemberNotFound: a user who is neither uploader, issue
+// participant, workspace manager nor member gets 404 (existence stays hidden).
+func TestDocumentsGet_NonMemberNotFound(t *testing.T) {
+	tokens := &mockTokens{}
+	stubTokenAccept(tokens, 5, models.RoleEmployee)
+	repo := &mockDocumentRepo{}
+	repo.On("FindByID", uint(42)).Return(&models.Document{
+		Model: gormModelID(42), Name: "doc.pdf", UploaderID: 1, IssueID: 7,
+	}, nil)
+	issues := &mockIssueRepo{}
+	issues.On("FindByID", uint(7)).Return(&models.Issue{
+		Model: gormModelID(7), WorkspaceID: 3, CreatorID: 1, AssigneeID: 2,
+	}, nil)
+	ws := &mockWorkspaceRepo{}
+	ws.On("FindByID", uint(3)).Return(&models.Workspace{Model: gormModelID(3), ManagerID: 9}, nil)
+	ws.On("IsMember", uint(3), uint(5)).Return(false, nil)
+
+	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}, issues, ws))
+	defer srv.Close()
+
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodGet, srv.URL+"/documents/42", nil))
+	require.NoError(t, err)
+	defer res.Body.Close()
+	assert.Equal(t, http.StatusNotFound, res.StatusCode)
+	ws.AssertCalled(t, "IsMember", uint(3), uint(5))
+}
+
 func TestDocumentsDelete_HappyPath(t *testing.T) {
 	tokens := &mockTokens{}
 	stubTokenAccept(tokens, 1, models.RoleManager)
 	repo := &mockDocumentRepo{}
-	repo.On("FindByID", uint(42)).Return(&models.Document{Model: gormModelID(42), Name: "x"}, nil)
+	storage := &mockStorage{}
+	// caller is not the uploader, but owns the workspace.
+	repo.On("FindByID", uint(42)).Return(&models.Document{
+		Model: gormModelID(42), Name: "x", UploaderID: 2, IssueID: 7, StorageKey: "key/x",
+	}, nil)
+	issues := &mockIssueRepo{}
+	issues.On("FindByID", uint(7)).Return(&models.Issue{Model: gormModelID(7), WorkspaceID: 3, CreatorID: 2}, nil)
+	ws := &mockWorkspaceRepo{}
+	ws.On("FindByID", uint(3)).Return(&models.Workspace{Model: gormModelID(3), ManagerID: 1}, nil)
 	repo.On("Delete", uint(42)).Return(nil)
+	storage.On("Delete", mock.Anything, "key/x").Return(nil)
 
-	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}))
+	srv := newTestServer(t, docsServer(tokens, repo, storage, issues, ws))
 	defer srv.Close()
 
 	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodDelete, srv.URL+"/documents/42", nil))
 	require.NoError(t, err)
 	defer res.Body.Close()
 	assert.Equal(t, http.StatusOK, res.StatusCode)
+	storage.AssertCalled(t, "Delete", mock.Anything, "key/x")
+}
+
+// TestDocumentsDelete_MemberNotUploaderForbidden: a workspace member who can
+// view the document but is neither uploader nor manager gets 403 and nothing
+// is deleted.
+func TestDocumentsDelete_MemberNotUploaderForbidden(t *testing.T) {
+	tokens := &mockTokens{}
+	stubTokenAccept(tokens, 5, models.RoleEmployee)
+	repo := &mockDocumentRepo{}
+	storage := &mockStorage{}
+	repo.On("FindByID", uint(42)).Return(&models.Document{
+		Model: gormModelID(42), Name: "x", UploaderID: 1, IssueID: 7, StorageKey: "key/x",
+	}, nil)
+	issues := &mockIssueRepo{}
+	issues.On("FindByID", uint(7)).Return(&models.Issue{
+		Model: gormModelID(7), WorkspaceID: 3, CreatorID: 1, AssigneeID: 2,
+	}, nil)
+	ws := &mockWorkspaceRepo{}
+	ws.On("FindByID", uint(3)).Return(&models.Workspace{Model: gormModelID(3), ManagerID: 9}, nil)
+	ws.On("IsMember", uint(3), uint(5)).Return(true, nil)
+
+	srv := newTestServer(t, docsServer(tokens, repo, storage, issues, ws))
+	defer srv.Close()
+
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodDelete, srv.URL+"/documents/42", nil))
+	require.NoError(t, err)
+	defer res.Body.Close()
+	assert.Equal(t, http.StatusForbidden, res.StatusCode)
+	repo.AssertNotCalled(t, "Delete", mock.Anything)
+	storage.AssertNotCalled(t, "Delete", mock.Anything, mock.Anything)
 }
 
 func TestDocumentsDelete_NotFound(t *testing.T) {
@@ -224,7 +302,7 @@ func TestDocumentsDelete_NotFound(t *testing.T) {
 	repo := &mockDocumentRepo{}
 	repo.On("FindByID", uint(42)).Return(nil, assert.AnError)
 
-	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}))
+	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}, nil, nil))
 	defer srv.Close()
 
 	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodDelete, srv.URL+"/documents/42", nil))
@@ -238,10 +316,11 @@ func TestDocumentsDelete_DeleteFailureReturns500(t *testing.T) {
 	tokens := &mockTokens{}
 	stubTokenAccept(tokens, 1, models.RoleManager)
 	repo := &mockDocumentRepo{}
-	repo.On("FindByID", uint(42)).Return(&models.Document{Model: gormModelID(42), Name: "x"}, nil)
+	// caller is the uploader, so no issue/workspace lookups happen.
+	repo.On("FindByID", uint(42)).Return(&models.Document{Model: gormModelID(42), Name: "x", UploaderID: 1}, nil)
 	repo.On("Delete", uint(42)).Return(assert.AnError)
 
-	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}))
+	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}, nil, nil))
 	defer srv.Close()
 
 	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodDelete, srv.URL+"/documents/42", nil))
@@ -251,7 +330,7 @@ func TestDocumentsDelete_DeleteFailureReturns500(t *testing.T) {
 }
 
 func TestDocumentsDelete_Unauthorized(t *testing.T) {
-	srv := newTestServer(t, docsServer(&mockTokens{}, &mockDocumentRepo{}, &mockStorage{}))
+	srv := newTestServer(t, docsServer(&mockTokens{}, &mockDocumentRepo{}, &mockStorage{}, nil, nil))
 	defer srv.Close()
 
 	req, _ := http.NewRequest(http.MethodDelete, srv.URL+"/documents/42", nil)
@@ -267,12 +346,13 @@ func TestDocumentsGetDownloadUrl_HappyPath(t *testing.T) {
 	repo := &mockDocumentRepo{}
 	storage := &mockStorage{}
 
+	// caller is the uploader: canViewDocument short-circuits, no lookups.
 	repo.On("FindByID", uint(42)).Return(&models.Document{
-		Model: gormModelID(42), StorageKey: "key/abc",
+		Model: gormModelID(42), UploaderID: 1, StorageKey: "key/abc",
 	}, nil)
 	storage.On("PresignedURL", mock.Anything, "key/abc", mock.Anything).Return("https://minio.example/abc", nil)
 
-	srv := newTestServer(t, docsServer(tokens, repo, storage))
+	srv := newTestServer(t, docsServer(tokens, repo, storage, nil, nil))
 	defer srv.Close()
 
 	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodGet, srv.URL+"/documents/42/download", nil))
@@ -292,12 +372,13 @@ func TestDocumentsGetFile_StreamsBytes(t *testing.T) {
 	storage := &mockStorage{}
 
 	payload := []byte("file contents")
+	// caller is the uploader: canViewDocument short-circuits, no lookups.
 	repo.On("FindByID", uint(42)).Return(&models.Document{
-		Model: gormModelID(42), StorageKey: "k", Size: int64(len(payload)),
+		Model: gormModelID(42), UploaderID: 1, StorageKey: "k", Size: int64(len(payload)),
 	}, nil)
 	storage.On("Get", mock.Anything, "k").Return(io.NopCloser(bytes.NewReader(payload)), nil)
 
-	srv := newTestServer(t, docsServer(tokens, repo, storage))
+	srv := newTestServer(t, docsServer(tokens, repo, storage, nil, nil))
 	defer srv.Close()
 
 	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodGet, srv.URL+"/documents/42/file", nil))
@@ -318,7 +399,7 @@ func TestDocumentsSubmit_UploaderOnly(t *testing.T) {
 		Model: gormModelID(42), UploaderID: 1, Status: models.DocumentStatusPending,
 	}, nil)
 
-	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}))
+	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}, nil, nil))
 	defer srv.Close()
 
 	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodPost, srv.URL+"/documents/42/submit", nil))
@@ -339,7 +420,7 @@ func TestDocumentsSubmit_TransitionsToInReview(t *testing.T) {
 		assert.Equal(t, models.DocumentStatusInReview, d.Status)
 	})
 
-	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}))
+	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}, nil, nil))
 	defer srv.Close()
 
 	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodPost, srv.URL+"/documents/42/submit", nil))
@@ -360,13 +441,22 @@ func TestDocumentsSubmit_InvalidTransitionReturns422(t *testing.T) {
 		Model: gormModelID(42), UploaderID: 1, Status: models.DocumentStatusApproved,
 	}, nil)
 
-	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}))
+	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}, nil, nil))
 	defer srv.Close()
 
 	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodPost, srv.URL+"/documents/42/submit", nil))
 	require.NoError(t, err)
 	defer res.Body.Close()
 	assert.Equal(t, http.StatusUnprocessableEntity, res.StatusCode)
+}
+
+// approveWorkspace returns a workspace mock for workspace 3 owned by the
+// given manager; canReview and approvalProgressRecipients both hit it.
+func approveWorkspace(managerID uint) *mockWorkspaceRepo {
+	ws := &mockWorkspaceRepo{}
+	ws.On("FindByID", uint(3)).Return(&models.Workspace{Model: gormModelID(3), ManagerID: managerID}, nil)
+	ws.On("GetMembers", uint(3)).Return([]models.User{}, nil).Maybe()
+	return ws
 }
 
 func TestDocumentsApprove_ManagerSucceeds(t *testing.T) {
@@ -378,11 +468,11 @@ func TestDocumentsApprove_ManagerSucceeds(t *testing.T) {
 		Model: gormModelID(42), UploaderID: 1, IssueID: 7, Status: models.DocumentStatusInReview,
 	}, nil)
 	repo.On("Update", mock.AnythingOfType("*models.Document")).Return(nil)
-	issues.On("FindByID", uint(7)).Return(&models.Issue{Model: gormModelID(7), Resolved: false}, nil)
+	issues.On("FindByID", uint(7)).Return(&models.Issue{Model: gormModelID(7), WorkspaceID: 3, Resolved: false}, nil)
 	issues.On("GetReviewers", uint(7)).Return([]models.User{}, nil)
 	issues.On("Update", mock.AnythingOfType("*models.Issue")).Return(nil)
 
-	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}, issues))
+	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}, issues, approveWorkspace(99)))
 	defer srv.Close()
 
 	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodPost, srv.URL+"/documents/42/approve", nil))
@@ -404,14 +494,14 @@ func TestDocumentsApprove_MarksIssueResolved(t *testing.T) {
 		Model: gormModelID(42), UploaderID: 1, IssueID: 7, Status: models.DocumentStatusInReview,
 	}, nil)
 	repo.On("Update", mock.AnythingOfType("*models.Document")).Return(nil)
-	issues.On("FindByID", uint(7)).Return(&models.Issue{Model: gormModelID(7), Resolved: false}, nil)
+	issues.On("FindByID", uint(7)).Return(&models.Issue{Model: gormModelID(7), WorkspaceID: 3, Resolved: false}, nil)
 	issues.On("GetReviewers", uint(7)).Return([]models.User{}, nil)
 	issues.On("Update", mock.AnythingOfType("*models.Issue")).Return(nil).Run(func(a mock.Arguments) {
 		i := a.Get(0).(*models.Issue)
 		assert.True(t, i.Resolved, "issue must be marked resolved")
 	})
 
-	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}, issues))
+	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}, issues, approveWorkspace(99)))
 	defer srv.Close()
 
 	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodPost, srv.URL+"/documents/42/approve", nil))
@@ -431,11 +521,11 @@ func TestDocumentsApprove_AlreadyResolvedIssueSkipsUpdate(t *testing.T) {
 		Model: gormModelID(42), UploaderID: 1, IssueID: 7, Status: models.DocumentStatusInReview,
 	}, nil)
 	repo.On("Update", mock.AnythingOfType("*models.Document")).Return(nil)
-	issues.On("FindByID", uint(7)).Return(&models.Issue{Model: gormModelID(7), Resolved: true}, nil)
+	issues.On("FindByID", uint(7)).Return(&models.Issue{Model: gormModelID(7), WorkspaceID: 3, Resolved: true}, nil)
 	issues.On("GetReviewers", uint(7)).Return([]models.User{}, nil)
 	// IssueRepo.Update should NOT be called when issue already resolved.
 
-	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}, issues))
+	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}, issues, approveWorkspace(99)))
 	defer srv.Close()
 
 	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodPost, srv.URL+"/documents/42/approve", nil))
@@ -454,7 +544,7 @@ func TestDocumentsApprove_NonReviewerForbidden(t *testing.T) {
 		Model: gormModelID(42), UploaderID: 1, Status: models.DocumentStatusInReview,
 	}, nil)
 
-	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}))
+	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}, nil, nil))
 	defer srv.Close()
 
 	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodPost, srv.URL+"/documents/42/approve", nil))
@@ -468,15 +558,18 @@ func TestDocumentsReject_StoresNote(t *testing.T) {
 	stubTokenAccept(tokens, 99, models.RoleManager)
 	repo := &mockDocumentRepo{}
 	repo.On("FindByID", uint(42)).Return(&models.Document{
-		Model: gormModelID(42), UploaderID: 1, Status: models.DocumentStatusInReview,
+		Model: gormModelID(42), UploaderID: 1, IssueID: 7, Status: models.DocumentStatusInReview,
 	}, nil)
 	repo.On("Update", mock.AnythingOfType("*models.Document")).Return(nil).Run(func(a mock.Arguments) {
 		d := a.Get(0).(*models.Document)
 		assert.Equal(t, models.DocumentStatusRejected, d.Status)
 		assert.Equal(t, "fix section 3", d.ReviewerNote)
 	})
+	issues := &mockIssueRepo{}
+	issues.On("FindByID", uint(7)).Return(&models.Issue{Model: gormModelID(7), WorkspaceID: 3}, nil)
+	issues.On("GetReviewers", uint(7)).Return([]models.User{}, nil)
 
-	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}))
+	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}, issues, approveWorkspace(99)))
 	defer srv.Close()
 
 	body := strings.NewReader(`{"note":"fix section 3"}`)
@@ -491,15 +584,18 @@ func TestDocumentsRequestChanges_StoresNote(t *testing.T) {
 	stubTokenAccept(tokens, 99, models.RoleManager)
 	repo := &mockDocumentRepo{}
 	repo.On("FindByID", uint(42)).Return(&models.Document{
-		Model: gormModelID(42), UploaderID: 1, Status: models.DocumentStatusInReview,
+		Model: gormModelID(42), UploaderID: 1, IssueID: 7, Status: models.DocumentStatusInReview,
 	}, nil)
 	repo.On("Update", mock.AnythingOfType("*models.Document")).Return(nil).Run(func(a mock.Arguments) {
 		d := a.Get(0).(*models.Document)
 		assert.Equal(t, models.DocumentStatusChangesRequested, d.Status)
 		assert.Equal(t, "tighten methodology", d.ReviewerNote)
 	})
+	issues := &mockIssueRepo{}
+	issues.On("FindByID", uint(7)).Return(&models.Issue{Model: gormModelID(7), WorkspaceID: 3}, nil)
+	issues.On("GetReviewers", uint(7)).Return([]models.User{}, nil)
 
-	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}))
+	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}, issues, approveWorkspace(99)))
 	defer srv.Close()
 
 	body := strings.NewReader(`{"note":"tighten methodology"}`)
@@ -518,7 +614,7 @@ func TestDocumentsResubmit_FromChangesRequested(t *testing.T) {
 	}, nil)
 	repo.On("Update", mock.AnythingOfType("*models.Document")).Return(nil)
 
-	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}))
+	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}, nil, nil))
 	defer srv.Close()
 
 	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodPost, srv.URL+"/documents/42/resubmit", nil))
@@ -531,7 +627,7 @@ func TestDocumentsAssignReviewer_ManagerOnly(t *testing.T) {
 	tokens := &mockTokens{}
 	stubTokenAccept(tokens, 1, models.RoleEmployee)
 
-	srv := newTestServer(t, docsServer(tokens, &mockDocumentRepo{}, &mockStorage{}))
+	srv := newTestServer(t, docsServer(tokens, &mockDocumentRepo{}, &mockStorage{}, nil, nil))
 	defer srv.Close()
 
 	body := strings.NewReader(`{"reviewerId":"5"}`)
@@ -546,15 +642,17 @@ func TestDocumentsAssignReviewer_HappyPath(t *testing.T) {
 	stubTokenAccept(tokens, 99, models.RoleManager)
 	repo := &mockDocumentRepo{}
 	repo.On("FindByID", uint(42)).Return(&models.Document{
-		Model: gormModelID(42), UploaderID: 1, Status: models.DocumentStatusInReview,
+		Model: gormModelID(42), UploaderID: 1, IssueID: 7, Status: models.DocumentStatusInReview,
 	}, nil)
 	repo.On("Update", mock.AnythingOfType("*models.Document")).Return(nil).Run(func(a mock.Arguments) {
 		d := a.Get(0).(*models.Document)
 		require.NotNil(t, d.ReviewerID)
 		assert.Equal(t, uint(5), *d.ReviewerID)
 	})
+	issues := &mockIssueRepo{}
+	issues.On("FindByID", uint(7)).Return(&models.Issue{Model: gormModelID(7), WorkspaceID: 3}, nil)
 
-	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}))
+	srv := newTestServer(t, docsServer(tokens, repo, &mockStorage{}, issues, approveWorkspace(99)))
 	defer srv.Close()
 
 	body := strings.NewReader(`{"reviewerId":"5"}`)

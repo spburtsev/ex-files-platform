@@ -154,17 +154,25 @@
 	async function confirmArchiveIssue() {
 		if (!pendingIssueArchive) return;
 		const { id, archived } = pendingIssueArchive;
-		const r = await archiveIssue({ issueId: id, archived }).updates(
-			archivedIssuesQuery,
-			issuesQuery
-		);
-		if (!r.ok) {
+		try {
+			const r = await archiveIssue({ issueId: id, archived }).updates(
+				archivedIssuesQuery,
+				issuesQuery
+			);
+			if (!r.ok) {
+				toast.error(m.error_archive_issue());
+			} else {
+				toast.success(archived ? m.issue_archived() : m.issue_unarchived());
+			}
+		} catch (err) {
+			// A transport failure must not leave the confirm dialog hanging open
+			// with no feedback.
+			console.error('archive issue failed', err);
 			toast.error(m.error_archive_issue());
-		} else {
-			toast.success(archived ? m.issue_archived() : m.issue_unarchived());
+		} finally {
+			issueArchiveConfirmOpen = false;
+			pendingIssueArchive = null;
 		}
-		issueArchiveConfirmOpen = false;
-		pendingIssueArchive = null;
 	}
 
 	// New issue dialog

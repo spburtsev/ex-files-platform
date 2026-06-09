@@ -117,6 +117,27 @@ function createWorkbenchStore() {
 		doc.reviewStatus = reviewStatus;
 	}
 
+	// Merges the authoritative review state returned by a review action, so a
+	// partial approval (multi-reviewer panel) shows in_review with the right
+	// progress instead of an optimistic "approved".
+	function applyServerReview(
+		id: string,
+		fields: {
+			reviewStatus?: ReviewStatus;
+			approvals?: DocumentApproval[];
+			approvalCount?: number;
+			requiredApprovals?: number;
+		}
+	) {
+		if (!currentIssueId) return;
+		const doc = slots[currentIssueId].documents.find((d) => d.id === id);
+		if (!doc) return;
+		doc.reviewStatus = fields.reviewStatus ?? doc.reviewStatus;
+		doc.approvals = fields.approvals ?? doc.approvals;
+		doc.approvalCount = fields.approvalCount ?? doc.approvalCount;
+		doc.requiredApprovals = fields.requiredApprovals ?? doc.requiredApprovals;
+	}
+
 	// Idempotent: appends new docs and merges server-side fields onto existing
 	// docs (reviewStatus, reviewerNote, uploaderName). Safe to call repeatedly
 	// to re-sync after review actions or SSE-driven invalidations.
@@ -200,6 +221,7 @@ function createWorkbenchStore() {
 		setDocumentSaved,
 		setDocumentData,
 		setDocumentReviewStatus,
+		applyServerReview,
 		hydrate,
 		setActiveDocument,
 		discardDocument

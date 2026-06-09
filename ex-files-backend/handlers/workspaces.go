@@ -98,7 +98,8 @@ func (s *Server) WorkspacesList(ctx context.Context, params oapi.WorkspacesListP
 
 // WorkspacesGet implements GET /workspaces/{id}.
 func (s *Server) WorkspacesGet(ctx context.Context, params oapi.WorkspacesGetParams) (oapi.WorkspacesGetRes, error) {
-	if _, err := s.callerID(ctx); err != nil {
+	uid, role, err := s.callerIDAndRole(ctx)
+	if err != nil {
 		return &oapi.WorkspacesGetUnauthorized{Error: "unauthorized"}, nil
 	}
 	id, ok := parseUintID(params.ID)
@@ -107,6 +108,12 @@ func (s *Server) WorkspacesGet(ctx context.Context, params oapi.WorkspacesGetPar
 	}
 	ws, err := s.WorkspaceRepo.FindByID(id)
 	if err != nil {
+		return &oapi.WorkspacesGetNotFound{Error: "workspace not found"}, nil
+	}
+	if allowed, err := s.canViewWorkspace(ws, uid, role); err != nil {
+		logErr("workspaces.get.authz", err)
+		return &oapi.WorkspacesGetInternalServerError{Error: "failed to check access"}, nil
+	} else if !allowed {
 		return &oapi.WorkspacesGetNotFound{Error: "workspace not found"}, nil
 	}
 	manager, err := s.UserRepo.FindByID(ws.ManagerID)
@@ -134,13 +141,23 @@ func (s *Server) WorkspacesGet(ctx context.Context, params oapi.WorkspacesGetPar
 }
 
 // WorkspacesAssignableMembers implements GET /workspaces/{id}/assignable-members.
+// Feeds the manager's add-member picker, so it exposes the company user list —
+// restricted to the workspace manager (or root).
 func (s *Server) WorkspacesAssignableMembers(ctx context.Context, params oapi.WorkspacesAssignableMembersParams) (oapi.WorkspacesAssignableMembersRes, error) {
-	if _, err := s.callerID(ctx); err != nil {
+	uid, role, err := s.callerIDAndRole(ctx)
+	if err != nil {
 		return &oapi.WorkspacesAssignableMembersUnauthorized{Error: "unauthorized"}, nil
 	}
 	id, ok := parseUintID(params.ID)
 	if !ok {
-		return &oapi.WorkspacesAssignableMembersInternalServerError{Error: "invalid workspace id"}, nil
+		return &oapi.WorkspacesAssignableMembersNotFound{Error: "workspace not found"}, nil
+	}
+	ws, err := s.WorkspaceRepo.FindByID(id)
+	if err != nil {
+		return &oapi.WorkspacesAssignableMembersNotFound{Error: "workspace not found"}, nil
+	}
+	if role != models.RoleRoot && !ws.IsOwnedBy(uid) {
+		return &oapi.WorkspacesAssignableMembersNotFound{Error: "workspace not found"}, nil
 	}
 	users, err := s.WorkspaceRepo.GetAssignableUsers(id)
 	if err != nil {

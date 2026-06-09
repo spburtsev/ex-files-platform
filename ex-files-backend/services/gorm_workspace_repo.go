@@ -117,6 +117,14 @@ func (r *GormWorkspaceRepository) GetAssignableUsers(workspaceID uint) ([]models
 	return users, err
 }
 
+func (r *GormWorkspaceRepository) IsMember(workspaceID, userID uint) (bool, error) {
+	var count int64
+	err := r.DB.Model(&models.WorkspaceMember{}).
+		Where("workspace_id = ? AND user_id = ?", workspaceID, userID).
+		Count(&count).Error
+	return count > 0, err
+}
+
 func (r *GormWorkspaceRepository) GetMembers(workspaceID uint) ([]models.User, error) {
 	var users []models.User
 	err := r.DB.

@@ -1,6 +1,5 @@
 {
 	"$schema": "https://inlang.com/schema/inlang-message-format",
-
 	"common_cancel": "Anuluj",
 	"common_close": "Zamknij",
 	"common_save": "Zapisz",
@@ -22,7 +21,6 @@
 	"common_uploading": "Przesyłanie...",
 	"common_page_of": "Strona {current} z {total}",
 	"common_loading": "Ładowanie...",
-
 	"error_network": "Nie udało się połączyć z serwerem. Spróbuj ponownie.",
 	"error_network_retry": "Błąd sieci, spróbuj ponownie",
 	"error_action_failed": "Operacja nie powiodła się",
@@ -30,23 +28,19 @@
 	"error_delete_workspace": "Nie udało się usunąć przestrzeni roboczej",
 	"error_delete_document": "Nie udało się usunąć dokumentu",
 	"error_download_failed": "Nie udało się pobrać pliku",
-
 	"status_pending": "Oczekujący",
 	"status_in_review": "W recenzji",
 	"status_changes_requested": "Wymagane zmiany",
 	"status_approved": "Zatwierdzony",
 	"status_rejected": "Odrzucony",
-
 	"role_manager": "Kierownik",
 	"role_employee": "Pracownik",
 	"role_root": "Root",
-
 	"nav_dashboard": "Panel",
 	"nav_workspaces": "Przestrzenie robocze",
 	"nav_users": "Użytkownicy",
 	"nav_profile": "Profil",
 	"nav_logout": "Wyloguj się",
-
 	"login_page_title": "Logowanie - ex-files",
 	"login_welcome": "Witamy ponownie",
 	"login_description": "Zaloguj się do konta ex-files",
@@ -58,7 +52,6 @@
 	"login_invalid_credentials": "Nieprawidłowy e-mail lub hasło.",
 	"login_no_account": "Nie masz konta?",
 	"login_signup_link": "Zarejestruj się",
-
 	"forgot_page_title": "Zapomniałeś hasła - ex-files",
 	"forgot_heading": "Zapomniałeś hasła?",
 	"forgot_description": "Podaj swój email, a wyślemy Ci link do resetowania hasła.",
@@ -66,7 +59,6 @@
 	"forgot_submitting": "Wysyłanie...",
 	"forgot_success": "Jeśli konto z tym adresem email istnieje, link do resetowania został wysłany.",
 	"forgot_back_to_login": "Powrót do logowania",
-
 	"reset_page_title": "Resetowanie hasła - ex-files",
 	"reset_heading": "Zresetuj hasło",
 	"reset_description": "Wpisz token z emaila i wybierz nowe hasło.",
@@ -78,7 +70,6 @@
 	"reset_submitting": "Resetowanie...",
 	"reset_success": "Twoje hasło zostało zresetowane. Możesz się teraz zalogować.",
 	"reset_invalid_token": "Nieprawidłowy lub wygasły token.",
-
 	"profile_page_title": "Profil - ex-files",
 	"profile_heading": "Profil",
 	"profile_change_password_heading": "Zmień hasło",
@@ -96,7 +87,6 @@
 	"profile_reset_desc": "Wyślemy Ci e-mailem link do resetu, aby ustawić nowe.",
 	"profile_reset_button": "Wyślij link do resetu na mój e-mail",
 	"profile_reset_sent": "Jeśli konto istnieje, link do resetu został wysłany.",
-
 	"signup_page_title": "Rejestracja - ex-files",
 	"signup_heading": "Utwórz konto",
 	"signup_description": "Wprowadź swoje dane, aby rozpocząć",
@@ -110,7 +100,6 @@
 	"signup_error": "Rejestracja nie powiodła się. Spróbuj ponownie.",
 	"signup_has_account": "Masz już konto?",
 	"signup_login_link": "Zaloguj się",
-
 	"dashboard_page_title": "Panel - ex-files",
 	"dashboard_greeting": "Cześć, {name}!",
 	"dashboard_assigned_open": "Przypisane do Ciebie",
@@ -146,7 +135,6 @@
 	"notif_deadline_1h": "{title} kończy się za 1 godzinę",
 	"notif_deadline_24h": "{title} kończy się w ciągu 24 godzin",
 	"notif_view_action": "Otwórz",
-
 	"ws_page_title": "Przestrzenie robocze - ex-files",
 	"ws_heading": "Przestrzenie robocze",
 	"ws_description": "Organizuj powiązane dokumenty w przestrzeniach roboczych w celu sprawnej weryfikacji.",
@@ -160,13 +148,10 @@
 	"ws_no_workspaces_employee": "Nie zostałeś dodany do żadnej przestrzeni roboczej.",
 	"ws_created_date": "Utworzono {date}",
 	"ws_manager_label": "Kierownik: {name}",
-
 	"ws_edit_title": "Edytuj przestrzeń roboczą",
 	"ws_update_error": "Nie udało się zaktualizować przestrzeni roboczej",
-
 	"ws_delete_title": "Usuń przestrzeń roboczą",
 	"ws_delete_confirm": "Czy na pewno chcesz usunąć {name}? Tej operacji nie można cofnąć.",
-
 	"ws_issues_tab": "Zagadnienia",
 	"ws_members_tab": "Członkowie",
 	"ws_no_issues": "Brak zagadnień",
@@ -203,7 +188,6 @@
 	"ws_status_all": "Wszystkie",
 	"ws_status_active": "Aktywne",
 	"ws_status_archived": "Zarchiwizowane",
-
 	"doc_page_title": "{name} - ex-files",
 	"doc_loading": "Ładowanie dokumentu...",
 	"doc_reviewer_label": "Recenzent: {name}",
@@ -218,25 +202,19 @@
 	"doc_request_changes": "Poproś o zmiany",
 	"doc_reject": "Odrzuć",
 	"doc_rejecting": "Odrzucanie...",
-
 	"doc_download": "Pobierz",
 	"doc_getting_link": "Pobieranie linku...",
-
-
 	"doc_delete_title": "Usuń dokument",
 	"doc_delete_confirm": "Czy na pewno chcesz usunąć {name}? Wszystkie wersje zostaną usunięte. Tej operacji nie można cofnąć.",
-
 	"doc_reject_title": "Odrzuć dokument",
 	"doc_reject_description": "Podaj powód, aby autor wiedział, co poprawić.",
 	"doc_reject_reason_label": "Powód (opcjonalnie)",
 	"doc_reject_placeholder": "Opisz, dlaczego dokument jest odrzucany...",
-
 	"doc_changes_title": "Poproś o zmiany",
 	"doc_changes_description": "Opisz, jakie zmiany są potrzebne, aby dokument mógł zostać zatwierdzony.",
 	"doc_changes_notes_label": "Uwagi (opcjonalnie)",
 	"doc_changes_placeholder": "Opisz wymagane zmiany...",
 	"doc_changes_sending": "Wysyłanie...",
-
 	"doc_assign_title": "Przypisz recenzenta",
 	"doc_assign_description": "Wybierz członka przestrzeni roboczej do recenzji tego dokumentu.",
 	"doc_assign_reviewer_label": "Recenzent",
@@ -244,7 +222,6 @@
 	"doc_assigning": "Przypisywanie...",
 	"doc_assign": "Przypisz",
 	"doc_assign_error": "Nie udało się przypisać recenzenta",
-
 	"users_page_title": "Użytkownicy - ex-files",
 	"users_heading": "Użytkownicy",
 	"users_description": "Zarządzaj członkami platformy i ich rolami.",
@@ -258,7 +235,6 @@
 	"users_create_success": "Użytkownik utworzony.",
 	"users_create_error": "Nie udało się utworzyć użytkownika.",
 	"users_create_back": "Powrót do użytkowników",
-
 	"audit_page_title": "Dziennik audytu - ex-files",
 	"audit_heading": "Dziennik audytu",
 	"audit_description": "Niezmienny rejestr wszystkich działań na platformie.",
@@ -274,7 +250,6 @@
 	"audit_no_entries": "Nie znaleziono wpisów",
 	"audit_adjust_filters": "Spróbuj zmienić filtry.",
 	"audit_empty": "Działania pojawią się tutaj w miarę ich występowania.",
-
 	"workbench_page_title": "ex-files - Przegląd dokumentów",
 	"workbench_toggle_sidebar": "Przełącz panel boczny",
 	"workbench_expand_sidebar": "Rozwiń panel boczny",
@@ -317,10 +292,10 @@
 	"workbench_save_success": "Zapisano \"{name}\"",
 	"workbench_save_error": "Nie udało się zapisać dokumentu",
 	"workbench_file_too_large": "Plik zbyt duży. Maksymalny rozmiar to {mb} MB.",
+	"workbench_invalid_pdf": "Ten plik nie wygląda na poprawny PDF.",
 	"workbench_no_description": "Brak opisu",
 	"workbench_discard_button": "Odrzuć",
 	"workbench_discard_success": "Odrzucono \"{name}\"",
-
 	"pdf_click_to_upload": "Kliknij, aby przesłać",
 	"pdf_or_drag_drop": "lub przeciągnij i upuść",
 	"pdf_files_only": "Tylko pliki PDF",
@@ -337,7 +312,6 @@
 	"pdf_zoom_in": "Powiększ",
 	"pdf_page_back": "Poprzednia strona",
 	"pdf_page_forward": "Następna strona",
-
 	"issue_open": "Otwarte",
 	"issue_resolved": "Rozwiązane",
 	"issues_search_placeholder": "Szukaj zadań...",
@@ -354,7 +328,7 @@
 	"issue_archive": "Archiwizuj",
 	"issue_archived": "Zarchiwizowane",
 	"issue_unarchive": "Przywróć",
-    "issue_unarchived": "Przywrócone",
+	"issue_unarchived": "Przywrócone",
 	"ws_no_archived_issues": "Brak zarchiwizowanych zadań.",
 	"ws_no_archived_issues_hint": "Zarchiwizowane zadania pojawią się tutaj.",
 	"error_archive_issue": "Nie udało się zarchiwizować zadania",
@@ -364,7 +338,6 @@
 	"issue_unarchive_confirm_desc": "To zadanie zostanie przywrócone do zakładki Zadania.",
 	"comment_delete_confirm_title": "Usunąć komentarz?",
 	"comment_delete_confirm_desc": "Ten komentarz zostanie trwale usunięty. Tej operacji nie można cofnąć.",
-
 	"analytics_page_title": "Analityka - ex-files",
 	"analytics_heading": "Analityka",
 	"analytics_description": "Przegląd aktywności platformy i statusu dokumentów.",

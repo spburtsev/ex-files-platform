@@ -12,6 +12,15 @@ type GormIssueRepository struct {
 	DB *gorm.DB
 }
 
+// issueCountsSelect computes comments_count and versions_count at read time.
+// The columns exist on issues but are never maintained on writes, so reads
+// must derive them from the live comment/document rows.
+const issueCountsSelect = `issues.*,
+	(SELECT COUNT(*) FROM comments c JOIN documents d ON d.id = c.document_id
+	 WHERE d.issue_id = issues.id AND d.deleted_at IS NULL AND c.deleted_at IS NULL) AS comments_count,
+	(SELECT COUNT(*) FROM documents d
+	 WHERE d.issue_id = issues.id AND d.deleted_at IS NULL) AS versions_count`
+
 func (r *GormIssueRepository) ListAll() ([]models.Issue, error) {
 	var issues []models.Issue
 	err := r.DB.Preload("Creator").Preload("Assignee").Find(&issues).Error
@@ -23,7 +32,7 @@ func (r *GormIssueRepository) ListAll() ([]models.Issue, error) {
 
 func (r *GormIssueRepository) ListByWorkspace(workspaceID uint, search string, resolved *bool, archived bool) ([]models.Issue, error) {
 	var issues []models.Issue
-	q := r.DB.Preload("Creator").Preload("Assignee").
+	q := r.DB.Select(issueCountsSelect).Preload("Creator").Preload("Assignee").
 		Where("workspace_id = ?", workspaceID).
 		Where("archived = ?", archived)
 	if search != "" {
@@ -60,6 +69,7 @@ func (r *GormIssueRepository) ListMyCurrentIssues(userID uint, search string, li
 
 	var issues []models.Issue
 	if err := q.
+		Select(issueCountsSelect).
 		Preload("Workspace").
 		Preload("Workspace.Manager").
 		Preload("Assignee").
@@ -91,7 +101,7 @@ func (r *GormIssueRepository) ListUnresolvedWithDeadline() ([]models.Issue, erro
 
 func (r *GormIssueRepository) FindByID(id uint) (*models.Issue, error) {
 	var issue models.Issue
-	err := r.DB.Preload("Creator").Preload("Assignee").
+	err := r.DB.Select(issueCountsSelect).Preload("Creator").Preload("Assignee").
 		Preload("Reviewers").Preload("Reviewers.User").
 		First(&issue, id).Error
 	if err != nil {

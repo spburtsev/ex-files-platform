@@ -76,6 +76,8 @@ services:
       SEED_ROOT_EMAIL: ${SEED_ROOT_EMAIL:-}
       SEED_ROOT_PASSWORD: ${SEED_ROOT_PASSWORD:-}
       SEED_ROOT_NAME: ${SEED_ROOT_NAME:-Root}
+      SEED_DEMO_USERS: ${SEED_DEMO_USERS:-true}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
       MINIO_ENDPOINT: ex-files-minio:9000
       MINIO_ACCESS_KEY: ${MINIO_USER:-minioadmin}
       MINIO_SECRET_KEY: ${MINIO_PASSWORD:-minioadmin}

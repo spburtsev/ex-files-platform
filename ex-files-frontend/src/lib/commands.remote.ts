@@ -1,4 +1,5 @@
 import { command, getRequestEvent, requested } from '$app/server';
+import { isHttpError, isRedirect } from '@sveltejs/kit';
 
 import { apiOpts } from '$lib/api-client';
 import {
@@ -36,6 +37,13 @@ import { getComments, getIssues } from './queries.remote';
 
 const NETWORK_ERROR = 'Unable to reach the server. Please try again later.';
 
+// SvelteKit control-flow objects (the 401 force-logout redirect from
+// hooks.server's handleFetch, error() responses) must escape the catch-all
+// error handling below so SvelteKit can act on them.
+function rethrowControlFlow(err: unknown) {
+	if (isRedirect(err) || isHttpError(err)) throw err;
+}
+
 function errorMessage(error: unknown, fallback: string): string {
 	if (error && typeof error === 'object') {
 		if ('error' in error && typeof error.error === 'string') {
@@ -59,7 +67,8 @@ async function runApi<T extends { error?: unknown }>(
 		const r = await call;
 		if (r.error) return { ok: false as const, error: errorMessage(r.error, fallback) };
 		return { ok: true as const };
-	} catch {
+	} catch (err) {
+		rethrowControlFlow(err);
 		return { ok: false as const, error: NETWORK_ERROR };
 	}
 }
@@ -92,6 +101,7 @@ export const login = command(
 			setSessionCookie(r.data.token);
 			return { ok: true as const };
 		} catch (err) {
+			rethrowControlFlow(err);
 			console.error('login failed', err);
 			return { ok: false as const, error: NETWORK_ERROR };
 		}
@@ -111,7 +121,8 @@ export const register = command(
 			}
 			setSessionCookie(r.data.token);
 			return { ok: true as const };
-		} catch {
+		} catch (err) {
+			rethrowControlFlow(err);
 			return { ok: false as const, error: NETWORK_ERROR };
 		}
 	}
@@ -134,7 +145,8 @@ export const createUser = command(
 				};
 			}
 			return { ok: true as const, user: r.data.user };
-		} catch {
+		} catch (err) {
+			rethrowControlFlow(err);
 			return { ok: false as const, error: NETWORK_ERROR };
 		}
 	}
@@ -149,6 +161,7 @@ export const forgotPassword = command('unchecked', async (email: string) => {
 		}
 		return { ok: true as const };
 	} catch (err: unknown) {
+		rethrowControlFlow(err);
 		console.error('forgot password failed:', String(err));
 		return { ok: false as const, error: NETWORK_ERROR };
 	}
@@ -373,9 +386,22 @@ export const resubmitDocument = command('unchecked', async (id: string) =>
 	runApi(documentsResubmit({ ...apiOpts(), path: { id } }), 'Action failed')
 );
 
-export const approveDocument = command('unchecked', async (id: string) =>
-	runApi(documentsApprove({ ...apiOpts(), path: { id } }), 'Action failed')
-);
+// Returns the updated document so callers can apply the real review state:
+// with a multi-reviewer panel one approval keeps the document in_review, so
+// an optimistic local "approved" flip would show the wrong badge and disable
+// the other review actions.
+export const approveDocument = command('unchecked', async (id: string) => {
+	try {
+		const r = await documentsApprove({ ...apiOpts(), path: { id } });
+		if (r.error || !r.data) {
+			return { ok: false as const, error: errorMessage(r.error, 'Action failed') };
+		}
+		return { ok: true as const, document: r.data.document };
+	} catch (err) {
+		rethrowControlFlow(err);
+		return { ok: false as const, error: NETWORK_ERROR };
+	}
+});
 
 export const rejectDocument = command(
 	'unchecked',

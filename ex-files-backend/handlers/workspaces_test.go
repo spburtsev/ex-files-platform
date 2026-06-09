@@ -384,6 +384,7 @@ func TestWorkspacesAssignableMembers_HappyPath(t *testing.T) {
 	tokens := &mockTokens{}
 	stubTokenAccept(tokens, 1, models.RoleManager)
 	repo := &mockWorkspaceRepo{}
+	repo.On("FindByID", uint(7)).Return(&models.Workspace{Model: gormModelID(7), ManagerID: 1}, nil)
 	repo.On("GetAssignableUsers", uint(7)).Return([]models.User{
 		{Model: gormModelID(2), Email: "a@x", Name: "A", Role: models.RoleEmployee},
 	}, nil)
@@ -400,4 +401,3 @@ func TestWorkspacesAssignableMembers_HappyPath(t *testing.T) {
 	require.NoError(t, json.NewDecoder(res.Body).Decode(&got))
 	assert.Len(t, got.Users, 1)
 }
-

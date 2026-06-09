@@ -86,7 +86,8 @@ func clampRequiredApprovals(n, panelSize int) int {
 
 // IssuesGet implements GET /issues/{id}.
 func (s *Server) IssuesGet(ctx context.Context, params oapi.IssuesGetParams) (oapi.IssuesGetRes, error) {
-	if _, err := s.callerID(ctx); err != nil {
+	uid, role, err := s.callerIDAndRole(ctx)
+	if err != nil {
 		return &oapi.IssuesGetUnauthorized{Error: "unauthorized"}, nil
 	}
 	id, ok := parseUintID(params.ID)
@@ -97,6 +98,12 @@ func (s *Server) IssuesGet(ctx context.Context, params oapi.IssuesGetParams) (oa
 	if err != nil {
 		return &oapi.IssuesGetNotFound{Error: "issue not found"}, nil
 	}
+	if allowed, err := s.canViewIssue(issue, uid, role); err != nil {
+		logErr("issues.get.authz", err)
+		return &oapi.IssuesGetInternalServerError{Error: "failed to check access"}, nil
+	} else if !allowed {
+		return &oapi.IssuesGetNotFound{Error: "issue not found"}, nil
+	}
 	return &oapi.GetIssueResponse{
 		Issue: issueToOAPI(issue),
 		User:  userToOAPI(&issue.Assignee),
@@ -105,12 +112,23 @@ func (s *Server) IssuesGet(ctx context.Context, params oapi.IssuesGetParams) (oa
 
 // IssuesListByWorkspace implements GET /workspaces/{id}/issues.
 func (s *Server) IssuesListByWorkspace(ctx context.Context, params oapi.IssuesListByWorkspaceParams) (oapi.IssuesListByWorkspaceRes, error) {
-	if _, err := s.callerID(ctx); err != nil {
+	uid, role, err := s.callerIDAndRole(ctx)
+	if err != nil {
 		return &oapi.IssuesListByWorkspaceUnauthorized{Error: "unauthorized"}, nil
 	}
 	wsID, ok := parseUintID(params.ID)
 	if !ok {
-		return &oapi.IssuesListByWorkspaceInternalServerError{Error: "invalid workspace id"}, nil
+		return &oapi.IssuesListByWorkspaceNotFound{Error: "workspace not found"}, nil
+	}
+	ws, err := s.WorkspaceRepo.FindByID(wsID)
+	if err != nil {
+		return &oapi.IssuesListByWorkspaceNotFound{Error: "workspace not found"}, nil
+	}
+	if allowed, err := s.canViewWorkspace(ws, uid, role); err != nil {
+		logErr("issues.list.authz", err)
+		return &oapi.IssuesListByWorkspaceInternalServerError{Error: "failed to check access"}, nil
+	} else if !allowed {
+		return &oapi.IssuesListByWorkspaceNotFound{Error: "workspace not found"}, nil
 	}
 	search := params.Search.Or("")
 	var resolved *bool
@@ -149,8 +167,15 @@ func (s *Server) IssuesUpdateAssignee(ctx context.Context, req *oapi.UpdateAssig
 	if err != nil {
 		return &oapi.IssuesUpdateAssigneeNotFound{Error: "issue not found"}, nil
 	}
-	if !role.CanManageWorkspaces() && issue.CreatorID != uid {
-		return &oapi.IssuesUpdateAssigneeForbidden{Error: "only managers or the issue creator may change the assignee"}, nil
+	if issue.CreatorID != uid && role != models.RoleRoot {
+		ws, err := s.WorkspaceRepo.FindByID(issue.WorkspaceID)
+		if err != nil {
+			logErr("issues.update_assignee.workspace", err)
+			return &oapi.IssuesUpdateAssigneeInternalServerError{Error: "failed to load workspace"}, nil
+		}
+		if !ws.IsOwnedBy(uid) {
+			return &oapi.IssuesUpdateAssigneeForbidden{Error: "only the workspace manager or the issue creator may change the assignee"}, nil
+		}
 	}
 	if issue.Resolved {
 		return &oapi.IssuesUpdateAssigneeUnprocessableEntity{Error: "cannot change assignee of a resolved issue"}, nil
@@ -191,6 +216,13 @@ func (s *Server) IssuesCreate(ctx context.Context, req *oapi.CreateIssueRequest,
 	if !ok {
 		return &oapi.IssuesCreateBadRequest{Error: "invalid workspace id"}, nil
 	}
+	ws, err := s.WorkspaceRepo.FindByID(wsID)
+	if err != nil {
+		return &oapi.IssuesCreateBadRequest{Error: "workspace not found"}, nil
+	}
+	if role != models.RoleRoot && !ws.IsOwnedBy(uid) {
+		return &oapi.IssuesCreateForbidden{Error: "only the workspace manager may create issues in this workspace"}, nil
+	}
 	assigneeID, ok := parseUintID(req.AssigneeId)
 	if !ok {
 		return &oapi.IssuesCreateBadRequest{Error: "invalid assigneeId"}, nil
@@ -198,10 +230,6 @@ func (s *Server) IssuesCreate(ctx context.Context, req *oapi.CreateIssueRequest,
 
 	var reviewerIDs []uint
 	if len(req.ReviewerIds) > 0 {
-		ws, err := s.WorkspaceRepo.FindByID(wsID)
-		if err != nil {
-			return &oapi.IssuesCreateBadRequest{Error: "workspace not found"}, nil
-		}
 		ids, ok := s.resolveReviewerIDs(ws, req.ReviewerIds)
 		if !ok {
 			return &oapi.IssuesCreateBadRequest{Error: "invalid reviewerIds"}, nil
@@ -296,7 +324,7 @@ func (s *Server) IssuesUpdateReviewConfig(ctx context.Context, req *oapi.UpdateR
 
 // IssuesArchive implements PUT /issues/{id}/archive.
 func (s *Server) IssuesArchive(ctx context.Context, req *oapi.ArchiveIssueRequest, params oapi.IssuesArchiveParams) (oapi.IssuesArchiveRes, error) {
-	_, role, err := s.callerIDAndRole(ctx)
+	uid, role, err := s.callerIDAndRole(ctx)
 	if err != nil {
 		return &oapi.IssuesArchiveUnauthorized{Error: "unauthorized"}, nil
 	}
@@ -310,6 +338,16 @@ func (s *Server) IssuesArchive(ctx context.Context, req *oapi.ArchiveIssueReques
 	issue, err := s.IssueRepo.FindByID(id)
 	if err != nil {
 		return &oapi.IssuesArchiveNotFound{Error: "issue not found"}, nil
+	}
+	if role != models.RoleRoot {
+		ws, err := s.WorkspaceRepo.FindByID(issue.WorkspaceID)
+		if err != nil {
+			logErr("issues.archive.workspace", err)
+			return &oapi.IssuesArchiveInternalServerError{Error: "failed to load workspace"}, nil
+		}
+		if !ws.IsOwnedBy(uid) {
+			return &oapi.IssuesArchiveForbidden{Error: "only the workspace manager may archive issues in this workspace"}, nil
+		}
 	}
 	issue.Archived = req.Archived
 	if err := s.IssueRepo.Update(issue); err != nil {

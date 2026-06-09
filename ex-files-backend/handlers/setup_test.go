@@ -176,6 +176,10 @@ func (m *mockWorkspaceRepo) GetMembers(workspaceID uint) ([]models.User, error) 
 	a := m.Called(workspaceID)
 	return a.Get(0).([]models.User), a.Error(1)
 }
+func (m *mockWorkspaceRepo) IsMember(workspaceID, userID uint) (bool, error) {
+	a := m.Called(workspaceID, userID)
+	return a.Bool(0), a.Error(1)
+}
 func (m *mockWorkspaceRepo) GetAssignableUsers(workspaceID uint) ([]models.User, error) {
 	a := m.Called(workspaceID)
 	return a.Get(0).([]models.User), a.Error(1)

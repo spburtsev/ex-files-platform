@@ -47,7 +47,14 @@
 			toast.error(result.error ?? m.error_action_failed());
 			return;
 		}
-		workbenchStore.setDocumentReviewStatus(localId, 'approved');
+		// Apply the authoritative state from the response: with a multi-reviewer
+		// panel a single approval keeps the document in_review.
+		workbenchStore.applyServerReview(localId, {
+			reviewStatus: result.document.status,
+			approvals: result.document.approvals,
+			approvalCount: result.document.approvalCount,
+			requiredApprovals: result.document.requiredApprovals
+		});
 		await onApproved();
 	}
 </script>

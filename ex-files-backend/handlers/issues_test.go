@@ -17,13 +17,28 @@ import (
 	"github.com/spburtsev/ex-files-backend/oapi"
 )
 
-func issuesServer(tokens *mockTokens, repo *mockIssueRepo, users *mockUserRepo) *handlers.Server {
-	return &handlers.Server{
-		UserRepo:  users,
-		Tokens:    tokens,
-		Hasher:    stubHasher{},
-		IssueRepo: repo,
+func issuesServer(tokens *mockTokens, repo *mockIssueRepo, users *mockUserRepo, ws ...*mockWorkspaceRepo) *handlers.Server {
+	var wsRepo *mockWorkspaceRepo
+	if len(ws) > 0 && ws[0] != nil {
+		wsRepo = ws[0]
+	} else {
+		wsRepo = &mockWorkspaceRepo{}
 	}
+	return &handlers.Server{
+		UserRepo:      users,
+		Tokens:        tokens,
+		Hasher:        stubHasher{},
+		IssueRepo:     repo,
+		WorkspaceRepo: wsRepo,
+	}
+}
+
+// ownedWorkspace returns a workspace repo whose FindByID(wsID) yields a
+// workspace managed by managerID, satisfying the new ownership checks.
+func ownedWorkspace(wsID, managerID uint) *mockWorkspaceRepo {
+	ws := &mockWorkspaceRepo{}
+	ws.On("FindByID", wsID).Return(&models.Workspace{Model: gormModelID(wsID), ManagerID: managerID}, nil)
+	return ws
 }
 
 func TestIssuesListByWorkspace_HappyPath(t *testing.T) {
@@ -35,7 +50,7 @@ func TestIssuesListByWorkspace_HappyPath(t *testing.T) {
 		{Model: gormModelID(2), WorkspaceID: 7, CreatorID: 1, AssigneeID: 3, Title: "B"},
 	}, nil)
 
-	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}))
+	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}, ownedWorkspace(7, 1)))
 	defer srv.Close()
 
 	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodGet, srv.URL+"/workspaces/7/issues", nil))
@@ -115,7 +130,7 @@ func TestIssuesCreate_ManagerSucceeds(t *testing.T) {
 	repo := &mockIssueRepo{}
 	repo.On("Create", mock.AnythingOfType("*models.Issue")).Return(uint(11), nil)
 
-	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}))
+	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}, ownedWorkspace(7, 1)))
 	defer srv.Close()
 
 	body := strings.NewReader(`{"title":"Q4 audit","description":"Stuff","assigneeId":"2","deadline":"2026-12-31T23:59:59Z"}`)
@@ -144,11 +159,29 @@ func TestIssuesCreate_EmployeeForbidden(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, res.StatusCode)
 }
 
+// TestIssuesCreate_OtherWorkspaceManagerForbidden: a manager who does not own
+// the target workspace may not create issues in it.
+func TestIssuesCreate_OtherWorkspaceManagerForbidden(t *testing.T) {
+	tokens := &mockTokens{}
+	stubTokenAccept(tokens, 2, models.RoleManager) // workspace 7 is owned by manager 1
+	repo := &mockIssueRepo{}
+
+	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}, ownedWorkspace(7, 1)))
+	defer srv.Close()
+
+	body := strings.NewReader(`{"title":"X","assigneeId":"2"}`)
+	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodPost, srv.URL+"/workspaces/7/issues", body))
+	require.NoError(t, err)
+	defer res.Body.Close()
+	assert.Equal(t, http.StatusForbidden, res.StatusCode)
+	repo.AssertNotCalled(t, "Create", mock.Anything)
+}
+
 func TestIssuesCreate_BadAssigneeReturns400(t *testing.T) {
 	tokens := &mockTokens{}
 	stubTokenAccept(tokens, 1, models.RoleManager)
 
-	srv := newTestServer(t, issuesServer(tokens, &mockIssueRepo{}, &mockUserRepo{}))
+	srv := newTestServer(t, issuesServer(tokens, &mockIssueRepo{}, &mockUserRepo{}, ownedWorkspace(7, 1)))
 	defer srv.Close()
 
 	body := strings.NewReader(`{"title":"X","assigneeId":"not-a-number"}`)
@@ -167,7 +200,7 @@ func TestIssuesListByWorkspace_StatusOpen(t *testing.T) {
 		{Model: gormModelID(1), WorkspaceID: 7, Title: "Open issue"},
 	}, nil)
 
-	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}))
+	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}, ownedWorkspace(7, 1)))
 	defer srv.Close()
 
 	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodGet, srv.URL+"/workspaces/7/issues?status=open", nil))
@@ -189,7 +222,7 @@ func TestIssuesListByWorkspace_StatusResolved(t *testing.T) {
 		{Model: gormModelID(2), WorkspaceID: 7, Title: "Done", Resolved: true},
 	}, nil)
 
-	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}))
+	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}, ownedWorkspace(7, 1)))
 	defer srv.Close()
 
 	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodGet, srv.URL+"/workspaces/7/issues?status=resolved", nil))
@@ -211,7 +244,7 @@ func TestIssuesListByWorkspace_SearchParam(t *testing.T) {
 		{Model: gormModelID(3), WorkspaceID: 7, Title: "foo bar"},
 	}, nil)
 
-	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}))
+	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}, ownedWorkspace(7, 1)))
 	defer srv.Close()
 
 	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodGet, srv.URL+"/workspaces/7/issues?search=foo", nil))
@@ -247,7 +280,8 @@ func TestIssuesUpdateAssignee_ManagerSucceeds(t *testing.T) {
 		Title:       "Review",
 	}, nil).Once()
 
-	srv := newTestServer(t, issuesServer(tokens, repo, users))
+	// the manager owns workspace 7, so the new ownership check passes.
+	srv := newTestServer(t, issuesServer(tokens, repo, users, ownedWorkspace(7, 1)))
 	defer srv.Close()
 
 	body := strings.NewReader(`{"assigneeId":"5"}`)
@@ -296,11 +330,12 @@ func TestIssuesUpdateAssignee_NonCreatorEmployeeForbidden(t *testing.T) {
 	stubTokenAccept(tokens, 7, models.RoleEmployee)
 	repo := &mockIssueRepo{}
 	repo.On("FindByID", uint(42)).Return(&models.Issue{
-		Model:     gormModelID(42),
-		CreatorID: 99,
+		Model:       gormModelID(42),
+		WorkspaceID: 7,
+		CreatorID:   99,
 	}, nil)
 
-	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}))
+	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}, ownedWorkspace(7, 1)))
 	defer srv.Close()
 
 	body := strings.NewReader(`{"assigneeId":"5"}`)
@@ -315,11 +350,12 @@ func TestIssuesUpdateAssignee_ResolvedReturns422(t *testing.T) {
 	stubTokenAccept(tokens, 1, models.RoleManager)
 	repo := &mockIssueRepo{}
 	repo.On("FindByID", uint(42)).Return(&models.Issue{
-		Model:    gormModelID(42),
-		Resolved: true,
+		Model:       gormModelID(42),
+		WorkspaceID: 7,
+		Resolved:    true,
 	}, nil)
 
-	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}))
+	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}, ownedWorkspace(7, 1)))
 	defer srv.Close()
 
 	body := strings.NewReader(`{"assigneeId":"5"}`)
@@ -334,10 +370,10 @@ func TestIssuesUpdateAssignee_UnknownAssignee400(t *testing.T) {
 	stubTokenAccept(tokens, 1, models.RoleManager)
 	repo := &mockIssueRepo{}
 	users := &mockUserRepo{}
-	repo.On("FindByID", uint(42)).Return(&models.Issue{Model: gormModelID(42)}, nil)
+	repo.On("FindByID", uint(42)).Return(&models.Issue{Model: gormModelID(42), WorkspaceID: 7}, nil)
 	users.On("FindByID", uint(999)).Return(nil, errors.New("not found"))
 
-	srv := newTestServer(t, issuesServer(tokens, repo, users))
+	srv := newTestServer(t, issuesServer(tokens, repo, users, ownedWorkspace(7, 1)))
 	defer srv.Close()
 
 	body := strings.NewReader(`{"assigneeId":"999"}`)
@@ -355,7 +391,7 @@ func TestIssuesListByWorkspace_ArchivedParam(t *testing.T) {
 		{Model: gormModelID(5), WorkspaceID: 7, Title: "Archived issue", Archived: true},
 	}, nil)
 
-	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}))
+	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}, ownedWorkspace(7, 1)))
 	defer srv.Close()
 
 	res, err := http.DefaultClient.Do(authedRequest(t, http.MethodGet, srv.URL+"/workspaces/7/issues?archived=true", nil))
@@ -382,7 +418,8 @@ func TestIssuesArchive_ManagerSucceeds(t *testing.T) {
 		Assignee: models.User{Model: gormModelID(2), Name: "A"},
 	}, nil).Once()
 
-	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}))
+	// non-root managers must own the workspace to archive its issues.
+	srv := newTestServer(t, issuesServer(tokens, repo, &mockUserRepo{}, ownedWorkspace(7, 1)))
 	defer srv.Close()
 
 	body := strings.NewReader(`{"archived":true}`)

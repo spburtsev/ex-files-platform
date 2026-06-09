@@ -16,6 +16,11 @@ type cookieJarKey struct{}
 // SessionCookieTTL is the lifetime applied when SetSessionCookie is used.
 const SessionCookieTTL = 8 * time.Hour
 
+// SessionCookieSecure controls the Secure flag on the session cookie. It
+// defaults to true and is only meant to be switched off for plain-HTTP local
+// setups (COOKIE_SECURE=false), configured once at startup in main.
+var SessionCookieSecure = true
+
 // SetSessionCookie tells the surrounding WithCookieJar middleware to set a
 // `session` cookie containing token on the next response.
 func SetSessionCookie(ctx context.Context, token string) {
@@ -64,6 +69,7 @@ func (w *cookieWriter) WriteHeader(code int) {
 				MaxAge:   int(SessionCookieTTL.Seconds()),
 				Path:     "/",
 				HttpOnly: true,
+				Secure:   SessionCookieSecure,
 				SameSite: http.SameSiteLaxMode,
 			})
 		case jar.clear:
@@ -73,6 +79,8 @@ func (w *cookieWriter) WriteHeader(code int) {
 				MaxAge:   -1,
 				Path:     "/",
 				HttpOnly: true,
+				Secure:   SessionCookieSecure,
+				SameSite: http.SameSiteLaxMode,
 			})
 		}
 	}

@@ -89,10 +89,21 @@
 		if (!issueId) return;
 		const id = issueId;
 		try {
-			const res = imperative ? await getDocuments(id).run() : await getDocuments(id);
+			// Fetch every page (backend caps perPage at 100) so issues with many
+			// submissions don't silently lose their older versions in the drawer.
+			const fetchPage = (p: number) => {
+				const q = `${id}?page=${p}&per_page=100`;
+				return imperative ? getDocuments(q).run() : getDocuments(q);
+			};
+			const first = await fetchPage(1);
+			const documents = [...first.documents];
+			for (let p = 2; p <= first.totalPages; p++) {
+				const next = await fetchPage(p);
+				documents.push(...next.documents);
+			}
 			if (workbenchStore.currentIssueId !== id) return;
 			workbenchStore.hydrate(
-				res.documents.map((d) => ({
+				documents.map((d) => ({
 					serverId: String(d.id),
 					name: d.name,
 					size: Number(d.size),
@@ -292,12 +303,23 @@
 			return;
 		}
 		rememberPageOf(workbenchStore.activeDocumentId);
-		const pdfjsLib = await getPdfjs();
-		const buffer = await file.arrayBuffer();
-		const data = new Uint8Array(buffer);
-		const doc = await pdfjsLib.getDocument({ data: data.slice() }).promise;
-		const uploaded = workbenchStore.uploadDocument(file, data, doc.numPages);
-		doc.destroy();
+		// The picker's accept filter is advisory: a corrupt or non-PDF file makes
+		// pdfjs reject, which must surface as a toast, not an unhandled rejection.
+		let data: Uint8Array;
+		let numPages: number;
+		try {
+			const pdfjsLib = await getPdfjs();
+			const buffer = await file.arrayBuffer();
+			data = new Uint8Array(buffer);
+			const doc = await pdfjsLib.getDocument({ data: data.slice() }).promise;
+			numPages = doc.numPages;
+			doc.destroy();
+		} catch (err) {
+			console.error('Failed to parse uploaded file as PDF', err);
+			toast.error(m.workbench_invalid_pdf());
+			return;
+		}
+		const uploaded = workbenchStore.uploadDocument(file, data, numPages);
 		currentPage = 0;
 		showUpload = false;
 		if (uploaded) {
@@ -350,7 +372,14 @@
 			toast.error(r.error ?? m.error_action_failed());
 			return;
 		}
-		workbenchStore.setDocumentReviewStatus(doc.id, 'approved');
+		// Use the authoritative state from the response: with a multi-reviewer
+		// panel a single approval keeps the document in_review.
+		workbenchStore.applyServerReview(doc.id, {
+			reviewStatus: r.document.status,
+			approvals: r.document.approvals,
+			approvalCount: r.document.approvalCount,
+			requiredApprovals: r.document.requiredApprovals
+		});
 		await workbenchQuery.refresh();
 	}
 

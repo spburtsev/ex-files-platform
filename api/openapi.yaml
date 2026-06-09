@@ -358,6 +358,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/AssignableMembersResponse'
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
 
   /workspaces/{id}/members:
@@ -440,6 +441,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/GetIssuesResponse'
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
     post:
       tags: [issues]
@@ -589,6 +591,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ListDocumentsResponse'
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
     post:
       tags: [documents]
@@ -638,7 +641,7 @@ paths:
     delete:
       tags: [documents]
       operationId: documentsDelete
-      summary: Delete a document
+      summary: Delete a document (uploader, workspace manager, or root)
       responses:
         '200':
           description: Deleted.
@@ -647,6 +650,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/MessageResponse'
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
 
@@ -845,6 +849,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ListCommentsResponse'
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
     post:
       tags: [comments]
@@ -865,6 +870,7 @@ paths:
                 $ref: '#/components/schemas/CreateCommentResponse'
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
 
   /documents/{id}/comments/{commentId}:

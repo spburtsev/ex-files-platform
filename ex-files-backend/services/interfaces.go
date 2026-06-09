@@ -110,5 +110,6 @@ type WorkspaceRepository interface {
 	AddMember(member *models.WorkspaceMember) error
 	RemoveMember(workspaceID, userID uint) error
 	GetMembers(workspaceID uint) ([]models.User, error)
+	IsMember(workspaceID, userID uint) (bool, error)
 	GetAssignableUsers(workspaceID uint) ([]models.User, error)
 }

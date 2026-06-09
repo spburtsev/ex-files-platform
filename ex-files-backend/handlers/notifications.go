@@ -54,21 +54,60 @@ func notifyDocumentEvent(
 	}
 }
 
-func notifyApprovalProgress(hub *services.SSEHub, doc *models.Document, approvalCount, requiredApprovals int) {
+// notifyApprovalProgress emits one targeted SSE event per recipient. The
+// payload carries the document name, so it must never go out untargeted —
+// that would leak document activity to every connected client.
+func notifyApprovalProgress(hub *services.SSEHub, doc *models.Document, approvalCount, requiredApprovals int, recipients []uint) {
 	if hub == nil {
 		return
 	}
-	hub.Broadcast(services.SSEEvent{
-		Type:       "document.approval_added",
-		DocumentID: doc.ID,
-		Payload: map[string]any{
-			"status":             string(doc.Status),
-			"name":               doc.Name,
-			"issue_id":           doc.IssueID,
-			"approval_count":     approvalCount,
-			"required_approvals": requiredApprovals,
-		},
-	})
+	for _, uid := range recipients {
+		hub.Broadcast(services.SSEEvent{
+			Type:       "document.approval_added",
+			DocumentID: doc.ID,
+			UserID:     uid,
+			Payload: map[string]any{
+				"status":             string(doc.Status),
+				"name":               doc.Name,
+				"issue_id":           doc.IssueID,
+				"approval_count":     approvalCount,
+				"required_approvals": requiredApprovals,
+			},
+		})
+	}
+}
+
+// approvalProgressRecipients returns the users who should see live approval
+// progress for a document: the uploader, the issue's direct participants,
+// the reviewer panel, the workspace manager and the workspace members.
+func (s *Server) approvalProgressRecipients(doc *models.Document, issue *models.Issue, panelIDs []uint) []uint {
+	seen := make(map[uint]bool)
+	out := make([]uint, 0, len(panelIDs)+4)
+	add := func(id uint) {
+		if id != 0 && !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	add(doc.UploaderID)
+	add(issue.CreatorID)
+	add(issue.AssigneeID)
+	for _, id := range panelIDs {
+		add(id)
+	}
+	if ws, err := s.WorkspaceRepo.FindByID(issue.WorkspaceID); err == nil {
+		add(ws.ManagerID)
+	} else {
+		logErr("notify.approval_progress.workspace", err)
+	}
+	if members, err := s.WorkspaceRepo.GetMembers(issue.WorkspaceID); err == nil {
+		for i := range members {
+			add(members[i].ID)
+		}
+	} else {
+		logErr("notify.approval_progress.members", err)
+	}
+	return out
 }
 
 // notifyReviewerAssigned sends an email to the assigned reviewer and a

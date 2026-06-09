@@ -14,14 +14,21 @@ import (
 )
 
 func reviewServer(tokens *mockTokens, docs *mockDocumentRepo, issues *mockIssueRepo, approvals *mockDocumentApprovalRepo) *handlers.Server {
+	// approvalProgressRecipients always looks up the issue's workspace and its
+	// members on approve; the panel tests don't care about workspace authz, so
+	// keep these permissive.
+	ws := &mockWorkspaceRepo{}
+	ws.On("FindByID", mock.Anything).Return(&models.Workspace{Model: gormModelID(3), ManagerID: 99}, nil).Maybe()
+	ws.On("GetMembers", mock.Anything).Return([]models.User{}, nil).Maybe()
 	return &handlers.Server{
-		UserRepo:     &mockUserRepo{},
-		Tokens:       tokens,
-		Hasher:       stubHasher{},
-		DocumentRepo: docs,
-		IssueRepo:    issues,
-		ApprovalRepo: approvals,
-		Storage:      &mockStorage{},
+		UserRepo:      &mockUserRepo{},
+		Tokens:        tokens,
+		Hasher:        stubHasher{},
+		DocumentRepo:  docs,
+		IssueRepo:     issues,
+		WorkspaceRepo: ws,
+		ApprovalRepo:  approvals,
+		Storage:       &mockStorage{},
 	}
 }
 

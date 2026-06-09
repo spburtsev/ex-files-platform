@@ -78,12 +78,23 @@ func (s *Server) documentResponse(doc *models.Document, issue *models.Issue) oap
 
 // DocumentsList implements GET /issues/{id}/documents.
 func (s *Server) DocumentsList(ctx context.Context, params oapi.DocumentsListParams) (oapi.DocumentsListRes, error) {
-	if _, err := s.callerID(ctx); err != nil {
+	uid, role, err := s.callerIDAndRole(ctx)
+	if err != nil {
 		return &oapi.DocumentsListUnauthorized{Error: "unauthorized"}, nil
 	}
 	issueID, ok := parseUintID(params.ID)
 	if !ok {
-		return &oapi.DocumentsListInternalServerError{Error: "invalid issue id"}, nil
+		return &oapi.DocumentsListNotFound{Error: "issue not found"}, nil
+	}
+	issue, err := s.IssueRepo.FindByID(issueID)
+	if err != nil {
+		return &oapi.DocumentsListNotFound{Error: "issue not found"}, nil
+	}
+	if allowed, err := s.canViewIssue(issue, uid, role); err != nil {
+		logErr("documents.list.authz", err)
+		return &oapi.DocumentsListInternalServerError{Error: "failed to check access"}, nil
+	} else if !allowed {
+		return &oapi.DocumentsListNotFound{Error: "issue not found"}, nil
 	}
 
 	page, perPage, offset := resolvePagination(params.Page, params.PerPage)
@@ -99,10 +110,7 @@ func (s *Server) DocumentsList(ctx context.Context, params oapi.DocumentsListPar
 		return &oapi.DocumentsListInternalServerError{Error: "failed to fetch documents"}, nil
 	}
 
-	required := 1
-	if issue, err := s.IssueRepo.FindByID(issueID); err == nil {
-		required = requiredApprovalsOf(issue)
-	}
+	required := requiredApprovalsOf(issue)
 	approvalsByDoc := make(map[uint][]models.DocumentApproval)
 	if s.ApprovalRepo != nil && len(docs) > 0 {
 		ids := make([]uint, len(docs))
@@ -133,7 +141,7 @@ func (s *Server) DocumentsList(ctx context.Context, params oapi.DocumentsListPar
 
 // DocumentsUpload implements POST /issues/{id}/documents.
 func (s *Server) DocumentsUpload(ctx context.Context, req *oapi.DocumentsUploadReq, params oapi.DocumentsUploadParams) (oapi.DocumentsUploadRes, error) {
-	uid, err := s.callerID(ctx)
+	uid, role, err := s.callerIDAndRole(ctx)
 	if err != nil {
 		return &oapi.DocumentsUploadUnauthorized{Error: "unauthorized"}, nil
 	}
@@ -144,6 +152,12 @@ func (s *Server) DocumentsUpload(ctx context.Context, req *oapi.DocumentsUploadR
 
 	issue, err := s.IssueRepo.FindByID(issueID)
 	if err != nil {
+		return &oapi.DocumentsUploadBadRequest{Error: "issue not found"}, nil
+	}
+	if allowed, err := s.canViewIssue(issue, uid, role); err != nil {
+		logErr("documents.upload.authz", err)
+		return &oapi.DocumentsUploadInternalServerError{Error: "failed to check access"}, nil
+	} else if !allowed {
 		return &oapi.DocumentsUploadBadRequest{Error: "issue not found"}, nil
 	}
 	if issue.Resolved {
@@ -194,15 +208,26 @@ func (s *Server) DocumentsUpload(ctx context.Context, req *oapi.DocumentsUploadR
 		return &oapi.DocumentsUploadInternalServerError{Error: "failed to create document"}, nil
 	}
 
+	// If the storage upload or the follow-up update fails, remove the row
+	// again: leaving it behind would make every retry of the same file hit
+	// the hash-dedup 409 above while the document itself stays undownloadable.
+	cleanup := func(op string) {
+		if err := s.DocumentRepo.Delete(doc.ID); err != nil {
+			logErr(op+".cleanup", err)
+		}
+	}
+
 	storageKey := fmt.Sprintf("issues/%d/documents/%d/%s", issueID, doc.ID, mp.Name)
 	if err := s.Storage.Upload(ctx, storageKey, mp.File, mp.Size, mimeType); err != nil {
 		logErr("documents.upload.storage", err)
+		cleanup("documents.upload.storage")
 		return &oapi.DocumentsUploadInternalServerError{Error: "failed to upload file"}, nil
 	}
 
 	doc.StorageKey = storageKey
 	if err := s.DocumentRepo.Update(&doc); err != nil {
 		logErr("documents.upload.update_key", err)
+		cleanup("documents.upload.update_key")
 		return &oapi.DocumentsUploadInternalServerError{Error: "failed to persist storage key"}, nil
 	}
 
@@ -227,7 +252,8 @@ func (s *Server) DocumentsUpload(ctx context.Context, req *oapi.DocumentsUploadR
 
 // DocumentsGet implements GET /documents/{id}.
 func (s *Server) DocumentsGet(ctx context.Context, params oapi.DocumentsGetParams) (oapi.DocumentsGetRes, error) {
-	if _, err := s.callerID(ctx); err != nil {
+	uid, role, err := s.callerIDAndRole(ctx)
+	if err != nil {
 		return &oapi.DocumentsGetUnauthorized{Error: "unauthorized"}, nil
 	}
 	docID, ok := parseUintID(params.ID)
@@ -238,12 +264,21 @@ func (s *Server) DocumentsGet(ctx context.Context, params oapi.DocumentsGetParam
 	if err != nil {
 		return &oapi.DocumentsGetNotFound{Error: "document not found"}, nil
 	}
-	return &oapi.GetDocumentResponse{Document: s.documentResponse(doc, nil)}, nil
+	allowed, issue, err := s.canViewDocument(doc, uid, role)
+	if err != nil {
+		logErr("documents.get.authz", err)
+		return &oapi.DocumentsGetInternalServerError{Error: "failed to check access"}, nil
+	}
+	if !allowed {
+		return &oapi.DocumentsGetNotFound{Error: "document not found"}, nil
+	}
+	return &oapi.GetDocumentResponse{Document: s.documentResponse(doc, issue)}, nil
 }
 
 // DocumentsGetFile implements GET /documents/{id}/file.
 func (s *Server) DocumentsGetFile(ctx context.Context, params oapi.DocumentsGetFileParams) (oapi.DocumentsGetFileRes, error) {
-	if _, err := s.callerID(ctx); err != nil {
+	uid, role, err := s.callerIDAndRole(ctx)
+	if err != nil {
 		return &oapi.DocumentsGetFileUnauthorized{Error: "unauthorized"}, nil
 	}
 	docID, ok := parseUintID(params.ID)
@@ -252,6 +287,12 @@ func (s *Server) DocumentsGetFile(ctx context.Context, params oapi.DocumentsGetF
 	}
 	doc, err := s.DocumentRepo.FindByID(docID)
 	if err != nil {
+		return &oapi.DocumentsGetFileNotFound{Error: "document not found"}, nil
+	}
+	if allowed, _, err := s.canViewDocument(doc, uid, role); err != nil {
+		logErr("documents.file.authz", err)
+		return &oapi.DocumentsGetFileInternalServerError{Error: "failed to check access"}, nil
+	} else if !allowed {
 		return &oapi.DocumentsGetFileNotFound{Error: "document not found"}, nil
 	}
 	reader, err := s.Storage.Get(ctx, doc.StorageKey)
@@ -270,7 +311,8 @@ func (s *Server) DocumentsGetFile(ctx context.Context, params oapi.DocumentsGetF
 
 // DocumentsGetDownloadUrl implements GET /documents/{id}/download.
 func (s *Server) DocumentsGetDownloadUrl(ctx context.Context, params oapi.DocumentsGetDownloadUrlParams) (oapi.DocumentsGetDownloadUrlRes, error) {
-	if _, err := s.callerID(ctx); err != nil {
+	uid, role, err := s.callerIDAndRole(ctx)
+	if err != nil {
 		return &oapi.DocumentsGetDownloadUrlUnauthorized{Error: "unauthorized"}, nil
 	}
 	docID, ok := parseUintID(params.ID)
@@ -279,6 +321,12 @@ func (s *Server) DocumentsGetDownloadUrl(ctx context.Context, params oapi.Docume
 	}
 	doc, err := s.DocumentRepo.FindByID(docID)
 	if err != nil {
+		return &oapi.DocumentsGetDownloadUrlNotFound{Error: "document not found"}, nil
+	}
+	if allowed, _, err := s.canViewDocument(doc, uid, role); err != nil {
+		logErr("documents.download.authz", err)
+		return &oapi.DocumentsGetDownloadUrlInternalServerError{Error: "failed to check access"}, nil
+	} else if !allowed {
 		return &oapi.DocumentsGetDownloadUrlNotFound{Error: "document not found"}, nil
 	}
 	signedURL, err := s.Storage.PresignedURL(ctx, doc.StorageKey, 15*time.Minute)
@@ -383,11 +431,24 @@ func (s *Server) issuePanel(issueID uint) (map[uint]bool, []uint, error) {
 	return set, ids, nil
 }
 
-func canReviewPanel(panel map[uint]bool, issueCreatorID, callerID uint, role models.Role) bool {
-	if len(panel) == 0 {
-		return role.CanManageWorkspaces() || issueCreatorID == callerID
+// canReview decides review rights on a document's issue: with a reviewer
+// panel configured, only panel members may review; without one, the issue
+// creator, the workspace manager, or root may.
+func (s *Server) canReview(panel map[uint]bool, issue *models.Issue, callerID uint, role models.Role) (bool, error) {
+	if len(panel) > 0 {
+		return panel[callerID], nil
 	}
-	return panel[callerID]
+	if issue.CreatorID == callerID || role == models.RoleRoot {
+		return true, nil
+	}
+	if !role.CanManageWorkspaces() {
+		return false, nil
+	}
+	ws, err := s.WorkspaceRepo.FindByID(issue.WorkspaceID)
+	if err != nil {
+		return false, err
+	}
+	return ws.IsOwnedBy(callerID), nil
 }
 
 // DocumentsApprove implements POST /documents/{id}/approve.
@@ -414,7 +475,10 @@ func (s *Server) DocumentsApprove(ctx context.Context, params oapi.DocumentsAppr
 		logErr("documents.approve.panel", err)
 		return &oapi.DocumentsApproveInternalServerError{Error: "failed to load reviewers"}, nil
 	}
-	if !canReviewPanel(panel, issue.CreatorID, uid, role) {
+	if allowed, err := s.canReview(panel, issue, uid, role); err != nil {
+		logErr("documents.approve.authz", err)
+		return &oapi.DocumentsApproveInternalServerError{Error: "failed to check access"}, nil
+	} else if !allowed {
 		return &oapi.DocumentsApproveForbidden{Error: "not authorized to review this document"}, nil
 	}
 	if !doc.CanTransitionTo(models.DocumentStatusApproved) {
@@ -428,6 +492,8 @@ func (s *Server) DocumentsApprove(ctx context.Context, params oapi.DocumentsAppr
 			return &oapi.DocumentsApproveInternalServerError{Error: "failed to record approval"}, nil
 		}
 	}
+
+	progressRecipients := s.approvalProgressRecipients(doc, issue, panelIDs)
 
 	threshold := requiredApprovalsOf(issue)
 	count := 1
@@ -464,7 +530,7 @@ func (s *Server) DocumentsApprove(ctx context.Context, params oapi.DocumentsAppr
 			fmt.Sprintf("Document approved: %s", doc.Name),
 			fmt.Sprintf("<p>Your document <strong>%s</strong> has been approved.</p>", doc.Name),
 		)
-		notifyApprovalProgress(s.Hub, doc, count, threshold)
+		notifyApprovalProgress(s.Hub, doc, count, threshold, progressRecipients)
 	} else {
 		if doc.Status != models.DocumentStatusInReview {
 			doc.Status = models.DocumentStatusInReview
@@ -479,7 +545,7 @@ func (s *Server) DocumentsApprove(ctx context.Context, params oapi.DocumentsAppr
 			slog.Int("approval_count", count),
 			slog.Int("required_approvals", threshold),
 		)
-		notifyApprovalProgress(s.Hub, doc, count, threshold)
+		notifyApprovalProgress(s.Hub, doc, count, threshold, progressRecipients)
 	}
 	return &oapi.UpdateDocumentResponse{Document: s.documentResponse(doc, issue)}, nil
 }
@@ -508,7 +574,10 @@ func (s *Server) DocumentsReject(ctx context.Context, req oapi.OptReviewNoteRequ
 		logErr("documents.reject.panel", err)
 		return &oapi.DocumentsRejectInternalServerError{Error: "failed to load reviewers"}, nil
 	}
-	if !canReviewPanel(panel, issue.CreatorID, uid, role) {
+	if allowed, err := s.canReview(panel, issue, uid, role); err != nil {
+		logErr("documents.reject.authz", err)
+		return &oapi.DocumentsRejectInternalServerError{Error: "failed to check access"}, nil
+	} else if !allowed {
 		return &oapi.DocumentsRejectForbidden{Error: "not authorized to review this document"}, nil
 	}
 	if !doc.CanTransitionTo(models.DocumentStatusRejected) {
@@ -560,7 +629,10 @@ func (s *Server) DocumentsRequestChanges(ctx context.Context, req oapi.OptReview
 		logErr("documents.request_changes.panel", err)
 		return &oapi.DocumentsRequestChangesInternalServerError{Error: "failed to load reviewers"}, nil
 	}
-	if !canReviewPanel(panel, issue.CreatorID, uid, role) {
+	if allowed, err := s.canReview(panel, issue, uid, role); err != nil {
+		logErr("documents.request_changes.authz", err)
+		return &oapi.DocumentsRequestChangesInternalServerError{Error: "failed to check access"}, nil
+	} else if !allowed {
 		return &oapi.DocumentsRequestChangesForbidden{Error: "not authorized to review this document"}, nil
 	}
 	if !doc.CanTransitionTo(models.DocumentStatusChangesRequested) {
@@ -609,6 +681,21 @@ func (s *Server) DocumentsAssignReviewer(ctx context.Context, req *oapi.AssignRe
 	if err != nil {
 		return &oapi.DocumentsAssignReviewerNotFound{Error: "document not found"}, nil
 	}
+	if role != models.RoleRoot {
+		issue, err := s.IssueRepo.FindByID(doc.IssueID)
+		if err != nil {
+			logErr("documents.assign_reviewer.issue_lookup", err)
+			return &oapi.DocumentsAssignReviewerInternalServerError{Error: "failed to load issue"}, nil
+		}
+		ws, err := s.WorkspaceRepo.FindByID(issue.WorkspaceID)
+		if err != nil {
+			logErr("documents.assign_reviewer.workspace_lookup", err)
+			return &oapi.DocumentsAssignReviewerInternalServerError{Error: "failed to load workspace"}, nil
+		}
+		if !ws.IsOwnedBy(uid) {
+			return &oapi.DocumentsAssignReviewerForbidden{Error: "only the workspace manager may assign reviewers"}, nil
+		}
+	}
 	doc.ReviewerID = &reviewerID
 	if err := s.DocumentRepo.Update(doc); err != nil {
 		logErr("documents.assign_reviewer.update", err)
@@ -623,9 +710,11 @@ func (s *Server) DocumentsAssignReviewer(ctx context.Context, req *oapi.AssignRe
 	return &oapi.UpdateDocumentResponse{Document: s.documentResponse(doc, nil)}, nil
 }
 
-// DocumentsDelete implements DELETE /documents/{id}.
+// DocumentsDelete implements DELETE /documents/{id}. Only the uploader, the
+// workspace manager, or root may delete; other workspace members get 403 and
+// outsiders get 404 so document IDs stay unguessable.
 func (s *Server) DocumentsDelete(ctx context.Context, params oapi.DocumentsDeleteParams) (oapi.DocumentsDeleteRes, error) {
-	uid, err := s.callerID(ctx)
+	uid, role, err := s.callerIDAndRole(ctx)
 	if err != nil {
 		return &oapi.DocumentsDeleteUnauthorized{Error: "unauthorized"}, nil
 	}
@@ -637,9 +726,37 @@ func (s *Server) DocumentsDelete(ctx context.Context, params oapi.DocumentsDelet
 	if err != nil {
 		return &oapi.DocumentsDeleteNotFound{Error: "document not found"}, nil
 	}
+	if doc.UploaderID != uid && role != models.RoleRoot {
+		issue, err := s.IssueRepo.FindByID(doc.IssueID)
+		if err != nil {
+			logErr("documents.delete.issue_lookup", err)
+			return &oapi.DocumentsDeleteInternalServerError{Error: "failed to load issue"}, nil
+		}
+		ws, err := s.WorkspaceRepo.FindByID(issue.WorkspaceID)
+		if err != nil {
+			logErr("documents.delete.workspace_lookup", err)
+			return &oapi.DocumentsDeleteInternalServerError{Error: "failed to load workspace"}, nil
+		}
+		if !ws.IsOwnedBy(uid) {
+			allowed, err := s.canViewIssue(issue, uid, role)
+			if err != nil {
+				logErr("documents.delete.authz", err)
+				return &oapi.DocumentsDeleteInternalServerError{Error: "failed to check access"}, nil
+			}
+			if !allowed {
+				return &oapi.DocumentsDeleteNotFound{Error: "document not found"}, nil
+			}
+			return &oapi.DocumentsDeleteForbidden{Error: "only the uploader or the workspace manager may delete this document"}, nil
+		}
+	}
 	if err := s.DocumentRepo.Delete(docID); err != nil {
 		logErr("documents.delete", err)
 		return &oapi.DocumentsDeleteInternalServerError{Error: "failed to delete document"}, nil
+	}
+	if doc.StorageKey != "" {
+		if err := s.Storage.Delete(ctx, doc.StorageKey); err != nil {
+			logErr("documents.delete.storage", err)
+		}
 	}
 	logging.Audit(ctx, "document.deleted", uid,
 		slog.String("target_type", "document"),

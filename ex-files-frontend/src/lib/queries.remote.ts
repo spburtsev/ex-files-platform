@@ -1,4 +1,5 @@
 import { query } from '$app/server';
+import { isHttpError, isRedirect } from '@sveltejs/kit';
 
 import { apiOpts } from '$lib/api-client';
 import {
@@ -34,6 +35,8 @@ export const getMe = query(async () => {
 		const r = await authMe(apiOpts());
 		return r.data?.user ?? null;
 	} catch (err) {
+		// Let the 401 force-logout redirect (and error() responses) propagate.
+		if (isRedirect(err) || isHttpError(err)) throw err;
 		console.error('Failed to fetch /auth/me', err);
 		return null;
 	}
