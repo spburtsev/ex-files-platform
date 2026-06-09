@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { browser } from '$app/environment';
-	import { onDestroy, tick, untrack } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { workbenchStore } from '$lib/stores/workbench.svelte';
 	import { extraBreadcrumbs } from '$lib/stores/breadcrumbs.svelte';
@@ -204,6 +204,13 @@
 	let pdfViewer = $state<ReturnType<typeof PdfViewer> | undefined>();
 	const pageByDoc = new SvelteMap<string, number>();
 
+	$effect(() => {
+		const viewer = pdfViewer;
+		const data = workbenchStore.activeDocument?.data;
+		if (!viewer || !data) return;
+		void viewer.load(data);
+	});
+
 	function rememberPageOf(localId: string | null) {
 		if (localId) pageByDoc.set(localId, currentPage);
 	}
@@ -264,18 +271,12 @@
 		if (prev && prev !== localId) rememberPageOf(prev);
 		workbenchStore.setActiveDocument(localId);
 		currentPage = pageByDoc.get(localId) ?? 0;
-		let data: Uint8Array | null;
 		try {
-			data = await ensureBytes(localId);
+			await ensureBytes(localId);
 		} catch (err) {
 			console.error('Failed to load document binary', err);
 			toast.error(m.error_action_failed());
-			return;
 		}
-		if (!data) return;
-		if (workbenchStore.activeDocumentId !== localId) return;
-		await tick();
-		await pdfViewer?.load(data);
 	}
 
 	async function handleUpload(file: File) {
@@ -288,14 +289,10 @@
 		const buffer = await file.arrayBuffer();
 		const data = new Uint8Array(buffer);
 		const doc = await pdfjsLib.getDocument({ data: data.slice() }).promise;
-		const uploaded = workbenchStore.uploadDocument(file, data, doc.numPages);
+		workbenchStore.uploadDocument(file, data, doc.numPages);
 		doc.destroy();
 		currentPage = 0;
 		showUpload = false;
-		if (uploaded) {
-			await tick();
-			await pdfViewer?.load(data);
-		}
 	}
 
 	function handlePageClick(page: number, x: number, y: number, screenX: number, screenY: number) {
