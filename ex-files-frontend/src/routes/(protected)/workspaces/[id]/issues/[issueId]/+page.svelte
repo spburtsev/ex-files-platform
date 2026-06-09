@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { browser } from '$app/environment';
-	import { onDestroy, tick } from 'svelte';
+	import { onDestroy, tick, untrack } from 'svelte';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { workbenchStore } from '$lib/stores/workbench.svelte';
 	import { extraBreadcrumbs } from '$lib/stores/breadcrumbs.svelte';
@@ -76,15 +76,6 @@
 		if (issueId) workbenchStore.setIssue(issueId);
 	});
 
-	// Pulls the latest documents for the current issue from the API and merges
-	// them into the workbench store. Used both for the initial hydrate and for
-	// re-syncing after review actions / SSE-driven invalidations so reviewer
-	// notes and statuses stay current without a page refresh.
-	// A SvelteKit remote query must be awaited directly inside render/$effect,
-	// but executed via .run() from event handlers / SSE callbacks. `imperative`
-	// selects the right call so a single sync helper works from both - and so
-	// review-status / reviewer-panel / approval-progress changes reflect after
-	// review actions and SSE events without a full page reload.
 	async function syncDocumentsFromServer(imperative = false) {
 		if (!issueId) return;
 		const id = issueId;
@@ -111,12 +102,16 @@
 	}
 
 	$effect(() => {
-		if (!issueId || workbenchStore.hydrated) return;
-		(async () => {
-			await syncDocumentsFromServer();
-			const activeId = workbenchStore.activeDocumentId;
-			if (activeId) await selectDocument(activeId);
-		})();
+		const id = issueId;
+		if (!id) return;
+		untrack(() => {
+			void (async () => {
+				if (!workbenchStore.hydrated) await syncDocumentsFromServer();
+				if (workbenchStore.currentIssueId !== id) return;
+				const activeId = workbenchStore.activeDocumentId;
+				if (activeId) await selectDocument(activeId);
+			})();
+		});
 	});
 
 	$effect(() => {
@@ -156,9 +151,6 @@
 	const comments = $derived(commentsQuery?.current ?? []);
 	const hasComments = $derived(comments.length > 0);
 
-	// Live updates: subscribe to SSE for the active document. Comment events
-	// refresh the comments list; review events refresh the doc list so badges
-	// (status, reviewer) update without a manual reload.
 	const COMMENT_EVENTS = new Set(['comment.added', 'comment.deleted']);
 	const REVIEW_EVENTS = new Set([
 		'document.approved',
